@@ -1,0 +1,21 @@
+node_modules/
+.wrangler/
+.dev.vars
+.dev.vars.*
+*.log
+# nested worktrees
+feature/
+fix/
+wp*/
+secrets/
+
+# D1 backups (contain all context docs)
+backups/
+
+# generated from instance/ (scripts/build-instance.mjs)
+src/generated/
+public/instance/
+# local plan workspace
+.superpowers/
+seed/seed.sql
+wrangler.jsonc

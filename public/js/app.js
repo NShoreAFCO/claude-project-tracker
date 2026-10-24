@@ -1,0 +1,151 @@
+// Entry point: hash router (#/, #/gantt, #/inbox, #/search?q=…, #/p/<id>[/kontext]), nav and search.
+import config from "../instance/config.js";
+import { t, LOCALE } from "./i18n.js";
+import { api } from "./api.js";
+import { h, clear, toastError } from "./dom.js";
+import { renderGrid } from "./grid.js";
+import { renderGantt } from "./gantt.js";
+import { renderInbox } from "./inbox.js";
+import { openProject } from "./project.js";
+
+// Shell texts come from the instance config and the UI locale (index.html carries no brand text).
+document.documentElement.lang = LOCALE;
+document.title = t("appTitle");
+document.getElementById("app-title").textContent = t("appTitle");
+document.getElementById("logo").src = `/instance/${config.app.logo}`;
+document.getElementById("favicon").href = `/instance/${config.app.favicon}`;
+const main = document.getElementById("main");
+const nav = document.getElementById("nav");
+nav.setAttribute("aria-label", t("navMain"));
+const searchForm = document.getElementById("search");
+
+/** Shared state: the project list (cards) is reused by forms, inbox and gantt. */
+export const state = { projects: [], filter: { status: "", tag: "", category: "" }, inboxCount: 0, view: "grid" };
+
+export async function loadProjects() {
+  state.projects = await api.projects();
+  return state.projects;
+}
+
+/** Re-render the current base view (after any write). */
+export async function refresh() {
+  try {
+    await loadProjects();
+    await renderView();
+    updateInboxCount();
+  } catch (e) {
+    toastError(e);
+  }
+}
+
+async function updateInboxCount() {
+  try {
+    state.inboxCount = (await api.inbox()).length;
+  } catch {
+    state.inboxCount = 0;
+  }
+  renderNav();
+}
+
+function renderNav() {
+  const link = (view, href, label, extra) => h("a", { href, "aria-current": state.view === view ? "page" : null }, label, extra || null);
+  clear(
+    nav,
+    link("grid", "#/", t("navProjects")),
+    link("gantt", "#/gantt", t("navGantt")),
+    link(
+      "inbox",
+      "#/inbox",
+      t("navInbox"),
+      state.inboxCount ? h("span.count", { "aria-label": String(state.inboxCount) }, String(state.inboxCount)) : null,
+    ),
+  );
+}
+
+function renderSearch() {
+  const input = h("input", { type: "search", name: "q", placeholder: t("searchPlaceholder"), "aria-label": t("searchLabel") });
+  clear(searchForm, input, h("button.btn.secondary", { type: "submit" }, t("searchButton")));
+  searchForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const q = input.value.trim();
+    if (q.length < 2) return toastError(new Error(t("searchTooShort")));
+    location.hash = `#/search?q=${encodeURIComponent(q)}`;
+  });
+}
+
+async function renderSearchResults(q) {
+  clear(main, h("h2", t("searchResults", { q })), h("p", t("loading")));
+  const hits = await api.search(q);
+  const list = h("ul.timeline");
+  for (const hit of hits) {
+    const label = { project: t("ownerKind.project"), workpackage: t("ownerKind.workpackage"), context_doc: t("tabContext") }[hit.kind];
+    list.append(
+      h(
+        "li",
+        h("span.who", label),
+        h(
+          "div",
+          h(
+            "button.linkbtn",
+            {
+              type: "button",
+              on: { click: () => openProject(hit.project_id, hit.kind === "context_doc" ? { tab: "context", openDoc: hit.id } : {}) },
+            },
+            `${hit.title} (${hit.project_id})`,
+          ),
+          h("div.meta", hit.snippet),
+        ),
+      ),
+    );
+  }
+  clear(main, h("h2", t("searchResults", { q })), hits.length ? list : h("p.empty", t("searchNone")));
+}
+
+function parseHash() {
+  const raw = location.hash.replace(/^#/, "") || "/";
+  const [path, query = ""] = raw.split("?");
+  return { parts: path.split("/").filter(Boolean).map(decodeURIComponent), params: new URLSearchParams(query) };
+}
+
+async function renderView() {
+  const { parts, params } = parseHash();
+  const view = parts[0] === "gantt" ? "gantt" : parts[0] === "inbox" ? "inbox" : parts[0] === "search" ? "search" : "grid";
+  state.view = view;
+  renderNav();
+  if (view === "gantt") await renderGantt(main, state);
+  else if (view === "inbox") await renderInbox(main, state);
+  else if (view === "search") await renderSearchResults(params.get("q") || "");
+  else renderGrid(main, state);
+}
+
+async function route() {
+  const { parts } = parseHash();
+  try {
+    if (!state.projects.length) await loadProjects();
+    if (parts[0] === "p" && parts[1]) {
+      // deep link to a project: show the grid underneath, then the modal
+      if (state.view !== "grid" || !main.childElementCount) {
+        state.view = "grid";
+        renderNav();
+        renderGrid(main, state);
+      }
+      document.querySelectorAll("dialog[open]").forEach((d) => d.close());
+      openProject(parts[1], { tab: parts[2] === "kontext" ? "context" : "overview" });
+      return;
+    }
+    // navigating to a base view closes any open popup (project, forms, dialogs)
+    document.querySelectorAll("dialog[open]").forEach((d) => d.close());
+    await renderView();
+  } catch (e) {
+    clear(main, h("div.callout.conflict", e?.isAuth ? t("errorAuth") : t("errorGeneric", { msg: e?.message || String(e) })));
+  }
+}
+
+document.title = t("appTitle");
+document.getElementById("app-title").textContent = t("appTitle");
+renderSearch();
+renderNav();
+window.addEventListener("hashchange", route);
+// Any successful write anywhere (forms, context panel, inbox) → reload cards and the current view.
+window.addEventListener("tracker:changed", () => refresh());
+route().then(updateInboxCount);

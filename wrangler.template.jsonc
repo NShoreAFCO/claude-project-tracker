@@ -1,0 +1,51 @@
+// Template for wrangler.jsonc. Do not edit wrangler.jsonc by hand: `npm run build:instance`
+// generates it from this file and instance/instance.config.json ("deploy" section).
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "${deploy.workerName}",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-10-01",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"workers_dev": true,
+	// No preview URLs: their hostnames are not covered by the Access application.
+	"preview_urls": false,
+	"assets": {
+		"directory": "./public",
+		"binding": "ASSETS",
+		// Worker runs first so the Access JWT is checked before any static file is served.
+		"run_worker_first": true
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "${deploy.d1.name}",
+			"database_id": "${deploy.d1.id}",
+			"migrations_dir": "migrations"
+		}
+	],
+	"kv_namespaces": [
+		{
+			"binding": "OAUTH_KV",
+			"id": "${deploy.kv.id}"
+		}
+	],
+	"triggers": {
+		"crons": [
+			"0 * * * *"
+		]
+	},
+	"vars": {
+		// Non-secret values only. Secrets go via `wrangler secret put` (npm run setup does this).
+		"PUBLIC_URL": "${deploy.publicUrl}",
+		"ACCESS_TEAM_DOMAIN": "${deploy.accessTeamDomain}",
+		"ACCESS_AUD": "${deploy.accessAud}",
+		"ALLOWED_EMAILS": "${deploy.allowedEmails}",
+		"ALLOWED_SERVICE_TOKEN_IDS": "${deploy.allowedServiceTokenIds}",
+		"AUDIT_REPO": "${deploy.auditRepo}"
+	},
+	"observability": {
+		"enabled": true
+	}
+}

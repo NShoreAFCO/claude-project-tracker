@@ -1,0 +1,83 @@
+// Thin fetch wrapper for /api/*. Access cookies ride along automatically (same origin).
+export class ApiError extends Error {
+  constructor(status, body) {
+    super((body && (body.message || body.error)) || `HTTP ${status}`);
+    this.status = status;
+    this.body = body;
+  }
+  get isConflict() {
+    return this.status === 409;
+  }
+  get isAuth() {
+    return this.status === 401 || this.status === 403;
+  }
+}
+
+async function request(method, path, body, isForm = false) {
+  const init = { method, credentials: "same-origin", headers: { Accept: "application/json" } };
+  if (body !== undefined) {
+    if (isForm) init.body = body;
+    else {
+      init.headers["Content-Type"] = "application/json";
+      init.body = JSON.stringify(body);
+    }
+  }
+  const res = await fetch(path, init);
+  const type = res.headers.get("Content-Type") || "";
+  const data = type.includes("application/json") ? await res.json().catch(() => null) : await res.text();
+  if (!res.ok) throw new ApiError(res.status, typeof data === "object" ? data : { message: data });
+  return data;
+}
+
+const q = (params) => {
+  const s = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== "") s.set(k, String(v));
+  const str = s.toString();
+  return str ? `?${str}` : "";
+};
+
+export const api = {
+  whoami: () => request("GET", "/api/whoami"),
+  projects: (filter = {}) => request("GET", `/api/projects${q(filter)}`),
+  project: (id) => request("GET", `/api/projects/${encodeURIComponent(id)}`),
+  createProject: (body) => request("POST", "/api/projects", body),
+  updateProject: (id, patch, expected_version) =>
+    request("PATCH", `/api/projects/${encodeURIComponent(id)}`, { ...patch, expected_version }),
+  deleteProject: (id) => request("DELETE", `/api/projects/${encodeURIComponent(id)}`),
+
+  workpackages: (project_id) => request("GET", `/api/workpackages${q({ project_id })}`),
+  createWp: (body) => request("POST", "/api/workpackages", body),
+  updateWp: (id, body, expected_version) => request("PATCH", `/api/workpackages/${encodeURIComponent(id)}`, { ...body, expected_version }),
+  deleteWp: (id) => request("DELETE", `/api/workpackages/${encodeURIComponent(id)}`),
+  createMilestone: (body) => request("POST", "/api/milestones", body),
+  updateMilestone: (id, body, expected_version) =>
+    request("PATCH", `/api/milestones/${encodeURIComponent(id)}`, { ...body, expected_version }),
+  deleteMilestone: (id) => request("DELETE", `/api/milestones/${encodeURIComponent(id)}`),
+
+  linkBranch: (body) => request("POST", "/api/branches", body),
+  deleteBranch: (id) => request("DELETE", `/api/branches/${encodeURIComponent(id)}`),
+  setScores: (project_id, scores) => request("POST", "/api/scores", { project_id, scores }),
+  logTokenCost: (body) => request("POST", "/api/token-cost", body),
+  logProgress: (body) => request("POST", "/api/progress", body),
+
+  events: (params) => request("GET", `/api/events${q(params)}`),
+  inbox: () => request("GET", "/api/inbox"),
+  assignInbox: (id, project_id) => request("POST", `/api/inbox/${id}/assign`, { project_id }),
+  search: (query) => request("GET", `/api/search${q({ q: query })}`),
+
+  contextList: (owner_kind, owner_id, inherited = false) =>
+    request("GET", `/api/context${q({ owner_kind, owner_id, inherited: inherited ? "true" : "" })}`),
+  contextGet: (id) => request("GET", `/api/context/${encodeURIComponent(id)}`),
+  contextCreate: (body) => request("POST", "/api/context", body),
+  contextReplace: (id, body) => request("PUT", `/api/context/${encodeURIComponent(id)}`, body),
+  contextMeta: (id, body) => request("PATCH", `/api/context/${encodeURIComponent(id)}`, body),
+  contextAppend: (id, body) => request("POST", `/api/context/${encodeURIComponent(id)}/append`, body),
+  contextDelete: (id) => request("DELETE", `/api/context/${encodeURIComponent(id)}`),
+  contextRevisions: (id) => request("GET", `/api/context/${encodeURIComponent(id)}/revisions`),
+  contextRevision: (rev) => request("GET", `/api/context/revisions/${encodeURIComponent(rev)}`),
+  contextRestore: (id, revision_id, expected_version) =>
+    request("POST", `/api/context/${encodeURIComponent(id)}/restore`, { revision_id, expected_version }),
+  contextUpload: (form) => request("POST", "/api/context/upload", form, true),
+  bundle: (params) => request("GET", `/api/context/bundle${q(params)}`),
+  bundleUrl: (params) => `/api/context/bundle${q({ ...params, format: "md" })}`,
+};

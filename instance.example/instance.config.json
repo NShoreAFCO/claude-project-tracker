@@ -1,0 +1,272 @@
+{
+  "upstream": true,
+  "app": {
+    "name": "Project Tracker",
+    "locale": "en",
+    "logo": "assets/logo.svg",
+    "favicon": "assets/favicon.svg"
+  },
+  "categories": {
+    "project": [
+      {
+        "key": "research",
+        "color": "#6a4c93",
+        "label": {
+          "en": "Research",
+          "de": "Forschung"
+        }
+      },
+      {
+        "key": "product-development",
+        "color": "#2f6db5",
+        "label": {
+          "en": "Product development",
+          "de": "Produktentwicklung"
+        }
+      },
+      {
+        "key": "product-launch",
+        "color": "#c46b18",
+        "label": {
+          "en": "Product launch",
+          "de": "Produkteinführung"
+        }
+      },
+      {
+        "key": "product-optimisation",
+        "color": "#1f8a70",
+        "label": {
+          "en": "Product optimisation",
+          "de": "Produktoptimierung"
+        }
+      },
+      {
+        "key": "process-development",
+        "color": "#4b5bb5",
+        "label": {
+          "en": "Process development",
+          "de": "Prozessentwicklung"
+        }
+      },
+      {
+        "key": "process-implementation",
+        "color": "#0f6e6e",
+        "label": {
+          "en": "Process implementation",
+          "de": "Prozesseinführung"
+        }
+      },
+      {
+        "key": "process-optimisation",
+        "color": "#3d6b2f",
+        "label": {
+          "en": "Process optimisation",
+          "de": "Prozessoptimierung"
+        }
+      },
+      {
+        "key": "digital-it",
+        "color": "#1f7a8c",
+        "label": {
+          "en": "Digital & IT",
+          "de": "Digitalisierung & IT"
+        }
+      },
+      {
+        "key": "quality-regulatory",
+        "color": "#5a6470",
+        "label": {
+          "en": "Quality, regulatory & compliance",
+          "de": "Qualität, Regulatorik & Compliance"
+        }
+      },
+      {
+        "key": "marketing-communication",
+        "color": "#b0457a",
+        "label": {
+          "en": "Marketing & communication",
+          "de": "Marketing & Kommunikation"
+        }
+      },
+      {
+        "key": "sales-customer",
+        "color": "#96612d",
+        "label": {
+          "en": "Sales & customer projects",
+          "de": "Vertrieb & Kundenprojekte"
+        }
+      },
+      {
+        "key": "training-knowledge",
+        "color": "#7a6a1f",
+        "label": {
+          "en": "Training & knowledge",
+          "de": "Schulung & Wissen"
+        }
+      },
+      {
+        "key": "organisation-change",
+        "color": "#8a2252",
+        "label": {
+          "en": "Organisation & change",
+          "de": "Organisation & Veränderung"
+        }
+      },
+      {
+        "key": "other",
+        "color": "#6f7a84",
+        "label": {
+          "en": "Other",
+          "de": "Sonstiges"
+        }
+      }
+    ],
+    "workpackage": [
+      {
+        "key": "pm",
+        "color": "#6a4c93",
+        "human": true,
+        "label": {
+          "en": "Planning & decisions",
+          "de": "Planung & Entscheidungen"
+        }
+      },
+      {
+        "key": "research",
+        "color": "#1f8a70",
+        "human": false,
+        "label": {
+          "en": "Research",
+          "de": "Recherche"
+        }
+      },
+      {
+        "key": "design",
+        "color": "#b0457a",
+        "human": false,
+        "label": {
+          "en": "Design & concept",
+          "de": "Gestaltung & Konzept"
+        }
+      },
+      {
+        "key": "coding",
+        "color": "#2f6db5",
+        "human": false,
+        "label": {
+          "en": "Coding",
+          "de": "Programmierung"
+        }
+      },
+      {
+        "key": "data",
+        "color": "#8a2252",
+        "human": false,
+        "label": {
+          "en": "Data analysis",
+          "de": "Datenauswertung"
+        }
+      },
+      {
+        "key": "experimental",
+        "color": "#c46b18",
+        "human": true,
+        "label": {
+          "en": "Hands-on & lab work",
+          "de": "Praktische Arbeit & Labor"
+        }
+      },
+      {
+        "key": "testing",
+        "color": "#4b5bb5",
+        "human": false,
+        "label": {
+          "en": "Testing & validation",
+          "de": "Test & Validierung"
+        }
+      },
+      {
+        "key": "procurement",
+        "color": "#96612d",
+        "human": true,
+        "label": {
+          "en": "Procurement & suppliers",
+          "de": "Beschaffung & Lieferanten"
+        }
+      },
+      {
+        "key": "regulatory",
+        "color": "#5a6470",
+        "human": false,
+        "label": {
+          "en": "Regulatory & approvals",
+          "de": "Regulatorik & Freigaben"
+        }
+      },
+      {
+        "key": "docs",
+        "color": "#3d6b2f",
+        "human": false,
+        "label": {
+          "en": "Reports & documentation",
+          "de": "Berichte & Dokumentation"
+        }
+      },
+      {
+        "key": "communication",
+        "color": "#1f7a8c",
+        "human": false,
+        "label": {
+          "en": "Communication & media",
+          "de": "Kommunikation & Medien"
+        }
+      },
+      {
+        "key": "training",
+        "color": "#7a6a1f",
+        "human": true,
+        "label": {
+          "en": "Training & handover",
+          "de": "Schulung & Übergabe"
+        }
+      },
+      {
+        "key": "rollout",
+        "color": "#0f6e6e",
+        "human": false,
+        "label": {
+          "en": "Rollout & operations",
+          "de": "Einführung & Betrieb"
+        }
+      },
+      {
+        "key": "review",
+        "color": "#6f7a84",
+        "human": true,
+        "label": {
+          "en": "Review & sign-off",
+          "de": "Prüfung & Abnahme"
+        }
+      }
+    ]
+  },
+  "deploy": {
+    "workerName": "project-tracker",
+    "publicUrl": "",
+    "accessTeamDomain": "",
+    "accessAud": "",
+    "allowedEmails": [],
+    "allowedServiceTokenIds": [],
+    "d1": {
+      "name": "tracker-db",
+      "id": ""
+    },
+    "kv": {
+      "id": ""
+    },
+    "auditRepo": ""
+  },
+  "checks": {
+    "denylist": true
+  }
+}

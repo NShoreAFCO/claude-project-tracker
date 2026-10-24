@@ -1,0 +1,39 @@
+/* Default theme: neutral slate with one deep teal. Replace this file (and assets/) to apply a corporate design;
+   every token below is required (npm run check). Contract and contrast rules: docs/THEMING.md. */
+:root {
+  /* brand */
+  --color-primary: #0f4c5c;        /* filled buttons, table heads, active nav rule */
+  --color-primary-strong: #0a3a47; /* hover, badges, ghost-button text */
+  --color-on-primary: #ffffff;     /* text on primary, primary-strong and danger */
+  --color-accent: #2b5d8a;         /* secondary buttons, focus ring, open milestones */
+  --color-accent-strong: #1f4a72;
+
+  /* surfaces and text */
+  --color-surface: #ffffff;
+  --color-tint: #eef3f6;           /* zebra rows, callouts, hover */
+  --color-border: #cfd8df;
+  --color-text: #2a3640;
+  --color-text-strong: #111c24;
+  --color-text-muted: #46525d;
+  --color-link: #0b4f6c;
+  --color-danger: #8a1c1c;
+
+  /* status marks (borders and stripes, ≥ 3:1 on the surface) */
+  --status-active: #0f4c5c;
+  --status-doing: #2e7d6b;
+  --status-idea: #2b5d8a;
+  --status-hold: #6b4f8a;
+  --status-done: #0f4c5c;
+  --status-dropped: #6f7a84;
+
+  /* type and shape */
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-heading: var(--font);
+  --font-size-base: 16px;
+  --weight-heading: 650;
+  --heading-transform: none;
+  --button-transform: none;
+  --button-letter-spacing: 0;
+  --radius: 6px;
+  --header-rule: 3px solid var(--color-primary);
+}

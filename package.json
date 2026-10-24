@@ -1,0 +1,42 @@
+{
+  "name": "project-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run && npm run test:scripts",
+    "db:migrate:local": "wrangler d1 migrations apply tracker-db --local",
+    "db:seed:local": "wrangler d1 execute tracker-db --local --file seed/seed.sql",
+    "cf-typegen": "wrangler types",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"tools/**/*.mjs\" \"scripts/**/*.mjs\" \"hooks/**/*.mjs\" \"seed/**/*.mjs\"",
+    "check": "node tools/check-repo.mjs",
+    "build:instance": "node scripts/build-instance.mjs && node seed/build-seed.mjs",
+    "predev": "npm run build:instance",
+    "pretest": "npm run build:instance",
+    "pretypecheck": "npm run build:instance",
+    "predeploy": "npm run build:instance",
+    "test:scripts": "node --test \"scripts/test/*.test.mjs\""
+  },
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "1.2.3",
+    "@modelcontextprotocol/server": "2.3.1",
+    "agents": "0.28.1",
+    "jose": "6.2.13",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.4.6",
+    "@cloudflare/workers-types": "5.20261019.1",
+    "prettier": "3.9.10",
+    "typescript": "5.9.3",
+    "vitest": "5.0.5",
+    "wrangler": "4.151.3"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "workerd@1.20261019.1": true
+  }
+}
