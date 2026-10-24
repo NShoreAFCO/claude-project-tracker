@@ -115,3 +115,7 @@ Verified 2026-10-24 against the API reference (developers.cloudflare.com/api) an
 - Access: Service Tokens Edit
 - Access: Organizations, Identity Providers, and Groups Edit
 - Account Settings Read
+
+## Secret input under the Claude Code `!` prefix
+
+Checked 2026-10-24 with `! node scripts/lib/prompt.mjs --selftest` on Windows 11: commands run with `!` get no interactive terminal (stdin is not a TTY), so `askSecret` refuses with "Secret input needs an interactive terminal…" before reading anything. `npm run setup`, `teardown`, `secrets:rotate` and `hook:install` therefore cannot be run through `!`; they run in a separate terminal window only.

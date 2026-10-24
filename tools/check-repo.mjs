@@ -139,6 +139,13 @@ for (const f of [".gitignore", ".claudeignore"]) check(`${f} lists secrets/`, re
 const hardLocale = tracked.filter((f) => /^public\/js\/.*\.js$/.test(f) && f !== "public/js/i18n.js" && /Intl\.[A-Za-z]+\(\s*["']/.test(read(f)));
 check("no hard-coded Intl locale outside i18n.js", hardLocale.length === 0, hardLocale.join(", "));
 
+// every `npm run <x>` named in the docs exists in package.json
+const scripts = JSON.parse(read("package.json")).scripts;
+const missingCmds = [];
+for (const f of tracked.filter((f) => f.endsWith(".md")))
+  for (const m of read(f).matchAll(/npm run ([a-z][a-z0-9:-]*)/g)) if (!scripts[m[1]]) missingCmds.push(`${f}: npm run ${m[1]}`);
+check("commands named in the docs exist", missingCmds.length === 0, [...new Set(missingCmds)].join(", "));
+
 // no inline script/style in the HTML shell (CSP has no 'unsafe-inline')
 const html = read("public/index.html");
 check("index.html has no inline script or style", !/<script(?![^>]*\bsrc=)/i.test(html) && !/<style|style="/i.test(html));
