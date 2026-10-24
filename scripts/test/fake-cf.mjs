@@ -21,14 +21,19 @@ export function fakeCloudflare(state = {}) {
   const authDomain = state.authDomain === undefined ? "team.cloudflareaccess.com" : state.authDomain;
   const perPage = state.perPage ?? 50;
   const fail = { ...(state.fail ?? {}) };
+  const failNth = { ...(state.failNth ?? {}) }; // "METHOD /path" → fail only the n-th such call
+  const counts = {};
   const calls = [];
 
-  const ok = (result, extra = {}) => new Response(JSON.stringify({ success: true, errors: [], messages: [], result, ...extra }), { status: 200 });
+  const ok = (result, extra = {}) =>
+    new Response(JSON.stringify({ success: true, errors: [], messages: [], result, ...extra }), { status: 200 });
   const err = (status, errors) => new Response(JSON.stringify({ success: false, errors, messages: [], result: null }), { status });
   const page = (list, url) => {
     const p = Number(url.searchParams.get("page") ?? 1);
     const per = Math.min(Number(url.searchParams.get("per_page") ?? perPage), perPage);
-    return ok(list.slice((p - 1) * per, p * per), { result_info: { page: p, per_page: per, total_count: list.length, total_pages: Math.max(1, Math.ceil(list.length / per)) } });
+    return ok(list.slice((p - 1) * per, p * per), {
+      result_info: { page: p, per_page: per, total_count: list.length, total_pages: Math.max(1, Math.ceil(list.length / per)) },
+    });
   };
 
   async function fetch(input, init = {}) {
@@ -39,6 +44,8 @@ export function fakeCloudflare(state = {}) {
     const headers = Object.fromEntries(Object.entries(init.headers ?? {}).map(([k, v]) => [k.toLowerCase(), v]));
     calls.push({ method, path, body, headers });
     const key = `${method} ${path}`;
+    counts[key] = (counts[key] ?? 0) + 1;
+    if (failNth[key] === counts[key]) return err(500, [{ code: 1, message: "simulated failure" }]);
     if (fail[key]) {
       const f = fail[key];
       if (f.once) delete fail[key];
@@ -50,7 +57,9 @@ export function fakeCloudflare(state = {}) {
     if ((r = m(/^\/accounts\/[^/]+\/workers\/subdomain$/)) && method === "GET")
       return subdomain ? ok({ subdomain }) : err(404, [{ code: 10007, message: "This account does not have a subdomain" }]);
     if (m(/^\/accounts\/[^/]+\/access\/organizations$/) && method === "GET")
-      return authDomain ? ok({ auth_domain: authDomain, name: "team" }) : err(404, [{ code: 12130, message: "access.api.error.not_found" }]);
+      return authDomain
+        ? ok({ auth_domain: authDomain, name: "team" })
+        : err(404, [{ code: 12130, message: "access.api.error.not_found" }]);
     if (m(/^\/accounts\/[^/]+\/access\/identity_providers$/)) {
       if (method === "GET") return page(db.idps, url);
       const idp = { id: nextId("idp"), ...body };
@@ -73,9 +82,25 @@ export function fakeCloudflare(state = {}) {
       return ok(k);
     }
     if (m(/^\/accounts\/[^/]+\/access\/service_tokens$/)) {
-      if (method === "GET") return page(db.tokens.map(({ client_secret, ...t }) => t), url);
-      const t = { id: nextId("st"), name: body.name, duration: body.duration, client_id: `${nextId("cid")}.access`, client_secret: nextId("csecret") };
+      if (method === "GET")
+        return page(
+          db.tokens.map(({ client_secret, ...t }) => t),
+          url,
+        );
+      const t = {
+        id: nextId("st"),
+        name: body.name,
+        duration: body.duration,
+        client_id: `${nextId("cid")}.access`,
+        client_secret: nextId("csecret"),
+      };
       db.tokens.push(t);
+      return ok(t);
+    }
+    if ((r = m(/^\/accounts\/[^/]+\/access\/service_tokens\/([^/]+)\/rotate$/)) && method === "POST") {
+      const t = db.tokens.find((x) => x.id === r[1]);
+      if (!t) return err(404, [{ code: 7003, message: "not found" }]);
+      t.client_secret = nextId("csecret");
       return ok(t);
     }
     if (m(/^\/accounts\/[^/]+\/access\/policies$/)) {
@@ -91,14 +116,29 @@ export function fakeCloudflare(state = {}) {
     }
     if (m(/^\/accounts\/[^/]+\/access\/apps$/)) {
       if (method === "GET")
-        return page(db.apps.map((a) => (a.saas_app ? { ...a, saas_app: { ...a.saas_app, client_secret: undefined } } : a)), url);
+        return page(
+          db.apps.map((a) => (a.saas_app ? { ...a, saas_app: { ...a.saas_app, client_secret: undefined } } : a)),
+          url,
+        );
       const a = { id: nextId("app"), aud: nextId("aud"), ...body };
       if (body.type === "saas") a.saas_app = { ...body.saas_app, client_id: nextId("oidc"), client_secret: nextId("oidcsecret") };
       db.apps.push(a);
       return ok(a);
     }
-    if ((r = m(/^\/accounts\/[^/]+\/(d1\/database|storage\/kv\/namespaces|access\/apps|access\/policies|access\/service_tokens|workers\/scripts)\/([^/]+)$/)) && method === "DELETE") {
-      const list = { "d1/database": db.d1, "storage/kv/namespaces": db.kv, "access/apps": db.apps, "access/policies": db.policies, "access/service_tokens": db.tokens, "workers/scripts": db.scripts }[r[1]];
+    if (
+      (r = m(
+        /^\/accounts\/[^/]+\/(d1\/database|storage\/kv\/namespaces|access\/apps|access\/policies|access\/service_tokens|workers\/scripts)\/([^/]+)$/,
+      )) &&
+      method === "DELETE"
+    ) {
+      const list = {
+        "d1/database": db.d1,
+        "storage/kv/namespaces": db.kv,
+        "access/apps": db.apps,
+        "access/policies": db.policies,
+        "access/service_tokens": db.tokens,
+        "workers/scripts": db.scripts,
+      }[r[1]];
       const i = list.findIndex((x) => (x.uuid ?? x.id) === r[2]);
       if (i < 0) return err(404, [{ code: 7003, message: "not found" }]);
       list.splice(i, 1);

@@ -108,7 +108,15 @@ test("validateConfig: enabled must be boolean and each list keeps one enabled ty
 
 test("example catalogue covers the common project and work types", () => {
   const p = example.categories.project.map((x) => x.key);
-  for (const k of ["research", "product-development", "product-launch", "product-optimisation", "process-development", "process-implementation", "process-optimisation"])
+  for (const k of [
+    "research",
+    "product-development",
+    "product-launch",
+    "product-optimisation",
+    "process-development",
+    "process-implementation",
+    "process-optimisation",
+  ])
     assert.ok(p.includes(k), k);
   const w = example.categories.workpackage.map((x) => x.key);
   for (const k of ["coding", "research", "design", "testing", "pm", "docs", "rollout"]) assert.ok(w.includes(k), k);

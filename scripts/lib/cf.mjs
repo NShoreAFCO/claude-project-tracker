@@ -26,7 +26,10 @@ function explain(status, apiMessage, what) {
  */
 export function createCf({ token, accountId, fetch: doFetch = globalThis.fetch }) {
   if (!token) throw new CfError(0, "No Cloudflare API token was given.");
-  const scrub = (s) => String(s ?? "").split(token).join("[token]");
+  const scrub = (s) =>
+    String(s ?? "")
+      .split(token)
+      .join("[token]");
   let account = accountId ?? null;
 
   async function req(method, path, body, what = `${method} ${path}`) {
@@ -82,7 +85,8 @@ export function createCf({ token, accountId, fetch: doFetch = globalThis.fetch }
         account = accounts[0].id;
         return { accountId: accounts[0].id, accountName: accounts[0].name };
       }
-      if (!accounts.length) throw new CfError(403, "The API token cannot see any Cloudflare account. Check its 'Account Resources' setting.");
+      if (!accounts.length)
+        throw new CfError(403, "The API token cannot see any Cloudflare account. Check its 'Account Resources' setting.");
       throw new CfError(
         0,
         `The API token can see several accounts (${accounts.map((a) => `${a.name} = ${a.id}`).join(", ")}). Limit the token to one account, or set deploy.accountId in the instance config.`,
@@ -115,7 +119,12 @@ export function createCf({ token, accountId, fetch: doFetch = globalThis.fetch }
       const idps = await list(`${acc()}/access/identity_providers`, "the login methods");
       const found = idps.find((i) => i.type === "onetimepin");
       if (found) return { id: found.id, created: false };
-      const r = await req("POST", `${acc()}/access/identity_providers`, { name: "One-time PIN", type: "onetimepin", config: {} }, "creating the one-time PIN login");
+      const r = await req(
+        "POST",
+        `${acc()}/access/identity_providers`,
+        { name: "One-time PIN", type: "onetimepin", config: {} },
+        "creating the one-time PIN login",
+      );
       return { id: r.result.id, created: true };
     },
 
@@ -139,6 +148,12 @@ export function createCf({ token, accountId, fetch: doFetch = globalThis.fetch }
       if (found) return { id: found.id, clientId: found.client_id, clientSecret: null, created: false };
       const r = (await req("POST", `${acc()}/access/service_tokens`, { name, duration }, `creating service token "${name}"`)).result;
       return { id: r.id, clientId: r.client_id, clientSecret: r.client_secret, created: true };
+    },
+
+    /** New client secret for an existing service token (the old one stops working). */
+    async rotateServiceToken(id) {
+      const r = (await req("POST", `${acc()}/access/service_tokens/${id}/rotate`, {}, "rotating the service token secret")).result;
+      return { id: r.id, clientId: r.client_id, clientSecret: r.client_secret };
     },
 
     /** Reusable Access policy; an existing one with the same name gets its decision and rules updated. */
@@ -211,7 +226,8 @@ export function createCf({ token, accountId, fetch: doFetch = globalThis.fetch }
 
     /** Everything whose name starts with prefix: { d1, kv, apps, policies, serviceTokens } as [{ id, name }]. */
     async listByPrefix(prefix) {
-      const pick = (items, idKey, nameKey) => items.filter((x) => String(x[nameKey] ?? "").startsWith(prefix)).map((x) => ({ id: x[idKey], name: x[nameKey] }));
+      const pick = (items, idKey, nameKey) =>
+        items.filter((x) => String(x[nameKey] ?? "").startsWith(prefix)).map((x) => ({ id: x[idKey], name: x[nameKey] }));
       return {
         d1: pick(await list(`${acc()}/d1/database`, "the D1 databases"), "uuid", "name"),
         kv: pick(await list(`${acc()}/storage/kv/namespaces`, "the KV namespaces"), "id", "title"),
@@ -223,7 +239,14 @@ export function createCf({ token, accountId, fetch: doFetch = globalThis.fetch }
 
     /** kind: d1 | kv | app | policy | serviceToken | worker (id = script name for worker). */
     async deleteResource(kind, id) {
-      const seg = { d1: "d1/database", kv: "storage/kv/namespaces", app: "access/apps", policy: "access/policies", serviceToken: "access/service_tokens", worker: "workers/scripts" }[kind];
+      const seg = {
+        d1: "d1/database",
+        kv: "storage/kv/namespaces",
+        app: "access/apps",
+        policy: "access/policies",
+        serviceToken: "access/service_tokens",
+        worker: "workers/scripts",
+      }[kind];
       if (!seg) throw new CfError(0, `Unknown resource kind "${kind}".`);
       await req("DELETE", `${acc()}/${seg}/${encodeURIComponent(id)}`, undefined, `deleting ${kind} ${id}`);
     },
