@@ -13,6 +13,7 @@
     "cf-typegen": "wrangler types",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"tools/**/*.mjs\" \"scripts/**/*.mjs\" \"hooks/**/*.mjs\" \"seed/**/*.mjs\"",
     "check": "node tools/check-repo.mjs",
+    "hook:install": "node scripts/install-hook.mjs",
     "build:instance": "node scripts/build-instance.mjs && node seed/build-seed.mjs",
     "predev": "npm run build:instance",
     "pretest": "npm run build:instance",
