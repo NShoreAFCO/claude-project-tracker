@@ -20,7 +20,8 @@ export function instanceDir(root) {
 export function loadInstance(root) {
   const dir = instanceDir(root);
   const file = join(dir, "instance.config.json");
-  if (!existsSync(file)) throw new InstanceError(`No instance config found at ${file}. Run "npm run setup" or copy instance.example to instance.`);
+  if (!existsSync(file))
+    throw new InstanceError(`No instance config found at ${file}. Run "npm run setup" or copy instance.example to instance.`);
   let config;
   try {
     config = JSON.parse(readFileSync(file, "utf8"));
@@ -41,7 +42,8 @@ export function validateConfig(c) {
   else {
     if (typeof c.app.name !== "string" || !c.app.name.trim()) p.push("app.name must be a non-empty text");
     if (!LOCALES.includes(c.app.locale)) p.push(`app.locale must be one of ${LOCALES.join(", ")}`);
-    for (const f of ["logo", "favicon"]) if (typeof c.app[f] !== "string" || !c.app[f]) p.push(`app.${f} must be a file path inside the instance folder`);
+    for (const f of ["logo", "favicon"])
+      if (typeof c.app[f] !== "string" || !c.app[f]) p.push(`app.${f} must be a file path inside the instance folder`);
   }
   if (!isObj(c.categories)) p.push("categories is missing");
   else
@@ -60,10 +62,12 @@ export function validateConfig(c) {
         else seen.add(cat.key);
         if (typeof cat.color !== "string" || !HEX.test(cat.color)) p.push(`${at}.color must look like #1a2b3c`);
         if (!isObj(cat.label) || typeof cat.label.en !== "string" || !cat.label.en) p.push(`${at}.label.en is required`);
-        if (kind === "workpackage" && cat.human !== undefined && typeof cat.human !== "boolean") p.push(`${at}.human must be true or false`);
+        if (kind === "workpackage" && cat.human !== undefined && typeof cat.human !== "boolean")
+          p.push(`${at}.human must be true or false`);
         if (cat.enabled !== undefined && typeof cat.enabled !== "boolean") p.push(`${at}.enabled must be true or false`);
       });
-      if (list.every((cat) => cat && cat.enabled === false)) p.push(`categories.${kind} needs at least one type with enabled not set to false`);
+      if (list.every((cat) => cat && cat.enabled === false))
+        p.push(`categories.${kind} needs at least one type with enabled not set to false`);
     }
   if (c.deploy !== undefined && !isObj(c.deploy)) p.push("deploy must be an object");
   if (c.checks !== undefined && !isObj(c.checks)) p.push("checks must be an object");

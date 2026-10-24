@@ -40,7 +40,10 @@ test("ensureAccessApp self_hosted with bypass destinations", async () => {
   const r = await cf.ensureAccessApp({ type: "self_hosted", name: "tracker-bypass", domain: host, paths, policies: ["pol-bypass"] });
   const body = fake.calls.find((c) => c.method === "POST" && c.path.endsWith("/access/apps")).body;
   assert.equal(body.type, "self_hosted");
-  assert.deepEqual(body.destinations.map((d) => d.uri), paths.map((p) => host + p));
+  assert.deepEqual(
+    body.destinations.map((d) => d.uri),
+    paths.map((p) => host + p),
+  );
   assert.ok(body.destinations.every((d) => d.type === "public"));
   assert.deepEqual(body.policies, ["pol-bypass"]);
   assert.ok(r.aud);
@@ -49,7 +52,13 @@ test("ensureAccessApp self_hosted with bypass destinations", async () => {
 test("ensureAccessApp saas_oidc returns client secret and endpoints on create only", async () => {
   const fake = fakeCloudflare();
   const cf = createCf({ token: TOKEN, accountId: "acc1", fetch: fake.fetch });
-  const spec = { type: "saas_oidc", name: "tracker-mcp", redirectUris: ["https://t.example/callback"], policies: ["pol-allow"], teamDomain: "team.cloudflareaccess.com" };
+  const spec = {
+    type: "saas_oidc",
+    name: "tracker-mcp",
+    redirectUris: ["https://t.example/callback"],
+    policies: ["pol-allow"],
+    teamDomain: "team.cloudflareaccess.com",
+  };
   const first = await cf.ensureAccessApp(spec);
   assert.ok(first.clientSecret);
   assert.equal(first.tokenUrl, `https://team.cloudflareaccess.com/cdn-cgi/access/sso/oidc/${first.clientId}/token`);
@@ -96,17 +105,32 @@ test("ensurePolicy updates the include list of an existing policy", async () => 
 });
 
 test("listByPrefix finds resources named with the prefix", async () => {
-  const fake = fakeCloudflare({ d1: [{ uuid: "x", name: "cpt-test-db" }, { uuid: "y", name: "other-db" }], kv: [{ id: "k", title: "cpt-test-oauth" }] });
+  const fake = fakeCloudflare({
+    d1: [
+      { uuid: "x", name: "cpt-test-db" },
+      { uuid: "y", name: "other-db" },
+    ],
+    kv: [{ id: "k", title: "cpt-test-oauth" }],
+  });
   const cf = createCf({ token: TOKEN, accountId: "acc1", fetch: fake.fetch });
   const r = await cf.listByPrefix("cpt-test");
-  assert.deepEqual(r.d1.map((x) => x.name), ["cpt-test-db"]);
-  assert.deepEqual(r.kv.map((x) => x.name), ["cpt-test-oauth"]);
+  assert.deepEqual(
+    r.d1.map((x) => x.name),
+    ["cpt-test-db"],
+  );
+  assert.deepEqual(
+    r.kv.map((x) => x.name),
+    ["cpt-test-oauth"],
+  );
 });
 
 test("errors are plain language", async () => {
   const fake = fakeCloudflare({ fail: { "GET /accounts": { status: 403, errors: [{ code: 10000, message: "Authentication error" }] } } });
   const cf = createCf({ token: TOKEN, fetch: fake.fetch });
-  await assert.rejects(cf.whoami(), (e) => e instanceof CfError && e.status === 403 && /API token/.test(e.message) && /permission/i.test(e.message));
+  await assert.rejects(
+    cf.whoami(),
+    (e) => e instanceof CfError && e.status === 403 && /API token/.test(e.message) && /permission/i.test(e.message),
+  );
 });
 
 test("token never appears in thrown messages", async () => {
@@ -120,4 +144,13 @@ test("sends the bearer token and JSON", async () => {
   const cf = createCf({ token: TOKEN, accountId: "acc1", fetch: fake.fetch });
   await cf.ensureD1("x");
   assert.ok(fake.calls.every((c) => c.headers.authorization === `Bearer ${TOKEN}`));
+});
+
+test("rotateServiceToken returns a new secret for an existing token", async () => {
+  const fake = fakeCloudflare();
+  const cf = createCf({ token: TOKEN, accountId: "acc1", fetch: fake.fetch });
+  const a = await cf.ensureServiceToken("tracker-hook");
+  const r = await cf.rotateServiceToken(a.id);
+  assert.ok(r.clientSecret && r.clientSecret !== a.clientSecret);
+  assert.equal(r.clientId, a.clientId);
 });
