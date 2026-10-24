@@ -26,7 +26,10 @@ export function buildInstance(root) {
   mkdirSync(join(root, "src", "generated"), { recursive: true });
   const categories = enabledCategories(config);
   const serverPart = { app: config.app, categories };
-  writeFileSync(join(root, "src", "generated", "instance.ts"), `${header}export const INSTANCE = ${JSON.stringify(serverPart, null, 2)} as const;\n`);
+  writeFileSync(
+    join(root, "src", "generated", "instance.ts"),
+    `${header}export const INSTANCE = ${JSON.stringify(serverPart, null, 2)} as const;\n`,
+  );
 
   const out = join(root, "public", "instance");
   rmSync(out, { recursive: true, force: true });

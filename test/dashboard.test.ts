@@ -108,6 +108,7 @@ describe("dashboard assets", () => {
     expect(csp).toContain("script-src 'self'");
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).not.toContain("unsafe-inline");
+    expect(csp).toContain("font-src 'self' https://fonts.gstatic.com"); // theme fonts in instance/assets
     expect(await res.text()).toContain('<script type="module" src="/js/app.js"></script>');
   });
   it("never serves assets without a valid Access JWT", async () => {

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "node scripts/wrangler-env.mjs deploy",
     "typecheck": "tsc --noEmit",
     "test": "vitest run && npm run test:scripts",
     "db:migrate:local": "wrangler d1 migrations apply tracker-db --local",
@@ -13,12 +13,20 @@
     "cf-typegen": "wrangler types",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"tools/**/*.mjs\" \"scripts/**/*.mjs\" \"hooks/**/*.mjs\" \"seed/**/*.mjs\"",
     "check": "node tools/check-repo.mjs",
+    "hook:install": "node scripts/install-hook.mjs",
     "build:instance": "node scripts/build-instance.mjs && node seed/build-seed.mjs",
     "predev": "npm run build:instance",
     "pretest": "npm run build:instance",
     "pretypecheck": "npm run build:instance",
     "predeploy": "npm run build:instance",
-    "test:scripts": "node --test \"scripts/test/*.test.mjs\""
+    "test:scripts": "node --test \"scripts/test/*.test.mjs\"",
+    "setup": "node scripts/setup.mjs",
+    "setup:check": "node scripts/setup-check.mjs",
+    "teardown": "node scripts/teardown.mjs",
+    "secrets:rotate": "node scripts/rotate-secrets.mjs",
+    "webhook:add": "node scripts/add-webhook.mjs",
+    "backup": "node scripts/wrangler-env.mjs --backup",
+    "db:migrate:remote": "node scripts/wrangler-env.mjs d1 migrations apply DB --remote"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "1.2.3",

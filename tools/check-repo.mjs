@@ -116,7 +116,8 @@ if (inst.checks?.denylist !== false) {
   try {
     log = execFileSync("git", ["log", "--format=%s%n%b"], { encoding: "utf8" });
   } catch {}
-  const logHits = log.split("\n").filter((l) => DENY.test(l));
+  // GitHub writes "Merge pull request #N from <owner>/<branch>" itself; the owner is the hosting account, not content
+  const logHits = log.split("\n").filter((l) => DENY.test(l.replace(/^Merge pull request #\d+ from [^/\s]+\//, "")));
   check("denylist: no identity in commit messages", logHits.length === 0, logHits.slice(0, 5).join(" | "));
   const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
   const ALLOWED_EMAIL = /@(example\.com|example\.org|users\.noreply\.github\.com)$/i;
@@ -138,6 +139,13 @@ for (const f of [".gitignore", ".claudeignore"]) check(`${f} lists secrets/`, re
 // dashboard formats dates and numbers only through i18n.js (locale from the instance config)
 const hardLocale = tracked.filter((f) => /^public\/js\/.*\.js$/.test(f) && f !== "public/js/i18n.js" && /Intl\.[A-Za-z]+\(\s*["']/.test(read(f)));
 check("no hard-coded Intl locale outside i18n.js", hardLocale.length === 0, hardLocale.join(", "));
+
+// every `npm run <x>` named in the docs exists in package.json
+const scripts = JSON.parse(read("package.json")).scripts;
+const missingCmds = [];
+for (const f of tracked.filter((f) => f.endsWith(".md")))
+  for (const m of read(f).matchAll(/npm run ([a-z][a-z0-9:-]*)/g)) if (!scripts[m[1]]) missingCmds.push(`${f}: npm run ${m[1]}`);
+check("commands named in the docs exist", missingCmds.length === 0, [...new Set(missingCmds)].join(", "));
 
 // no inline script/style in the HTML shell (CSP has no 'unsafe-inline')
 const html = read("public/index.html");
