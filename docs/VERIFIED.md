@@ -89,4 +89,29 @@ Docs: <https://code.claude.com/docs/en/hooks>
 - Config: `{"hooks":{"SessionEnd":[{"hooks":[{"type":"command","command":"node \"<home>/.claude/hooks/tracker-session-end.mjs\""}]}]}}`.
 
 ## Cloudflare API (setup scripts)
-To be verified in the setup task.
+
+Verified 2026-10-24 against the API reference (developers.cloudflare.com/api) and the official SDK `cloudflare/cloudflare-typescript` @ `6dbe1fc` (`src/resources/...`). Base URL `https://api.cloudflare.com/client/v4`; every response is the `{ success, errors, messages, result, result_info }` envelope; lists paginate with `page` / `per_page` and `result_info.total_pages`.
+
+| Purpose | Call | Notes |
+|---|---|---|
+| Account | `GET /accounts` | Pick the only account, or the one named in the config. |
+| workers.dev subdomain | `GET /accounts/{a}/workers/subdomain` | `result.subdomain`; missing until Workers is opened once in the dashboard. |
+| Zero Trust team | `GET /accounts/{a}/access/organizations` | `result.auth_domain` = `<team>.cloudflareaccess.com`; absent until Zero Trust is set up. |
+| One-time PIN login | `GET`/`POST /accounts/{a}/access/identity_providers` | Body `{ name, type: "onetimepin", config: {} }`. |
+| D1 | `GET /accounts/{a}/d1/database?name=`, `POST` `{ name }`, `DELETE …/d1/database/{uuid}` | Id field `uuid`. |
+| KV | `GET`/`POST /accounts/{a}/storage/kv/namespaces` `{ title }`, `DELETE …/{id}` | |
+| Service token | `GET`/`POST /accounts/{a}/access/service_tokens` `{ name, duration }`, `DELETE …/{id}` | `duration` like `8760h` (default 1 year). `client_secret` is returned **only on create**. |
+| Reusable policy | `GET`/`POST /accounts/{a}/access/policies` `{ name, decision, include }`, `DELETE …/{id}` | `decision`: `allow`, `deny`, `non_identity` (service auth), `bypass`. Rules: `{ email: { email } }`, `{ service_token: { token_id } }`, `{ everyone: {} }`. |
+| Access application | `GET`/`POST /accounts/{a}/access/apps`, `DELETE …/{id}` | `policies`: array of reusable policy ids (inline and reusable policies are mutually exclusive). Response has `aud`. |
+| — self-hosted | `{ type: "self_hosted", name, domain, destinations: [{ type: "public", uri }], policies, app_launcher_visible }` | A public `uri` covers its subpaths; a path wildcard `/x/*` does not cover `/x`, so list both. |
+| — SaaS OIDC | `{ type: "saas", name, policies, saas_app: { auth_type: "oidc", redirect_uris, grant_types, scopes, refresh_token_options: { lifetime } } }` | `grant_types` include `authorization_code_with_pkce` and `refresh_tokens` (the Worker sends a PKCE challenge plus the client secret). `saas_app.client_secret` is returned **only on create**. Endpoints: `https://<team>/cdn-cgi/access/sso/oidc/<client_id>/{token,authorization,jwks}` (saas-mcp guide). |
+| Worker | `DELETE /accounts/{a}/workers/scripts/{name}` | Deploys and secrets go through wrangler with `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. |
+
+**API token permissions** (account scope; the dashboard calls them "Edit"):
+- Workers Scripts Edit
+- D1 Edit
+- Workers KV Storage Edit
+- Access: Apps and Policies Edit
+- Access: Service Tokens Edit
+- Access: Organizations, Identity Providers, and Groups Edit
+- Account Settings Read
