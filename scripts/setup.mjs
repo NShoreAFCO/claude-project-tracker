@@ -14,13 +14,13 @@ const i = args.indexOf("--prefix");
 const prefix = i >= 0 ? args[i + 1] : undefined;
 
 const gh = async (a) => {
-  const r = spawnSync("gh", a, { encoding: "utf8", shell: process.platform === "win32" });
+  const r = spawnSync("gh", a, { encoding: "utf8" });
   return { code: r.status ?? 1, stdout: `${r.stdout ?? ""}${r.stderr ?? ""}` };
 };
 
 if (!process.stdin.isTTY) {
   console.error(
-    "npm run setup is interactive. Run it yourself in a terminal window (in Claude Code: type  ! npm run setup  or use a separate terminal).",
+    "npm run setup is interactive. Run it yourself in a separate terminal window (not through an AI assistant or the Claude Code ! prefix).",
   );
   process.exit(1);
 }

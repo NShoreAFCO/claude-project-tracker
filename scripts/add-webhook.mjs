@@ -35,7 +35,7 @@ export async function addWebhook({ repo, publicUrl, secret, gh, log }) {
 
 const ghRunner = (args, input) =>
   new Promise((res) => {
-    const child = spawn("gh", args, { shell: process.platform === "win32" });
+    const child = spawn("gh", args);
     let out = "";
     child.stdout.on("data", (d) => (out += d));
     child.stderr.on("data", (d) => (out += d));
