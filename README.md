@@ -83,10 +83,30 @@ Rules worth knowing:
 
 ## Guides
 
-- Install: `docs/INSTALL.md` *(written in a later step)*
-- Customise and theme: `docs/CUSTOMISING.md`, `docs/THEMING.md` *(later step)*
-- Updates from upstream: `docs/UPDATING.md` *(later step)*
-- Technical specification: [`docs/SPEC.md`](docs/SPEC.md); verified API versions: [`docs/VERIFIED.md`](docs/VERIFIED.md)
+| Guide | For |
+|---|---|
+| [`docs/INSTALL.md`](docs/INSTALL.md) | setting up, step by step, from no accounts to a working tracker |
+| [`docs/CUSTOMISING.md`](docs/CUSTOMISING.md) | the `instance/` folder: name, language, texts, demo data |
+| [`docs/THEMING.md`](docs/THEMING.md) | applying a corporate design (theme tokens, contrast rules, worked example) |
+| [`docs/UPDATING.md`](docs/UPDATING.md) | receiving updates from the package and contributing fixes back |
+| [`docs/ai/`](docs/ai/) | playbooks for your AI assistant (setup, customising) and text for claude.ai projects |
+| [`docs/SPEC.md`](docs/SPEC.md), [`docs/VERIFIED.md`](docs/VERIFIED.md) | technical specification, verified API versions and Cloudflare calls |
+
+**Quick start:** create your own copy (`gh repo create <name> --private --template <this-repo> --clone`), `npm install`, prepare Cloudflare and create an API token (INSTALL §5–6), then run `npm run setup` in your terminal. With Claude Code, just say *"Help me set up this tracker. Follow docs/ai/SETUP-PLAYBOOK.md."*
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `npm run setup` | creates or updates everything in Cloudflare, stores secrets in `secrets/`, deploys, checks (interactive; run it yourself) |
+| `npm run setup:check` | reports what is set up and whether the tracker is protected (no secrets shown) |
+| `npm run deploy` | rebuilds the instance files and deploys |
+| `npm run db:migrate:remote` | applies new database migrations after an update |
+| `npm run hook:install` | installs the Claude Code session hook |
+| `node scripts/add-webhook.mjs "<owner>/<repo>"` | adds the GitHub webhook to a repository |
+| `npm run backup` | exports the database to `backups/` |
+| `npm run secrets:rotate` | replaces the encryption key and webhook secret |
+| `npm run teardown` | deletes this instance's Cloudflare resources (asks for a typed confirmation) |
 
 ## Develop
 
