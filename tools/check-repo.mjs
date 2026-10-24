@@ -116,7 +116,8 @@ if (inst.checks?.denylist !== false) {
   try {
     log = execFileSync("git", ["log", "--format=%s%n%b"], { encoding: "utf8" });
   } catch {}
-  const logHits = log.split("\n").filter((l) => DENY.test(l));
+  // GitHub writes "Merge pull request #N from <owner>/<branch>" itself; the owner is the hosting account, not content
+  const logHits = log.split("\n").filter((l) => DENY.test(l.replace(/^Merge pull request #\d+ from [^/\s]+\//, "")));
   check("denylist: no identity in commit messages", logHits.length === 0, logHits.slice(0, 5).join(" | "));
   const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
   const ALLOWED_EMAIL = /@(example\.com|example\.org|users\.noreply\.github\.com)$/i;
