@@ -33,7 +33,7 @@ Say, in this order, waiting for "done" each time:
 4. "In a separate terminal window, in this folder, run: `npm run setup`." Explain the questions briefly (INSTALL §7 table). Suggest: allowed emails = everyone who should use it; language; types to switch off (show the README tables if they want to choose).
 5. When they report back, run `npm run setup:check`. If a step failed, the setup printed a plain fix. Ask them to paste **only the ✗ line and the line below it** (these never contain secrets) and explain the fix from INSTALL §15.
 
-If they want to use the Claude Code `!` prefix instead of a separate window: only if `docs/VERIFIED.md` says masked input works under `!`; otherwise insist on a separate terminal.
+The Claude Code `!` prefix does not work for setup: it gives the script no interactive terminal, so setup refuses to ask for the token (`docs/VERIFIED.md`). Always a separate terminal window.
 
 ## 4. Access checks failing
 Access changes take one to two minutes. Wait, then run `npm run setup:check` again. If "Dashboard redirects…" still fails, the Access application for the whole site is missing: ask them to rerun `npm run setup`. If "MCP endpoint demands a token" returns 302, the machine-paths application is missing: same fix.
