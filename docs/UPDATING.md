@@ -41,7 +41,7 @@ git push
 - `npm test` and `npm run check` must pass before you deploy. If `check` reports a missing theme token, the update added one: add it to `instance/theme.css` (the update notes and `docs/THEMING.md` name it).
 - `npm run db:migrate:remote` applies new database migrations, if any. It is safe to run when there are none.
 - The package runs the same `typecheck`, `test` and `check` steps in GitHub Actions (`.github/workflows/ci.yml`) on every pull request and on `main`. `.github/` is core: do not edit it in a deployment, and the denylist in `npm run check` applies to it.
-- Read the package's release notes for anything else to do.
+- Read `CHANGELOG.md` for anything else to do. Release R1 needs `policy.admins` in `instance/instance.config.json` (the admin email address or addresses, which must be among `deploy.allowedEmails`); until then `npm run setup:check` fails. Running `npm run setup` again asks for it.
 
 ## Sending a fix to the package
 

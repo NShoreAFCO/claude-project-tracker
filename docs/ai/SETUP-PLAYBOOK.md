@@ -35,6 +35,8 @@ Say, in this order, waiting for "done" each time:
 
 The Claude Code `!` prefix does not work for setup: it gives the script no interactive terminal, so setup refuses to ask for the token (`docs/VERIFIED.md`). Always a separate terminal window.
 
+After an update from an older version, `setup:check` may fail on `policy.admins`: ask who administers the tracker, then add that email to `policy.admins` in `instance/instance.config.json` (it must be an allowed email) or have the user rerun `npm run setup`. The admin role is given at a person's first sign-in only; for someone who has already signed in, an admin changes the role in the People view.
+
 ## 4. Access checks failing
 Access changes take one to two minutes. Wait, then run `npm run setup:check` again. If "Dashboard redirects…" still fails, the Access application for the whole site is missing: ask them to rerun `npm run setup`. If "MCP endpoint demands a token" returns 302, the machine-paths application is missing: same fix.
 
