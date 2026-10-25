@@ -66,7 +66,7 @@ describe("projects", () => {
     await expect(createProject(db, { title: "x", target_date: "20.10.2026" }, A)).rejects.toBeInstanceOf(ValidationError);
   });
   it("update writes a field-level diff event; no-op update writes nothing", async () => {
-    const p = await createProject(db, { title: uniq("D") }, A);
+    const p = await createProject(db, { title: uniq("D"), owner: "Test Owner" }, A);
     await updateProject(db, p.id, { status: "on_hold" }, A);
     await updateProject(db, p.id, { status: "on_hold" }, A);
     const ev = await listEvents(db, { project_id: p.id });

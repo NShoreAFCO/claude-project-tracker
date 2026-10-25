@@ -21,6 +21,8 @@ export interface HookBody {
   /** Optional (sent by the hook script): the repo's default branch from origin/HEAD, e.g. "main". */
   default_branch?: string | null;
   context_file?: { name?: string; content?: string } | null;
+  /** Optional: id or email of the person the session ran for; recorded as event.person_id (spec §4.1). */
+  on_behalf_of?: string | null;
 }
 
 const str = (v: unknown, max: number): string | null => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
@@ -28,7 +30,7 @@ const str = (v: unknown, max: number): string | null => (typeof v === "string" &
 /** POST /api/hooks/claude-code (SPEC §6). Matches by repo_url, then by local_path. */
 export async function handleClaudeCodeHook(body: HookBody, env: Env): Promise<Record<string, unknown>> {
   const db = env.DB;
-  const by = await serviceCaller(db, ACTOR);
+  const by = await serviceCaller(db, ACTOR, typeof body.on_behalf_of === "string" ? body.on_behalf_of : null);
   const sessionId = str(body.session_id, 100);
   const cwd = str(body.cwd, 500);
   const repoUrl = str(body.repo_url, 500);

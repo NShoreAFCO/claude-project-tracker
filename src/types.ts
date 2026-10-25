@@ -54,6 +54,13 @@ export interface ProjectRow {
   progress_manual: number | null;
   tags: string | null;
   category: string | null;
+  /** Owner, sponsor, decision maker: a person id, or free text when no person matches (spec §4.1). */
+  owner_person_id: string | null;
+  owner_text: string | null;
+  sponsor_person_id: string | null;
+  sponsor_text: string | null;
+  decision_maker_person_id: string | null;
+  decision_maker_text: string | null;
   version: number;
   created_at: string;
   updated_at: string;
@@ -75,6 +82,9 @@ export interface WorkpackageRow {
   sort: number;
   category: string | null;
   human: number | null;
+  /** Optional WP owner (person id or free text); the effective owner falls back to the project owner. */
+  owner_person_id: string | null;
+  owner_text: string | null;
   version: number;
   created_at: string;
   updated_at: string;
@@ -208,6 +218,25 @@ export interface PersonRow {
   deleted_at: string | null;
   deleted_by: string | null;
 }
+
+/** A person as shown next to an entity (owner chips, stakeholder lists). */
+export interface PersonOut {
+  person_id: string;
+  name: string;
+  initials: string;
+}
+/** A person-or-text field (owner, sponsor, decision maker) as returned to clients. */
+export type PersonRefOut = PersonOut | { text: string } | null;
+
+/** Non-blocking notice on a write result (e.g. a project created as idea because active preconditions are missing). */
+export interface WriteWarning {
+  code: string;
+  message: string;
+  fields?: string[];
+}
+
+/** Event with the human behind it joined in, for history display ("mcp:Claude for Jane Doe"). */
+export type EventOut = EventRow & { person_name: string | null };
 
 /** Identity resolved by the auth layer for a request. */
 export type Identity = { kind: "user"; email: string } | { kind: "service"; clientId: string };

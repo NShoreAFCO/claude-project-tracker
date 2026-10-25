@@ -10,7 +10,9 @@ import { writeContext, appendContext, deleteContext } from "../data/context-writ
 import { search } from "../data/search";
 import { upsertMilestone } from "../data/milestones";
 import { HUMAN_DEFAULT, PROJECT_CATEGORIES, WP_CATEGORIES } from "../data/categories";
-import { ValidationError } from "../data/util";
+import { ConflictError, ValidationError } from "../data/util";
+import { listPersons, upsertPerson } from "../data/persons";
+import type { PersonRow } from "../types";
 
 const projectStatusSchema = z.enum(["idea", "active", "on_hold", "done", "abandoned"]);
 
@@ -44,6 +46,35 @@ function optionalDate(description: string) {
   return dateSchema.describe(description);
 }
 
+/** Person-or-text field (owner, sponsor, decision maker). */
+function personRef(description: string) {
+  return z
+    .string()
+    .max(200)
+    .nullable()
+    .optional()
+    .describe(
+      `${description} Give a person id or email (see list_persons); an exact name also matches, other text is stored as free text. null clears.`,
+    );
+}
+
+/**
+ * Accepted on every write tool for interface parity with REST and the hook, and ignored here: an MCP write is
+ * always attributed to the OAuth login's person, so an agent cannot act as someone else. The MCP server strips it.
+ */
+const onBehalfOf = z
+  .string()
+  .optional()
+  .describe(
+    "Ignored for MCP calls: writes are always recorded for your OAuth login's person. Only service-token callers (hook, scripts) can act on behalf of a person.",
+  );
+
+/** Person as returned to agents: no phone or contact note (they need ids, names and emails to reference people). */
+function personForAgent(p: PersonRow) {
+  const { phone: _phone, contact_note: _note, deleted_at: _d, deleted_by: _db, ...rest } = p;
+  return rest;
+}
+
 function omitUndefined<T extends Record<string, unknown>>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T;
 }
@@ -72,6 +103,7 @@ export function registerTools(reg: Reg): void {
           .enum([...PROJECT_CATEGORIES, "none"])
           .optional()
           .describe("Filter by project category ('none' = uncategorised)."),
+        owner: z.string().optional().describe("Filter by owner (person id, see list_persons)."),
       }),
       readOnly: true,
     },
@@ -80,12 +112,14 @@ export function registerTools(reg: Reg): void {
         status: args.status,
         tag: args.tag,
         category: args.category,
+        owner: args.owner,
       });
 
       return projects.map((project) => ({
         id: project.id,
         title: project.title,
         status: project.status,
+        owner_initials: project.owner_initials,
         progress: project.progress,
         category: project.category,
         wp_counts: project.wp_counts,
@@ -113,13 +147,16 @@ export function registerTools(reg: Reg): void {
     "create_project",
     {
       title: "Create project",
-      description: "Create a project.",
+      description:
+        "Create a project. Fill owner (defaults to you, the logged-in person), and sponsor / decision_maker when known. Status active requires an owner: with status omitted and no owner the project starts as idea and the result carries a warning; an explicit status active without owner fails.",
       inputSchema: z.object({
         title: z.string().min(1).describe("Set the project title."),
         id: z.string().optional().describe("Set an optional project identifier (slug)."),
         summary: optionalText("Set a short project summary."),
         description_md: optionalText("Set the Markdown description."),
-        status: projectStatusSchema.optional().describe("Set the initial project status."),
+        status: projectStatusSchema
+          .optional()
+          .describe("Set the initial project status (default active when an owner is known, else idea)."),
         origin: projectOriginSchema.optional().describe("Set the project origin."),
         repo_url: optionalText("Set the repository URL."),
         local_path: optionalText("Set the local repository path."),
@@ -128,6 +165,10 @@ export function registerTools(reg: Reg): void {
         target_date: optionalDate("Set the target date as YYYY-MM-DD."),
         tags: z.array(z.string()).optional().describe("Set the project tags."),
         category: projectCategorySchema.nullable().optional().describe("Set the project category."),
+        owner: personRef("Set the project owner (accountable person; defaults to you)."),
+        sponsor: personRef("Set the sponsor."),
+        decision_maker: personRef("Set the decision maker (decides at gates)."),
+        on_behalf_of: onBehalfOf,
       }),
     },
     async (args, tc) =>
@@ -150,6 +191,9 @@ export function registerTools(reg: Reg): void {
           progress_manual: null,
           tags: args.tags ?? [],
           category: args.category ?? null,
+          owner: args.owner,
+          sponsor: args.sponsor,
+          decision_maker: args.decision_maker,
         },
         tc.by,
       ),
@@ -159,7 +203,7 @@ export function registerTools(reg: Reg): void {
     "update_project",
     {
       title: "Update project",
-      description: "Update project fields.",
+      description: "Update project fields. Setting status active requires an owner (set owner in the same patch if missing).",
       inputSchema: z.object({
         id: z.string().describe("Identify the project."),
         patch: z
@@ -179,9 +223,13 @@ export function registerTools(reg: Reg): void {
             progress_manual: z.number().min(0).max(100).nullable().optional().describe("Set manual progress from 0 to 100."),
             tags: z.array(z.string()).optional().describe("Set the project tags."),
             category: projectCategorySchema.nullable().optional().describe("Set the project category."),
+            owner: personRef("Set the project owner."),
+            sponsor: personRef("Set the sponsor."),
+            decision_maker: personRef("Set the decision maker."),
           })
           .describe("Provide the fields to update."),
         expected_version: z.number().int().optional().describe("Require the expected project version."),
+        on_behalf_of: onBehalfOf,
       }),
     },
     async (args, tc) => updateProject(tc.db, args.id, omitUndefined(args.patch), tc.by, args.expected_version),
@@ -191,7 +239,7 @@ export function registerTools(reg: Reg): void {
     "upsert_workpackage",
     {
       title: "Upsert work package",
-      description: `Create or update a work package. category: ${WP_CATEGORIES.join("|")} (null = inherit from the parent). WPs with human=true${HUMAN_DEFAULT.length ? ` (default for ${HUMAN_DEFAULT.join(", ")})` : ""} are done off the computer: log progress the user reports, and set them to done only when the user says so.`,
+      description: `Create or update a work package. category: ${WP_CATEGORIES.join("|")} (null = inherit from the parent). WPs with human=true${HUMAN_DEFAULT.length ? ` (default for ${HUMAN_DEFAULT.join(", ")})` : ""} are done off the computer: log progress the user reports, and set them to done only when the user says so. Set owner when someone other than the project owner is responsible (effective_owner falls back to the project owner); priority_stakeholders lists persons to keep informed.`,
       inputSchema: z.object({
         project_id: z.string().describe("Identify the owning project."),
         id: z.string().optional().describe("Identify an existing work package (omit to create)."),
@@ -208,7 +256,17 @@ export function registerTools(reg: Reg): void {
         sort: z.number().int().optional().describe("Set the sort order."),
         category: wpCategorySchema.nullable().optional().describe("Set the work category (null = inherit)."),
         human: z.boolean().nullable().optional().describe("Mark as human (off-computer) work; null = default from category."),
+        owner: personRef("Set the work package owner (empty = project owner)."),
+        priority_stakeholders: z
+          .array(z.string())
+          .max(50)
+          .nullable()
+          .optional()
+          .describe(
+            "Replace the priority stakeholders: person ids, emails or exact names of existing persons (add new ones with upsert_person). [] clears.",
+          ),
         expected_version: z.number().int().optional().describe("Require the expected work package version."),
+        on_behalf_of: onBehalfOf,
       }),
     },
     async (args, tc) => {
@@ -235,6 +293,7 @@ export function registerTools(reg: Reg): void {
         requires: z.array(z.string()).optional().describe("Set the work packages that close this milestone."),
         unlocks: z.array(z.string()).optional().describe("Set the work packages this milestone unlocks."),
         expected_version: z.number().int().optional().describe("Require the expected milestone version."),
+        on_behalf_of: onBehalfOf,
       }),
     },
     async (args, tc) => {
@@ -252,6 +311,7 @@ export function registerTools(reg: Reg): void {
         kind: entityKindSchema.describe("Select the entity kind."),
         id: z.string().describe("Identify the entity."),
         confirm: z.literal(true).describe("Must be true."),
+        on_behalf_of: onBehalfOf,
       }),
       destructive: true,
     },
@@ -275,6 +335,7 @@ export function registerTools(reg: Reg): void {
         workpackage_id: optionalText("Link a work package."),
         progress: z.number().min(0).max(100).optional().describe("Set progress from 0 to 100."),
         session_id: optionalText("Link the session identifier."),
+        on_behalf_of: onBehalfOf,
       }),
     },
     async (args, tc) => logProgress(tc.db, args, tc.by),
@@ -296,6 +357,7 @@ export function registerTools(reg: Reg): void {
         status: branchStatusSchema.optional().describe("Set the branch status."),
         note: optionalText("Set a branch note."),
         workpackage_id: optionalText("Link a work package."),
+        on_behalf_of: onBehalfOf,
       }),
     },
     async (args, tc) => {
@@ -323,6 +385,7 @@ export function registerTools(reg: Reg): void {
           .min(1)
           .max(20)
           .describe("Provide between 1 and 20 scores."),
+        on_behalf_of: onBehalfOf,
       }),
     },
     async (args, tc) =>
@@ -345,6 +408,7 @@ export function registerTools(reg: Reg): void {
         copilot_prompts: z.number().int().optional().describe("Set the Copilot prompt count."),
         note: optionalText("Add a usage note."),
         workpackage_id: optionalText("Link a work package."),
+        on_behalf_of: onBehalfOf,
       }),
     },
     async (args, tc) => {
@@ -462,6 +526,7 @@ export function registerTools(reg: Reg): void {
         slug: optionalText("Set the document slug."),
         expected_version: z.number().int().optional().describe("Require the expected document version."),
         pinned: z.boolean().optional().describe("Set whether the document is pinned."),
+        on_behalf_of: onBehalfOf,
       }),
     },
     async (args, tc) => {
@@ -486,6 +551,7 @@ export function registerTools(reg: Reg): void {
         text: z.string().min(1).describe("Set the text to append."),
         heading: optionalText("Set the appended section heading."),
         title: optionalText("Set the title when creating a document."),
+        on_behalf_of: onBehalfOf,
       }),
     },
     async (args, tc) => {
@@ -532,6 +598,7 @@ export function registerTools(reg: Reg): void {
       inputSchema: z.object({
         doc_id: z.string().describe("Identify the context document."),
         confirm: z.literal(true).describe("Must be true."),
+        on_behalf_of: onBehalfOf,
       }),
       destructive: true,
     },
@@ -541,6 +608,54 @@ export function registerTools(reg: Reg): void {
       }
 
       return deleteContext(tc.db, args.doc_id, tc.by);
+    },
+  );
+
+  reg(
+    "list_persons",
+    {
+      title: "List persons",
+      description:
+        "List persons (users and stakeholders) to find the id or email for owner, sponsor, decision_maker and priority_stakeholders. Phone numbers and contact notes are not included.",
+      inputSchema: z.object({
+        users_only: z.boolean().optional().describe("Only persons who can log in."),
+      }),
+      readOnly: true,
+    },
+    async (args, tc) => (await listPersons(tc.db, { users_only: args.users_only })).map(personForAgent),
+  );
+
+  reg(
+    "upsert_person",
+    {
+      title: "Upsert person",
+      description:
+        "Add a stakeholder (customer contact, supplier, colleague without login) or edit a person. Check list_persons first to avoid duplicates. Agents cannot grant or change access roles, and cannot change the email of a user.",
+      inputSchema: z.object({
+        id: z.string().optional().describe("Identify an existing person (omit to create)."),
+        name: optionalText("Set the full name (required when creating)."),
+        display_name: optionalText("Set a short form; initials derive from it."),
+        company: optionalText("Set the company or organisation."),
+        email: optionalText("Set the email (unique)."),
+        phone: optionalText("Set the phone number."),
+        contact_note: optionalText("Set a contact note."),
+        internal: z.boolean().optional().describe("Mark as member of the own organisation."),
+        function: optionalText("Set the job role, e.g. customer QA lead (descriptive, not a permission)."),
+        comment: optionalText("Set a comment."),
+        expected_version: z.number().int().optional().describe("Require the expected person version."),
+        on_behalf_of: onBehalfOf,
+      }),
+    },
+    async (args, tc) => {
+      const { expected_version, ...input } = args;
+      try {
+        return personForAgent(await upsertPerson(tc.db, omitUndefined(input), tc.by, expected_version));
+      } catch (e) {
+        // A version conflict carries the current row; agents get the same trimmed shape as on success.
+        if (e instanceof ConflictError && e.current && typeof e.current === "object" && "phone" in e.current)
+          throw new ConflictError(e.message, personForAgent(e.current as PersonRow));
+        throw e;
+      }
     },
   );
 }
