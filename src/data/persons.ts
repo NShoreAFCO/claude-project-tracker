@@ -183,7 +183,8 @@ async function checkEmailFree(db: D1Database, email: unknown, selfId: string | n
 
 /**
  * Create a person, or update the one named by input.id. undefined keeps a field, null clears it.
- * Agents (MCP, service tokens) never change access roles; role checks per §4.2 arrive with R5.
+ * Agents (MCP, service tokens) never change access roles or a user's email; only admins change a user's email.
+ * Further role checks per §4.2 arrive with R5.
  */
 export async function upsertPerson(
   db: D1Database,
@@ -195,6 +196,10 @@ export async function upsertPerson(
   const existing = input.id ? await getPerson(db, String(input.id)) : null;
   const roleChange = "access_role" in fields && (fields.access_role ?? null) !== (existing?.access_role ?? null);
   if (roleChange && isAgent(by)) throw new ForbiddenError("agents cannot change access roles");
+  // A user's email is their login: whoever controls it inherits the row's role. Only admins (never agents) change it (§4.1).
+  const userEmailChange = !!existing && existing.access_role !== null && "email" in fields && (fields.email ?? null) !== existing.email;
+  if (userEmailChange && isAgent(by)) throw new ForbiddenError("agents cannot change the email of a user");
+  if (userEmailChange && by.role !== "admin") throw new ForbiddenError("only admins can change the email of a user");
 
   if (existing) {
     if (typeof expectedVersion === "number" && expectedVersion !== existing.version) throw new ConflictError("version conflict", existing);

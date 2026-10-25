@@ -17,6 +17,8 @@ async function whoami(email: string, extraAllowed: string[] = [email.toLowerCase
   return { status: res.status, body: (await res.json()) as { identity: { email: string }; person: PersonRow | null } };
 }
 
+const getPersonRow = async (id: string) => (await db.prepare("SELECT * FROM person WHERE id = ?").bind(id).first<PersonRow>())!;
+
 const personsByEmail = async (email: string) =>
   (await db.prepare("SELECT * FROM person WHERE lower(email) = ?").bind(email.toLowerCase()).all<PersonRow>()).results;
 
@@ -194,6 +196,33 @@ describe("persons and identity", () => {
       expect(e.project_id).toBeNull();
       expect(e.diff_json ?? "").not.toMatch(/erika@example\.com|1234/);
     }
+  });
+
+  it("agent cannot change a user's email", async () => {
+    const user = await ensureUserPerson(db, "lead@example.com");
+    expect(user.access_role).not.toBeNull();
+    for (const agent of [
+      testCaller({ actor: "mcp:Claude", channel: "mcp", role: "admin" }),
+      testCaller({ actor: "hook:claude-code", channel: "service", role: "editor" }),
+    ]) {
+      await expect(upsertPerson(db, { id: user.id, email: "intruder@example.com" }, agent)).rejects.toBeInstanceOf(ForbiddenError);
+      await expect(upsertPerson(db, { id: user.id, email: null }, agent)).rejects.toBeInstanceOf(ForbiddenError);
+    }
+    // other fields of a user, and the email of a stakeholder, stay editable for agents
+    const agent = testCaller({ actor: "mcp:Claude", channel: "mcp", role: "admin" });
+    expect((await upsertPerson(db, { id: user.id, function: "Team lead", email: "LEAD@example.com" }, agent)).function).toBe("Team lead");
+    const stake = await upsertPerson(db, { name: "Outside Contact" }, testCaller());
+    expect((await upsertPerson(db, { id: stake.id, email: "contact@example.org" }, agent)).email).toBe("contact@example.org");
+    expect((await getPersonRow(user.id)).email).toBe("lead@example.com");
+  });
+
+  it("editor cannot change a user's email; admin can", async () => {
+    const user = await ensureUserPerson(db, "member@example.com");
+    const editor = testCaller({ actor: "user:editor@example.com", channel: "dashboard", role: "editor" });
+    const admin = testCaller({ actor: "user:admin@example.com", channel: "dashboard", role: "admin" });
+    await expect(upsertPerson(db, { id: user.id, email: "member2@example.com" }, editor)).rejects.toBeInstanceOf(ForbiddenError);
+    expect((await getPersonRow(user.id)).email).toBe("member@example.com");
+    expect((await upsertPerson(db, { id: user.id, email: "member2@example.com" }, admin)).email).toBe("member2@example.com");
   });
 
   it("listPersons filters users and deleted rows", async () => {
