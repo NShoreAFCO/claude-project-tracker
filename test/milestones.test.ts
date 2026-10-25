@@ -134,6 +134,7 @@ describe("milestones", () => {
     const { p, m } = await setup();
     await deleteEntity(db, "milestone", m.id, A);
     expect(await listMilestones(db, p.id)).toEqual([]);
-    expect(await db.prepare("SELECT COUNT(*) AS n FROM milestone_link WHERE milestone_id = ?").bind(m.id).first("n")).toBe(0);
+    // soft delete (F10): the links stay, so a restore brings the milestone back as it was
+    expect(await db.prepare("SELECT COUNT(*) AS n FROM milestone_link WHERE milestone_id = ?").bind(m.id).first("n")).toBe(3);
   });
 });

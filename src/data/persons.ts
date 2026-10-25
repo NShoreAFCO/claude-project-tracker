@@ -4,6 +4,7 @@ import { isAgent } from "../auth/caller";
 import {
   ConflictError,
   ForbiddenError,
+  LIVE,
   NotFoundError,
   ValidationError,
   diffFields,
@@ -37,7 +38,7 @@ type PersonField = (typeof PERSON_FIELDS)[number];
  * (spec §4.1): they show up as "[changed]" (null where the field is empty), so history still shows that
  * they changed.
  */
-const REDACTED_FIELDS: readonly string[] = ["email", "phone", "contact_note", "comment"];
+export const REDACTED_FIELDS: readonly string[] = ["email", "phone", "contact_note", "comment"];
 const REDACTED = "[changed]";
 function personEventDiff(before: Record<string, unknown> | null, after: Record<string, unknown>): Diff {
   const diff = diffFields(before, after, PERSON_FIELDS);
@@ -52,8 +53,9 @@ export type PersonRef = { person_id: string | null; text: string | null };
 
 const roleFor = (email: string): Role => (POLICY.admins.includes(email) ? "admin" : POLICY.default_role);
 
+/** A live person (404 for a person in the trash). */
 export async function getPerson(db: D1Database, id: string): Promise<PersonRow> {
-  const p = await db.prepare("SELECT * FROM person WHERE id = ?").bind(id).first<PersonRow>();
+  const p = await db.prepare(`SELECT * FROM person WHERE id = ? AND ${LIVE()}`).bind(id).first<PersonRow>();
   if (!p) throw new NotFoundError(`person ${id} not found`);
   return p;
 }
@@ -69,11 +71,13 @@ async function findByEmail(db: D1Database, email: string): Promise<PersonRow | n
 /**
  * The person behind an allow-listed login email, created on first use (spec §4.1): name = local part,
  * internal, role admin when listed in policy.admins, else policy.default_role. A stakeholder row with the
- * same email becomes the user; if it has no access role yet it gets one now.
+ * same email becomes the user; if it has no access role yet it gets one now. A person in the trash is a
+ * deactivated login (403) until an admin restores it; no second person is created for the email.
  */
 export async function ensureUserPerson(db: D1Database, email: string): Promise<PersonRow> {
   const addr = email.trim().toLowerCase();
   let p = await findByEmail(db, addr);
+  if (p?.deleted_at) throw new ForbiddenError("person deactivated");
   if (!p) {
     const ts = now();
     const id = newId();
@@ -160,14 +164,14 @@ export async function personRefInput(
   return resolvePersonRef(db, v);
 }
 
-/** Chip data for the given person ids (deleted persons included: they still own history). */
+/** Chip data for the given person ids; persons in the trash are left out (events keep their name via person_name). */
 export async function personOuts(db: D1Database, ids: Iterable<string | null | undefined>): Promise<Map<string, PersonOut>> {
   const want = [...new Set([...ids].filter((x): x is string => !!x))];
   const out = new Map<string, PersonOut>();
   for (let i = 0; i < want.length; i += 90) {
     const chunk = want.slice(i, i + 90);
     const { results } = await db
-      .prepare(`SELECT id, name, display_name FROM person WHERE id IN (${chunk.map(() => "?").join(", ")})`)
+      .prepare(`SELECT id, name, display_name FROM person WHERE id IN (${chunk.map(() => "?").join(", ")}) AND ${LIVE()}`)
       .bind(...chunk)
       .all<Pick<PersonRow, "id" | "name" | "display_name">>();
     for (const p of results) out.set(p.id, { person_id: p.id, name: p.name, initials: initials(p) });
@@ -175,7 +179,7 @@ export async function personOuts(db: D1Database, ids: Iterable<string | null | u
   return out;
 }
 
-/** Client shape of a person-or-text field. A dangling person id (purged person) reads as null. */
+/** Client shape of a person-or-text field. A person in the trash or purged reads as null. */
 export function personRefOut(personId: string | null, text: string | null, people: Map<string, PersonOut>): PersonRefOut {
   if (personId) return people.get(personId) ?? null;
   return text ? { text } : null;

@@ -24,6 +24,12 @@ export class ConflictError extends Error {
 }
 
 export const now = (): string => new Date().toISOString();
+
+/**
+ * SQL condition "row is not in the trash" (spec F10) for project, workpackage, milestone, context_doc and
+ * person rows; `alias` is the table alias, if the query uses one. Every read of those tables carries it.
+ */
+export const LIVE = (alias?: string): string => `${alias ? `${alias}.` : ""}deleted_at IS NULL`;
 export const newId = (): string => crypto.randomUUID();
 
 /** Lower-case ASCII slug: umlauts transliterated, non [a-z0-9] → "-", trimmed, max 60 chars. */

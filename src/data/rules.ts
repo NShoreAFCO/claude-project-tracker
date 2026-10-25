@@ -4,13 +4,15 @@
  */
 import type { Caller, ProjectRow, WorkpackageRow } from "../types";
 import { reachStmts } from "./milestones";
-import { ConflictError, NotFoundError, ValidationError, eventStmtWhere, now, parseJsonArray, type Diff } from "./util";
+import { ConflictError, LIVE, NotFoundError, ValidationError, eventStmtWhere, now, parseJsonArray, type Diff } from "./util";
 
 /** Machine-readable details of a refused transition (the 409 body's `current`). */
 export type TransitionDetails = {
   code: string;
   open_workpackages?: Array<{ id: string; title: string; status: string }>;
   missing?: string[];
+  /** RETENTION: when the item may be purged. */
+  purgeable_at?: string;
 };
 
 /** A status transition that the rules refuse (HTTP 409); `current` says why. */
@@ -97,7 +99,9 @@ export function projectFlags(
 export async function projectLinks(db: D1Database, projectId: string): Promise<{ follows: string[]; followed_by: string[] }> {
   const { results } = await db
     .prepare(
-      "SELECT from_project_id, to_project_id FROM project_link WHERE kind = 'follows' AND (from_project_id = ? OR to_project_id = ?) ORDER BY created_at, from_project_id, to_project_id",
+      `SELECT l.from_project_id, l.to_project_id FROM project_link l
+       JOIN project f ON f.id = l.from_project_id AND ${LIVE("f")} JOIN project t ON t.id = l.to_project_id AND ${LIVE("t")}
+       WHERE l.kind = 'follows' AND (l.from_project_id = ? OR l.to_project_id = ?) ORDER BY l.created_at, l.from_project_id, l.to_project_id`,
     )
     .bind(projectId, projectId)
     .all<{ from_project_id: string; to_project_id: string }>();
@@ -124,12 +128,12 @@ export function parseBlockedBy(v: string | null): BlockedRef | null {
   return { kind: "text", ref: s };
 }
 
-/** `wp:` and `ms:` references must name an existing work package or milestone. */
+/** `wp:` and `ms:` references must name an existing work package or milestone (not one in the trash). */
 export async function checkBlockedRef(db: D1Database, v: unknown): Promise<void> {
   const ref = typeof v === "string" ? parseBlockedBy(v) : null;
   if (!ref || (ref.kind !== "wp" && ref.kind !== "ms")) return;
   const table = ref.kind === "wp" ? "workpackage" : "milestone";
-  if (!(await db.prepare(`SELECT 1 FROM ${table} WHERE id = ?`).bind(ref.ref).first()))
+  if (!(await db.prepare(`SELECT 1 FROM ${table} WHERE id = ? AND ${LIVE()}`).bind(ref.ref).first()))
     throw new ValidationError(`blocked_by: ${table} ${ref.ref} not found (use ext:<text> for external blockers)`);
 }
 
@@ -192,8 +196,8 @@ export async function moveWorkpackages(
   if (typeof toProjectId !== "string" || !toProjectId) throw new ValidationError("to_project_id is required");
   if (fromProjectId === toProjectId) throw new ValidationError("source and target project are the same");
   const [fromRes, toRes, wpRes] = await db.batch([
-    db.prepare("SELECT id, status FROM project WHERE id = ?").bind(fromProjectId),
-    db.prepare("SELECT id, status FROM project WHERE id = ?").bind(toProjectId),
+    db.prepare(`SELECT id, status FROM project WHERE id = ? AND ${LIVE()}`).bind(fromProjectId),
+    db.prepare(`SELECT id, status FROM project WHERE id = ? AND ${LIVE()}`).bind(toProjectId),
     db.prepare("SELECT * FROM workpackage WHERE project_id = ? ORDER BY sort, title").bind(fromProjectId),
   ]);
   const from = fromRes.results[0] as { id: string; status: string } | undefined;
@@ -203,9 +207,10 @@ export async function moveWorkpackages(
   if (isClosedProjectStatus(to.status))
     throw new TransitionError(`target project ${to.id} is ${to.status}; choose an open project`, { code: "TARGET_CLOSED" });
 
+  // All rows, trash included: sub-WPs in the trash move with their parent, so a later restore finds it.
   const all = wpRes.results as WorkpackageRow[];
   const byId = new Map(all.map((w) => [w.id, w]));
-  const unknown = ids.filter((id) => !byId.has(id));
+  const unknown = ids.filter((id) => !byId.has(id) || byId.get(id)!.deleted_at);
   if (unknown.length) throw new ValidationError(`not workpackages of project ${from.id}: ${unknown.join(", ")}`);
   const notOpen = ids.filter((id) => !isOpenWpStatus(byId.get(id)!.status));
   if (notOpen.length)
@@ -255,7 +260,7 @@ export async function moveWorkpackages(
   );
   const guard = `NOT EXISTS (SELECT 1 FROM workpackage gw JOIN json_each(?) gj ON gw.id = gj.key
       WHERE (gw.version != gj.value OR gw.project_id != ?) AND gw.updated_at != ?)
-    AND EXISTS (SELECT 1 FROM project gp WHERE gp.id = ? AND gp.status NOT IN ('done', 'abandoned'))`;
+    AND EXISTS (SELECT 1 FROM project gp WHERE gp.id = ? AND gp.deleted_at IS NULL AND gp.status NOT IN ('done', 'abandoned'))`;
   const g = [versions, from.id, ts, to.id];
 
   const stmts: D1PreparedStatement[] = [];

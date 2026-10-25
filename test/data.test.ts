@@ -270,15 +270,20 @@ describe("context repository", () => {
 });
 
 describe("other writes", () => {
-  it("deleting a WP removes docs of the WP and its descendants", async () => {
+  it("deleting a WP moves docs of the WP and its descendants to the trash", async () => {
     const { p, parent, sub } = await setup();
     await writeContext(db, { owner_kind: "workpackage", owner_id: sub.id, title: "s", content_md: "s" }, A);
     await writeContext(db, { owner_kind: "workpackage", owner_id: parent.id, title: "p", content_md: "p" }, A);
     await writeContext(db, { owner_kind: "project", owner_id: p.id, title: "keep", content_md: "k" }, A);
     await deleteEntity(db, "workpackage", parent.id, A);
-    const left = await db.prepare("SELECT slug FROM context_doc WHERE project_id = ?").bind(p.id).all<{ slug: string }>();
+    const left = await db
+      .prepare("SELECT slug FROM context_doc WHERE project_id = ? AND deleted_at IS NULL")
+      .bind(p.id)
+      .all<{ slug: string }>();
     expect(left.results.map((r) => r.slug)).toEqual(["keep"]);
-    expect(await db.prepare("SELECT COUNT(*) AS n FROM workpackage WHERE project_id = ?").bind(p.id).first("n")).toBe(0);
+    expect(
+      await db.prepare("SELECT COUNT(*) AS n FROM workpackage WHERE project_id = ? AND deleted_at IS NULL").bind(p.id).first("n"),
+    ).toBe(0);
   });
 
   it("link_branch upserts by repo+name", async () => {

@@ -4,7 +4,7 @@ import { listWorkpackagesOut, upsertWorkpackage } from "../data/workpackages";
 import { listMilestones, upsertMilestone } from "../data/milestones";
 import { linkBranch } from "../data/branches";
 import { assignInboxEvent, listEvents, listInbox, logProgress, logTokenCost, setScores } from "../data/logs";
-import { deleteEntity } from "../data/entities";
+import { deleteEntity, deletePreview, listTrash, purgeEntity, restoreEntity, type EntityKind } from "../data/entities";
 import { getContextBundle, listContext, readContext } from "../data/context-read";
 import {
   appendContext,
@@ -146,6 +146,16 @@ route("PATCH", "/api/persons/:id", async ({ db, req, by, params }) => {
   const { expected_version, ...input } = await readJson(req);
   return upsertPerson(db, { ...input, id: params[0] }, by, optNum(expected_version));
 });
+route("DELETE", "/api/persons/:id", async ({ db, by, params }) => deleteEntity(db, "person", params[0], by));
+
+// ---- trash (spec F10): deletes are soft; restore any time, purge (admins) after policy.retention_days
+route("GET", "/api/trash", async ({ db }) => listTrash(db));
+route("POST", "/api/trash/:kind/:id/restore", async ({ db, by, params }) => restoreEntity(db, params[0] as EntityKind, params[1], by));
+route("DELETE", "/api/trash/:kind/:id", async ({ db, by, params }) => purgeEntity(db, params[0] as EntityKind, params[1], by));
+/** What a delete would take along, for the confirm text: {kind, id, title, children: {workpackages, milestones, context_docs}}. */
+route("GET", "/api/delete-preview", async ({ db, url }) =>
+  deletePreview(db, reqStr(url.searchParams.get("kind"), "kind") as EntityKind, reqStr(url.searchParams.get("id"), "id")),
+);
 
 // ---- audit (manual trigger of the hourly export; user identities only, like every /api route)
 route("POST", "/api/audit/run", async ({ env }) => {
@@ -237,6 +247,7 @@ route("PATCH", "/api/context/:id", async ({ db, req, by, params }) => {
       title: typeof b.title === "string" ? b.title : undefined,
       pinned: typeof b.pinned === "boolean" ? b.pinned : undefined,
       sort: optNum(b.sort),
+      status: typeof b.status === "string" ? b.status : undefined,
     },
     by,
   );
@@ -264,6 +275,7 @@ async function bundle(url: URL, db: D1Database): Promise<Response> {
     workpackage_id: url.searchParams.get("workpackage_id") || null,
     branch_id: url.searchParams.get("branch_id") || null,
     max_bytes: optNum(url.searchParams.get("max_bytes")),
+    include_obsolete: url.searchParams.get("include_obsolete") === "true",
   });
   if (url.searchParams.get("format") !== "md") return json(b);
   const name = `context-${url.searchParams.get("branch_id") || url.searchParams.get("workpackage_id") || url.searchParams.get("project_id")}.md`;
@@ -293,7 +305,11 @@ export async function handleApi(request: Request, env: Env, identity: Identity &
         const params = m.slice(1).map(decodeURIComponent);
         const out = await h({ req: request, url, env, db, by, params });
         const created =
-          request.method === "POST" && path !== "/api/context/upload" && !path.endsWith("/assign") && !path.endsWith("/move-workpackages");
+          request.method === "POST" &&
+          path !== "/api/context/upload" &&
+          !path.endsWith("/assign") &&
+          !path.endsWith("/move-workpackages") &&
+          !path.startsWith("/api/trash/");
         return json(out, created ? 201 : 200);
       }
     }

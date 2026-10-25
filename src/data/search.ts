@@ -1,4 +1,4 @@
-import { ValidationError } from "./util";
+import { LIVE, ValidationError } from "./util";
 
 export type SearchHit = {
   kind: "project" | "workpackage" | "milestone" | "context_doc";
@@ -31,23 +31,23 @@ export async function search(db: D1Database, query: string, limit = 30): Promise
   const [projects, wps, docs, ms] = await db.batch([
     db
       .prepare(
-        "SELECT id, title, summary, description_md FROM project WHERE title LIKE ?1 ESCAPE '\\' OR summary LIKE ?1 ESCAPE '\\' OR description_md LIKE ?1 ESCAPE '\\' LIMIT ?2",
+        `SELECT id, title, summary, description_md FROM project WHERE ${LIVE()} AND (title LIKE ?1 ESCAPE '\\' OR summary LIKE ?1 ESCAPE '\\' OR description_md LIKE ?1 ESCAPE '\\') LIMIT ?2`,
       )
       .bind(like, lim),
     db
       .prepare(
-        "SELECT id, project_id, title, description_md, blocked_by FROM workpackage WHERE title LIKE ?1 ESCAPE '\\' OR description_md LIKE ?1 ESCAPE '\\' OR blocked_by LIKE ?1 ESCAPE '\\' LIMIT ?2",
+        `SELECT id, project_id, title, description_md, blocked_by FROM workpackage WHERE ${LIVE()} AND (title LIKE ?1 ESCAPE '\\' OR description_md LIKE ?1 ESCAPE '\\' OR blocked_by LIKE ?1 ESCAPE '\\') LIMIT ?2`,
       )
       .bind(like, lim),
     // Only a 400-char window around the hit is transferred, never the full content.
     db
       .prepare(
-        "SELECT id, project_id, title, CASE WHEN instr(lower(content_md), lower(?3)) > 0 THEN substr(content_md, max(1, instr(lower(content_md), lower(?3)) - 200), 400) ELSE '' END AS window FROM context_doc WHERE title LIKE ?1 ESCAPE '\\' OR content_md LIKE ?1 ESCAPE '\\' LIMIT ?2",
+        `SELECT id, project_id, title, CASE WHEN instr(lower(content_md), lower(?3)) > 0 THEN substr(content_md, max(1, instr(lower(content_md), lower(?3)) - 200), 400) ELSE '' END AS window FROM context_doc WHERE ${LIVE()} AND (title LIKE ?1 ESCAPE '\\' OR content_md LIKE ?1 ESCAPE '\\') LIMIT ?2`,
       )
       .bind(like, lim, q),
     db
       .prepare(
-        "SELECT id, project_id, title, description_md FROM milestone WHERE title LIKE ?1 ESCAPE '\\' OR description_md LIKE ?1 ESCAPE '\\' LIMIT ?2",
+        `SELECT id, project_id, title, description_md FROM milestone WHERE ${LIVE()} AND (title LIKE ?1 ESCAPE '\\' OR description_md LIKE ?1 ESCAPE '\\') LIMIT ?2`,
       )
       .bind(like, lim),
   ]);

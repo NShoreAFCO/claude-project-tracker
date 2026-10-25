@@ -1,5 +1,5 @@
 import type { BranchRow, Caller } from "../types";
-import { NotFoundError, ValidationError, diffFields, eventStmt, newId, now } from "./util";
+import { LIVE, NotFoundError, ValidationError, diffFields, eventStmt, newId, now } from "./util";
 
 export type BranchInput = {
   repo: string;
@@ -43,11 +43,11 @@ export async function linkBranch(db: D1Database, projectId: string, input: Branc
   if (input.status !== undefined && !STATUSES.includes(input.status))
     throw new ValidationError(`status must be one of ${STATUSES.join("|")}`);
 
-  const project = await db.prepare("SELECT id FROM project WHERE id = ?").bind(projectId).first();
+  const project = await db.prepare(`SELECT id FROM project WHERE id = ? AND ${LIVE()}`).bind(projectId).first();
   if (!project) throw new NotFoundError(`project ${projectId} not found`);
   if (input.workpackage_id) {
     const wp = await db
-      .prepare("SELECT project_id FROM workpackage WHERE id = ?")
+      .prepare(`SELECT project_id FROM workpackage WHERE id = ? AND ${LIVE()}`)
       .bind(input.workpackage_id)
       .first<{ project_id: string }>();
     if (!wp || wp.project_id !== projectId)

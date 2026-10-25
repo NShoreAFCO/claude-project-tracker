@@ -1,8 +1,10 @@
-import type { Caller, ContextDocRow, ContextRevisionRow } from "../types";
+import type { Caller, ContextDocRow, ContextDocStatus, ContextRevisionRow } from "../types";
 import { CONTEXT_DOC_MAX_BYTES, CONTEXT_OWNER_MAX_BYTES, CONTEXT_REVISIONS_KEPT } from "../types";
 import { resolveOwner, type DocMeta, type OwnerRef } from "./context-read";
+import { deleteEntity } from "./entities";
 import {
   ConflictError,
+  LIVE,
   NotFoundError,
   TooLargeError,
   ValidationError,
@@ -19,16 +21,18 @@ const SOURCES: readonly Source[] = ["upload", "paste", "claude", "sync"];
 
 const kb = (n: number) => `${Math.round(n / 1024)} KB`;
 const label = (d: Pick<ContextDocRow, "owner_kind" | "owner_id" | "slug">) => `${d.owner_kind}:${d.owner_id}/${d.slug}`;
-const stripContent = ({ content_md: _c, ...meta }: ContextDocRow): DocMeta => meta;
+const stripContent = ({ content_md: _c, deleted_at: _d, deleted_by: _b, ...meta }: ContextDocRow): DocMeta => meta;
+const DOC_STATUSES: readonly ContextDocStatus[] = ["draft", "released", "obsolete"];
 
 function checkDocSize(bytes: number): void {
   if (bytes > CONTEXT_DOC_MAX_BYTES)
     throw new TooLargeError(`document is ${kb(bytes)}; the limit is ${kb(CONTEXT_DOC_MAX_BYTES)} per document`);
 }
 
+/** Bytes held by an owner's docs; docs in the trash do not count. */
 async function ownerBytes(db: D1Database, ref: OwnerRef, excludeId?: string): Promise<number> {
   const r = await db
-    .prepare("SELECT COALESCE(SUM(bytes), 0) AS total FROM context_doc WHERE owner_kind = ? AND owner_id = ? AND id != ?")
+    .prepare(`SELECT COALESCE(SUM(bytes), 0) AS total FROM context_doc WHERE owner_kind = ? AND owner_id = ? AND id != ? AND ${LIVE()}`)
     .bind(ref.owner_kind, ref.owner_id, excludeId ?? "")
     .first<{ total: number }>();
   return r?.total ?? 0;
@@ -58,7 +62,7 @@ function pruneStmt(db: D1Database, docId: string): D1PreparedStatement {
 }
 
 async function getDoc(db: D1Database, id: string): Promise<ContextDocRow> {
-  const d = await db.prepare("SELECT * FROM context_doc WHERE id = ?").bind(id).first<ContextDocRow>();
+  const d = await db.prepare(`SELECT * FROM context_doc WHERE id = ? AND ${LIVE()}`).bind(id).first<ContextDocRow>();
   if (!d) throw new NotFoundError(`context document ${id} not found`);
   return d;
 }
@@ -141,7 +145,7 @@ export async function writeContext(
   const base = slugify(args.slug || title);
   const find = (slug: string) =>
     db
-      .prepare("SELECT * FROM context_doc WHERE owner_kind = ? AND owner_id = ? AND slug = ?")
+      .prepare(`SELECT * FROM context_doc WHERE owner_kind = ? AND owner_id = ? AND slug = ? AND ${LIVE()}`)
       .bind(owner.owner_kind, owner.owner_id, slug)
       .first<ContextDocRow>();
 
@@ -230,19 +234,19 @@ export async function appendContext(
 
   if ("doc_id" in args && args.doc_id) {
     const d = await db
-      .prepare("SELECT owner_kind, owner_id, project_id FROM context_doc WHERE id = ?")
+      .prepare(`SELECT owner_kind, owner_id, project_id FROM context_doc WHERE id = ? AND ${LIVE()}`)
       .bind(args.doc_id)
       .first<OwnerRef & { project_id: string }>();
     if (!d) throw new NotFoundError(`context document ${args.doc_id} not found`);
     owner = d;
-    keySql = "id = ?";
+    keySql = "id = ? AND deleted_at IS NULL";
     keyArgs = [args.doc_id];
   } else {
     const ref = args as OwnerRef & { slug: string };
     const info = await resolveOwner(db, ref);
     const slug = slugify(ref.slug ?? "");
     owner = info;
-    keySql = "owner_kind = ? AND owner_id = ? AND slug = ?";
+    keySql = "owner_kind = ? AND owner_id = ? AND slug = ? AND deleted_at IS NULL";
     keyArgs = [info.owner_kind, info.owner_id, slug];
     pre.push(
       db
@@ -254,7 +258,7 @@ export async function appendContext(
   }
 
   // Same guard on every statement: doc cap and owner cap, evaluated inside the transaction.
-  const guard = `${keySql} AND bytes + ? <= ? AND (SELECT COALESCE(SUM(bytes), 0) FROM context_doc WHERE owner_kind = ? AND owner_id = ?) + ? <= ?`;
+  const guard = `${keySql} AND bytes + ? <= ? AND (SELECT COALESCE(SUM(bytes), 0) FROM context_doc WHERE owner_kind = ? AND owner_id = ? AND deleted_at IS NULL) + ? <= ?`;
   const guardArgs = [...keyArgs, add, CONTEXT_DOC_MAX_BYTES, owner.owner_kind, owner.owner_id, add, CONTEXT_OWNER_MAX_BYTES];
 
   const stmts = [
@@ -303,28 +307,16 @@ export async function appendContext(
   return doc;
 }
 
-/** Delete a doc. Revisions cascade, so the previous content is kept in the event diff for the audit log. */
-export async function deleteContext(db: D1Database, docId: string, by: Caller): Promise<{ deleted: string }> {
-  const d = await getDoc(db, docId);
-  await db.batch([
-    db.prepare("DELETE FROM context_doc WHERE id = ?").bind(docId),
-    eventStmt(db, {
-      by,
-      project_id: d.project_id,
-      entity: "context_doc",
-      entity_id: docId,
-      action: "delete",
-      summary: label(d),
-      diff: { content_md: [d.content_md, null] },
-    }),
-  ]);
-  return { deleted: docId };
+/** Move a doc to the trash (spec F10); the delete event keeps its full content. Restore with restoreEntity. */
+export async function deleteContext(db: D1Database, docId: string, by: Caller): Promise<{ deleted: string; children: number }> {
+  return deleteEntity(db, "context_doc", docId, by);
 }
 
 export async function listRevisions(
   db: D1Database,
   docId: string,
 ): Promise<Array<Omit<ContextRevisionRow, "content_md"> & { bytes: number }>> {
+  await getDoc(db, docId);
   const { results } = await db
     .prepare(
       "SELECT id, doc_id, version, changed_at, changed_by, length(CAST(content_md AS BLOB)) AS bytes FROM context_revision WHERE doc_id = ? ORDER BY id DESC",
@@ -335,7 +327,10 @@ export async function listRevisions(
 }
 
 export async function getRevision(db: D1Database, revisionId: number): Promise<ContextRevisionRow> {
-  const r = await db.prepare("SELECT * FROM context_revision WHERE id = ?").bind(revisionId).first<ContextRevisionRow>();
+  const r = await db
+    .prepare(`SELECT r.* FROM context_revision r JOIN context_doc d ON d.id = r.doc_id AND ${LIVE("d")} WHERE r.id = ?`)
+    .bind(revisionId)
+    .first<ContextRevisionRow>();
   if (!r) throw new NotFoundError(`revision ${revisionId} not found`);
   return r;
 }
@@ -355,19 +350,32 @@ export async function restoreRevision(
   return replaceContent(db, existing, { content_md: rev.content_md }, by, "restore", ` (restored v${rev.version})`);
 }
 
-/** Title / pin / sort only: no revision, no version bump. */
+/**
+ * Title / pin / sort / document status only: no revision, no version bump. Becoming `released` stamps
+ * released_by (the actor) and released_at; other status changes keep the last release stamp.
+ */
 export async function setContextMeta(
   db: D1Database,
   docId: string,
-  patch: { title?: string; pinned?: boolean; sort?: number },
+  patch: { title?: string; pinned?: boolean; sort?: number; status?: string },
   by: Caller,
 ): Promise<ContextDocRow> {
   const d = await getDoc(db, docId);
+  if (patch.status !== undefined && !DOC_STATUSES.includes(patch.status as ContextDocStatus))
+    throw new ValidationError(`status must be one of ${DOC_STATUSES.join("|")}`);
   const title = patch.title?.trim() || d.title;
   const pinned = patch.pinned === undefined ? d.pinned : patch.pinned ? 1 : 0;
   const sort = typeof patch.sort === "number" && Number.isFinite(patch.sort) ? Math.trunc(patch.sort) : d.sort;
+  const status = (patch.status as ContextDocStatus | undefined) ?? d.status;
+  const release = status === "released" && d.status !== "released";
+  const releasedBy = release ? by.actor : d.released_by;
+  const releasedAt = release ? now() : d.released_at;
   await db.batch([
-    db.prepare("UPDATE context_doc SET title = ?, pinned = ?, sort = ? WHERE id = ?").bind(title, pinned, sort, docId),
+    db
+      .prepare(
+        `UPDATE context_doc SET title = ?, pinned = ?, sort = ?, status = ?, released_by = ?, released_at = ? WHERE id = ? AND ${LIVE()}`,
+      )
+      .bind(title, pinned, sort, status, releasedBy, releasedAt, docId),
     eventStmt(db, {
       by,
       project_id: d.project_id,
@@ -381,6 +389,9 @@ export async function setContextMeta(
             ["title", d.title, title],
             ["pinned", d.pinned, pinned],
             ["sort", d.sort, sort],
+            ["status", d.status, status],
+            ["released_by", d.released_by, releasedBy],
+            ["released_at", d.released_at, releasedAt],
           ] as const
         )
           .filter(([, a, b]) => a !== b)

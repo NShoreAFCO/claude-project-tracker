@@ -27,6 +27,7 @@ import {
 } from "./rules";
 import {
   ConflictError,
+  LIVE,
   NotFoundError,
   ValidationError,
   diffFields,
@@ -156,7 +157,8 @@ const derivedProgress = (wps: WorkpackageRow[]): number => computeProjectProgres
  */
 export async function toProjectOut(db: D1Database, row: ProjectRow, wps?: WorkpackageRow[]): Promise<ProjectOut> {
   const people = await personOuts(db, [row.owner_person_id, row.sponsor_person_id, row.decision_maker_person_id]);
-  const list = wps ?? (await db.prepare("SELECT * FROM workpackage WHERE project_id = ?").bind(row.id).all<WorkpackageRow>()).results;
+  const list =
+    wps ?? (await db.prepare(`SELECT * FROM workpackage WHERE project_id = ? AND ${LIVE()}`).bind(row.id).all<WorkpackageRow>()).results;
   return {
     ...row,
     tags: parseJsonArray(row.tags),
@@ -200,7 +202,7 @@ export function setBeforeCloseWriteForTesting(f: (() => Promise<void>) | null): 
 }
 
 export async function getProjectRow(db: D1Database, id: string): Promise<ProjectRow> {
-  const p = await db.prepare("SELECT * FROM project WHERE id = ?").bind(id).first<ProjectRow>();
+  const p = await db.prepare(`SELECT * FROM project WHERE id = ? AND ${LIVE()}`).bind(id).first<ProjectRow>();
   if (!p) throw new NotFoundError(`project ${id} not found`);
   return p;
 }
@@ -211,14 +213,14 @@ export async function listProjects(
 ): Promise<ProjectCard[]> {
   const [projects, wps, branches, docs, events, ms] = await db.batch([
     filter.status
-      ? db.prepare("SELECT * FROM project WHERE status = ? ORDER BY updated_at DESC").bind(filter.status)
-      : db.prepare("SELECT * FROM project ORDER BY updated_at DESC"),
-    db.prepare("SELECT * FROM workpackage"),
+      ? db.prepare(`SELECT * FROM project WHERE status = ? AND ${LIVE()} ORDER BY updated_at DESC`).bind(filter.status)
+      : db.prepare(`SELECT * FROM project WHERE ${LIVE()} ORDER BY updated_at DESC`),
+    db.prepare(`SELECT * FROM workpackage WHERE ${LIVE()}`),
     db.prepare("SELECT project_id, COUNT(*) AS n FROM branch WHERE status = 'open' GROUP BY project_id"),
-    db.prepare("SELECT project_id, COUNT(*) AS n FROM context_doc GROUP BY project_id"),
+    db.prepare(`SELECT project_id, COUNT(*) AS n FROM context_doc WHERE ${LIVE()} GROUP BY project_id`),
     db.prepare("SELECT project_id, MAX(ts) AS ts FROM event WHERE project_id IS NOT NULL GROUP BY project_id"),
     db.prepare(
-      `SELECT m.project_id, m.id, m.title, m.due_date FROM milestone m WHERE NOT (${QUALIFIES}) ORDER BY m.due_date IS NULL, m.due_date, m.sort, m.title`,
+      `SELECT m.project_id, m.id, m.title, m.due_date FROM milestone m WHERE ${LIVE("m")} AND NOT (${QUALIFIES}) ORDER BY m.due_date IS NULL, m.due_date, m.sort, m.title`,
     ),
   ]);
   const nextMs = new Map<string, { id: string; title: string; due_date: string | null }>();
@@ -275,7 +277,7 @@ export async function listProjects(
 export async function getProjectDetail(db: D1Database, id: string) {
   const project = await getProjectRow(db, id);
   const [wps, branches, scores, scoreCount, cost, costEntries, events, ctx] = await db.batch([
-    db.prepare("SELECT * FROM workpackage WHERE project_id = ? ORDER BY sort, title").bind(id),
+    db.prepare(`SELECT * FROM workpackage WHERE project_id = ? AND ${LIVE()} ORDER BY sort, title`).bind(id),
     db.prepare("SELECT * FROM branch WHERE project_id = ? ORDER BY last_activity DESC").bind(id),
     db
       .prepare(
@@ -296,7 +298,7 @@ export async function getProjectDetail(db: D1Database, id: string) {
       .bind(id),
     db
       .prepare(
-        "SELECT id, owner_kind, owner_id, title, slug, source, bytes, version, pinned, sort, updated_at, updated_by FROM context_doc WHERE project_id = ? ORDER BY owner_kind, owner_id, pinned DESC, sort, title",
+        `SELECT id, owner_kind, owner_id, title, slug, source, bytes, version, pinned, sort, status, released_by, released_at, updated_at, updated_by FROM context_doc WHERE project_id = ? AND ${LIVE()} ORDER BY owner_kind, owner_id, pinned DESC, sort, title`,
       )
       .bind(id),
   ]);

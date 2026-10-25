@@ -1,5 +1,5 @@
 import type { BranchRow, ContextDocRow, Env, EventRow, ProjectRow, ScoreRow, TokenCostRow, WorkpackageRow, MilestoneRow } from "../types";
-import { now } from "../data/util";
+import { LIVE, now } from "../data/util";
 import {
   commitFiles,
   type FileChange,
@@ -59,21 +59,26 @@ const byKey =
     return 0;
   };
 
-/** `snapshot/projects.json`: every project with its WPs, branches, latest score per criterion, token cost and context index (no content). */
+/**
+ * `snapshot/projects.json`: every project with its WPs, branches, latest score per criterion, token cost and context index
+ * (no content). Items in the trash are left out (spec F10); their delete events stay in the event log.
+ */
 export async function buildSnapshot(db: D1Database): Promise<string> {
   const [p, w, b, s, t, c, ms, ml] = await db.batch([
-    db.prepare("SELECT * FROM project ORDER BY id"),
-    db.prepare("SELECT * FROM workpackage ORDER BY project_id, sort, id"),
+    db.prepare(`SELECT * FROM project WHERE ${LIVE()} ORDER BY id`),
+    db.prepare(`SELECT * FROM workpackage WHERE ${LIVE()} ORDER BY project_id, sort, id`),
     db.prepare("SELECT * FROM branch ORDER BY project_id, repo, name"),
     db.prepare(
       "SELECT s.* FROM score s WHERE s.recorded_at = (SELECT max(recorded_at) FROM score x WHERE x.project_id = s.project_id AND x.criterion = s.criterion) ORDER BY s.project_id, s.criterion",
     ),
     db.prepare("SELECT * FROM token_cost ORDER BY project_id, recorded_at, id"),
     db.prepare(
-      "SELECT id, project_id, owner_kind, owner_id, title, slug, source, filename, pinned, sort, bytes, version, created_at, updated_at, created_by, updated_by FROM context_doc ORDER BY project_id, owner_kind, owner_id, slug",
+      `SELECT id, project_id, owner_kind, owner_id, title, slug, source, filename, pinned, sort, bytes, version, status, released_by, released_at, created_at, updated_at, created_by, updated_by FROM context_doc WHERE ${LIVE()} ORDER BY project_id, owner_kind, owner_id, slug`,
     ),
-    db.prepare("SELECT * FROM milestone ORDER BY project_id, id"),
-    db.prepare("SELECT * FROM milestone_link ORDER BY milestone_id, role, workpackage_id"),
+    db.prepare(`SELECT * FROM milestone WHERE ${LIVE()} ORDER BY project_id, id`),
+    db.prepare(
+      `SELECT l.* FROM milestone_link l JOIN workpackage w ON w.id = l.workpackage_id AND ${LIVE("w")} ORDER BY l.milestone_id, l.role, l.workpackage_id`,
+    ),
   ]);
   const group = <T extends { project_id: string }>(rows: T[]) => {
     const m = new Map<string, Omit<T, "project_id">[]>();
@@ -149,7 +154,7 @@ async function docsByIds(db: D1Database, ids: string[]): Promise<ContextDocRow[]
   for (let i = 0; i < ids.length; i += 90) {
     const chunk = ids.slice(i, i + 90);
     const { results } = await db
-      .prepare(`SELECT * FROM context_doc WHERE id IN (${chunk.map(() => "?").join(", ")})`)
+      .prepare(`SELECT * FROM context_doc WHERE id IN (${chunk.map(() => "?").join(", ")}) AND ${LIVE()}`)
       .bind(...chunk)
       .all<ContextDocRow>();
     out.push(...results);
@@ -159,7 +164,7 @@ async function docsByIds(db: D1Database, ids: string[]): Promise<ContextDocRow[]
 
 /**
  * Hourly audit export (SPEC §8). Does nothing unless there are events after meta.last_export_event_id.
- * Changed context docs come from context_doc events; files of docs that no longer exist (deleted, cascaded or renamed)
+ * Changed context docs come from context_doc events; files of docs that no longer exist (in the trash, purged, cascaded or renamed)
  * are removed by comparing the repo tree with the current doc paths. Git is write-only: only the tree listing and the
  * current month's JSONL are read, to build the next commit.
  */
@@ -179,7 +184,9 @@ export async function runAuditExport(env: Env): Promise<AuditResult> {
   const message = `audit: ${events.length} events (${first}-${last})`;
 
   const changedIds = [...new Set(events.filter((e) => e.entity === "context_doc" && e.entity_id).map((e) => e.entity_id!))];
-  const { results: allDocs } = await db.prepare("SELECT id, project_id, owner_kind, owner_id, slug FROM context_doc").all<DocKey>();
+  const { results: allDocs } = await db
+    .prepare(`SELECT id, project_id, owner_kind, owner_id, slug FROM context_doc WHERE ${LIVE()}`)
+    .all<DocKey>();
   const snapshot = await buildSnapshot(db);
 
   const token = env.AUDIT_GITHUB_TOKEN;

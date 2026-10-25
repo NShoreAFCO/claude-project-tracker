@@ -1,5 +1,5 @@
 import type { Caller, MilestoneRow } from "../types";
-import { ConflictError, NotFoundError, ValidationError, diffFields, eventStmt, eventStmtIfChanged, newId, now } from "./util";
+import { ConflictError, LIVE, NotFoundError, ValidationError, diffFields, eventStmt, eventStmtIfChanged, newId, now } from "./util";
 
 export type MilestoneOut = MilestoneRow & { requires: string[]; unlocks: string[]; done: boolean };
 export type MilestoneInput = {
@@ -19,12 +19,12 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * A milestone qualifies (is done) when it has at least one non-dropped `requires` WP and every
- * `requires` WP is done or dropped. `m` is the milestone alias.
+ * `requires` WP is done or dropped. WPs in the trash do not count. `m` is the milestone alias.
  */
 export const QUALIFIES = `EXISTS (SELECT 1 FROM milestone_link l JOIN workpackage w ON w.id = l.workpackage_id
-    WHERE l.milestone_id = m.id AND l.role = 'requires' AND w.status != 'dropped')
+    WHERE l.milestone_id = m.id AND l.role = 'requires' AND w.deleted_at IS NULL AND w.status != 'dropped')
   AND NOT EXISTS (SELECT 1 FROM milestone_link l JOIN workpackage w ON w.id = l.workpackage_id
-    WHERE l.milestone_id = m.id AND l.role = 'requires' AND w.status NOT IN ('done', 'dropped'))`;
+    WHERE l.milestone_id = m.id AND l.role = 'requires' AND w.deleted_at IS NULL AND w.status NOT IN ('done', 'dropped'))`;
 
 /**
  * Statements to append at the end of any batch that writes work packages or milestones of a project:
@@ -37,11 +37,11 @@ export function reachStmts(db: D1Database, projectId: string, by: Caller): D1Pre
       .prepare(
         `INSERT INTO event (ts, actor, person_id, project_id, entity, entity_id, action, summary, diff_json)
          SELECT ?, ?, ?, m.project_id, 'milestone', m.id, 'reached', m.title, NULL FROM milestone m
-         WHERE m.project_id = ? AND m.reached_at IS NULL AND ${QUALIFIES}`,
+         WHERE m.project_id = ? AND m.reached_at IS NULL AND ${LIVE("m")} AND ${QUALIFIES}`,
       )
       .bind(ts, by.actor, by.personId, projectId),
     db
-      .prepare(`UPDATE milestone AS m SET reached_at = ? WHERE m.project_id = ? AND m.reached_at IS NULL AND ${QUALIFIES}`)
+      .prepare(`UPDATE milestone AS m SET reached_at = ? WHERE m.project_id = ? AND m.reached_at IS NULL AND ${LIVE("m")} AND ${QUALIFIES}`)
       .bind(ts, projectId),
   ];
 }
@@ -50,12 +50,13 @@ export async function listMilestones(db: D1Database, projectId: string): Promise
   const [ms, links] = await db.batch([
     db
       .prepare(
-        `SELECT m.*, (${QUALIFIES}) AS done FROM milestone m WHERE m.project_id = ? ORDER BY m.due_date IS NULL, m.due_date, m.sort, m.title`,
+        `SELECT m.*, (${QUALIFIES}) AS done FROM milestone m WHERE m.project_id = ? AND ${LIVE("m")} ORDER BY m.due_date IS NULL, m.due_date, m.sort, m.title`,
       )
       .bind(projectId),
     db
       .prepare(
-        "SELECT l.* FROM milestone_link l JOIN milestone m ON m.id = l.milestone_id WHERE m.project_id = ? ORDER BY l.workpackage_id",
+        `SELECT l.* FROM milestone_link l JOIN milestone m ON m.id = l.milestone_id JOIN workpackage w ON w.id = l.workpackage_id
+         WHERE m.project_id = ? AND ${LIVE("m")} AND ${LIVE("w")} ORDER BY l.workpackage_id`,
       )
       .bind(projectId),
   ]);
@@ -107,7 +108,10 @@ function idList(v: unknown, name: string): string[] | undefined {
 
 async function checkWps(db: D1Database, projectId: string, ids: string[]): Promise<void> {
   if (!ids.length) return;
-  const { results } = await db.prepare("SELECT id FROM workpackage WHERE project_id = ?").bind(projectId).all<{ id: string }>();
+  const { results } = await db
+    .prepare(`SELECT id FROM workpackage WHERE project_id = ? AND ${LIVE()}`)
+    .bind(projectId)
+    .all<{ id: string }>();
   const own = new Set(results.map((r) => r.id));
   const bad = ids.filter((id) => !own.has(id));
   if (bad.length) throw new ValidationError(`not workpackages of project ${projectId}: ${bad.join(", ")}`);
@@ -127,7 +131,7 @@ export async function upsertMilestone(
   by: Caller,
   expectedVersion?: number,
 ): Promise<MilestoneOut> {
-  if (!(await db.prepare("SELECT 1 FROM project WHERE id = ?").bind(projectId).first()))
+  if (!(await db.prepare(`SELECT 1 FROM project WHERE id = ? AND ${LIVE()}`).bind(projectId).first()))
     throw new NotFoundError(`project ${projectId} not found`);
   const fields = normalise(input);
   const requires = idList(input.requires, "requires");
@@ -139,6 +143,7 @@ export async function upsertMilestone(
   ]);
 
   const existing = input.id ? await db.prepare("SELECT * FROM milestone WHERE id = ?").bind(input.id).first<MilestoneRow>() : null;
+  if (existing?.deleted_at) throw new NotFoundError(`milestone ${existing.id} is in the trash; restore it first`);
   const ts = now();
   const linkStmts = (id: string, guard: { version: number } | null): D1PreparedStatement[] => {
     // On update the link writes only apply if this batch's versioned UPDATE won (same batch = same transaction).
