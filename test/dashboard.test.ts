@@ -115,6 +115,63 @@ describe("dashboard assets", () => {
     expect((await call("/")).status).toBe(401);
     expect((await call("/js/app.js")).status).toBe(401);
   });
+  it("people, trash and closure assets require Access", async () => {
+    for (const f of ["people.js", "trash.js", "closure.js"]) {
+      expect((await call(`/js/${f}`)).status, f).toBe(401);
+      expect((await call(`/js/${f}`, { jwt: await userJwt() })).status, f).toBe(200);
+    }
+  });
+  it("R1 screens use no inline handlers or HTML injection", async () => {
+    const jwt = await userJwt();
+    for (const f of ["people.js", "trash.js", "closure.js", "forms.js", "dom.js", "grid.js", "context.js", "project.js"]) {
+      const src = await (await call(`/js/${f}`, { jwt })).text();
+      expect(src, f).not.toMatch(/\bon(click|change|submit|input)\s*=/i);
+      expect(src, f).not.toMatch(/javascript:/i);
+      if (!["project.js", "context.js"].includes(f)) expect(src, f).not.toMatch(/innerHTML|insertAdjacentHTML/);
+    }
+  });
+});
+
+describe("delete confirm names children", () => {
+  it("lists the items that go to the trash with the parent", async () => {
+    // @ts-expect-error untyped JS module
+    const { deleteText } = await import("../public/js/dom.js");
+    // @ts-expect-error untyped JS module
+    const { LOCALE } = await import("../public/js/i18n.js");
+    const none = deleteText("workpackage", "WP3", { workpackages: 0, milestones: 0, context_docs: 0 });
+    const withKids = deleteText("workpackage", "WP3", { workpackages: 6, milestones: 1, context_docs: 2 });
+    expect(withKids).toContain("WP3");
+    if (LOCALE === "en") {
+      expect(none).toBe("Delete work package “WP3”? It moves to the trash and can be restored.");
+      expect(withKids).toContain("with 6 work packages, 1 milestone, 2 documents");
+    }
+    expect(withKids).not.toBe(none);
+    expect(deleteText("project", "P", null)).toContain("P");
+  });
+  it("R1 screen modules load (no syntax or import-cycle errors)", async () => {
+    // @ts-expect-error untyped JS module
+    const closure = await import("../public/js/closure.js");
+    // @ts-expect-error untyped JS module
+    const forms = await import("../public/js/forms.js");
+    // @ts-expect-error untyped JS module
+    const people = await import("../public/js/people.js");
+    // @ts-expect-error untyped JS module
+    const trash = await import("../public/js/trash.js");
+    expect([typeof closure.closureDialog, typeof forms.projectForm, typeof people.renderPeople, typeof trash.renderTrash]).toEqual([
+      "function",
+      "function",
+      "function",
+      "function",
+    ]);
+    const open = forms.openWps([{ id: "a", title: "A", status: "done", children: [{ id: "b", title: "B", status: "waiting" }] }]);
+    expect(open.map((w: { id: string }) => w.id)).toEqual(["b"]);
+  });
+  it("ageDays counts whole UTC days", async () => {
+    // @ts-expect-error untyped JS module
+    const { ageDays } = await import("../public/js/dom.js");
+    expect(ageDays("2026-10-20", new Date("2026-10-25T23:00:00Z"))).toBe(5);
+    expect(ageDays(null)).toBeNull();
+  });
 });
 
 describe("dashboard categories (instance config)", () => {
@@ -137,7 +194,9 @@ describe("dashboard categories (instance config)", () => {
 
 describe("locales", () => {
   const keyPaths = (o: Record<string, unknown>, p = ""): string[] =>
-    Object.entries(o).flatMap(([k, v]) => (v && typeof v === "object" ? keyPaths(v as Record<string, unknown>, `${p}${k}.`) : [`${p}${k}`]));
+    Object.entries(o).flatMap(([k, v]) =>
+      v && typeof v === "object" ? keyPaths(v as Record<string, unknown>, `${p}${k}.`) : [`${p}${k}`],
+    );
   it("locales have identical key sets", async () => {
     // @ts-expect-error untyped JS module
     const en = (await import("../public/js/locales/en.js")).default;

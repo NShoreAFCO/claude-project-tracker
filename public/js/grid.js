@@ -1,13 +1,26 @@
 // Grid view: one card per project (SPEC §9).
 import { t, fmtDate, fmtDateTime, STRINGS } from "./i18n.js";
-import { h, clear, statusChip, progressBar } from "./dom.js";
+import { h, clear, statusChip, progressBar, personBadge, ageDays } from "./dom.js";
 import { openProject } from "./project.js";
 import { projectForm } from "./forms.js";
 import { PROJECT_CATEGORIES, catVar, catDot, catLabel, knownCategory } from "./categories.js";
 
 const PROJECT_STATUSES = ["idea", "active", "on_hold", "done", "abandoned"];
 
-function card(p) {
+/** Red "Blocked" (with age), amber "Waiting (n)" and "Closure due" chips of a card (spec F3). */
+function flagChips(p) {
+  const chips = [];
+  if (p.stalled_blocked) {
+    const n = ageDays(p.blocked_since);
+    chips.push(h("span.chip.flag-blocked.outline", t("chipBlocked"), n === null ? null : h("span.age", t("ageDays", { n }))));
+  }
+  if (p.waiting_count) chips.push(h("span.chip.flag-waiting", t("chipWaiting", { n: p.waiting_count })));
+  if (p.closure_due) chips.push(h("span.chip.flag-closure", { title: t("closureDueHint") }, t("closureDue")));
+  return chips.length ? h("div.flags", chips) : null;
+}
+
+function card(p, persons) {
+  const owner = p.owner_initials ? { initials: p.owner_initials, name: persons.get(p.owner_id) || p.owner_initials } : null;
   return h(
     "article.card",
     {
@@ -24,7 +37,8 @@ function card(p) {
         STRINGS.originIcon[p.origin] || "",
       ),
     ),
-    h("div", statusChip(p.status)),
+    h("div.status-row", statusChip(p.status), personBadge(owner, { label: t("fOwner") })),
+    flagChips(p),
     p.summary ? h("p.summary", p.summary) : null,
     progressBar(p.progress),
     h(
@@ -32,14 +46,15 @@ function card(p) {
       h("span", t("target"), ": ", h("b", fmtDate(p.target_date))),
       h("span", t("openBranches"), ": ", h("b", String(p.open_branches))),
       h(
-        "span",
+        "span.wp-counts",
         t("wpCountsLabel"),
         ": ",
-        h("b", { title: t("wpOpen") }, String(p.wp_counts.open)),
-        " / ",
-        h("b", { title: t("wpStarted") }, String(p.wp_counts.started)),
-        " / ",
-        h("b", { title: t("wpDone") }, String(p.wp_counts.done)),
+        [
+          ["wpOpen", p.wp_counts.open],
+          ["wpInProgress", p.wp_counts.in_progress],
+          ["wpWaitingBlocked", p.wp_counts.waiting_blocked],
+          ["wpDone", p.wp_counts.done],
+        ].map(([key, n]) => h("span.wp-count", t(key), " ", h("b", String(n)))),
       ),
       h("span", t("contextDocs"), ": ", h("b", String(p.context_docs))),
       h("span", t("lastActivity"), ": ", h("b", fmtDateTime(p.last_activity))),
@@ -84,6 +99,20 @@ export function renderGrid(main, state) {
   );
   statusSel.value = filter.status;
 
+  // Owner filter: people who own at least one project, plus "no owner"
+  const persons = new Map((state.persons || []).map((p) => [p.id, p.name]));
+  const ownerIds = [...new Set(state.projects.map((p) => p.owner_id).filter(Boolean))].sort((a, b) =>
+    (persons.get(a) || a).localeCompare(persons.get(b) || b),
+  );
+  const ownerSel = h(
+    "select",
+    { "aria-label": t("filterOwner"), on: { change: (e) => ((filter.owner = e.target.value), renderGrid(main, state)) } },
+    h("option", { value: "" }, `${t("filterOwner")}: ${t("filterAll")}`),
+    ownerIds.map((id) => h("option", { value: id }, persons.get(id) || id)),
+    h("option", { value: "none" }, t("noOwner")),
+  );
+  ownerSel.value = filter.owner || "";
+
   const tagSel = h(
     "select",
     { "aria-label": t("filterTag"), on: { change: (e) => ((filter.tag = e.target.value), renderGrid(main, state)) } },
@@ -96,6 +125,7 @@ export function renderGrid(main, state) {
     (p) =>
       (!filter.status || p.status === filter.status) &&
       (!filter.tag || (p.tags || []).includes(filter.tag)) &&
+      (!filter.owner || (filter.owner === "none" ? !p.owner_initials : p.owner_id === filter.owner)) &&
       (!category || (category === "none" ? p.category === null : p.category === category)),
   );
 
@@ -109,7 +139,10 @@ export function renderGrid(main, state) {
         "section.cat-block",
         { "aria-label": label },
         h("header.cat-head", catDot("p", key), h("h2", label), h("span.count", String(projects.length))),
-        h("div.cards", projects.map(card)),
+        h(
+          "div.cards",
+          projects.map((p) => card(p, persons)),
+        ),
       );
     })
     .filter(Boolean);
@@ -121,6 +154,7 @@ export function renderGrid(main, state) {
       h("div", { style: { "min-width": "160px" } }, categorySel),
       h("div", { style: { "min-width": "180px" } }, statusSel),
       h("div", { style: { "min-width": "160px" } }, tagSel),
+      h("div", { style: { "min-width": "160px" } }, ownerSel),
       h("span.spacer"),
       h("button.btn", { type: "button", on: { click: () => projectForm(null) } }, `+ ${t("newProject")}`),
     ),

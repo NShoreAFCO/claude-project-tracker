@@ -44,7 +44,7 @@ const CONTRACT = [
   "color-primary", "color-primary-strong", "color-on-primary", "color-accent", "color-accent-strong",
   "color-surface", "color-tint", "color-border", "color-text", "color-text-strong", "color-text-muted",
   "color-link", "color-danger",
-  "status-active", "status-doing", "status-idea", "status-hold", "status-done", "status-dropped",
+  "status-active", "status-doing", "status-idea", "status-hold", "status-done", "status-dropped", "status-blocked", "status-waiting",
   "font", "font-heading", "font-size-base", "weight-heading", "heading-transform", "button-transform",
   "button-letter-spacing", "radius", "header-rule",
 ];

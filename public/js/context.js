@@ -2,10 +2,10 @@
 // append mode, history with line diff and restore, bundle copy/download.
 import { t, fmtBytes, fmtDateTime, STRINGS } from "./i18n.js";
 import { api } from "./api.js";
-import { h, clear, openModal, toast, toastError, copyText, confirmDialog, saveWithConflict } from "./dom.js";
+import { h, clear, openModal, toast, toastError, copyText, confirmDialog, saveWithConflict, menuButton } from "./dom.js";
 import { renderMarkdown } from "./markdown.js";
 import { lineDiff } from "./diff.js";
-import { changed, wpOptions } from "./forms.js";
+import { changed, wpOptions, deleteEntity } from "./forms.js";
 
 const OWNER_MAX = 2 * 1024 * 1024;
 const smallBtn = (label, onClick, cls = "ghost", extra = {}) =>
@@ -56,6 +56,18 @@ export async function renderContextPanel(container, { detail, owner, onOwner }) 
   );
   sel.value = JSON.stringify({ owner_kind: owner.owner_kind, owner_id: owner.owner_id });
 
+  // bundles leave obsolete documents out unless asked for
+  const obsolete = h("input", { type: "checkbox", id: "ctx-obsolete" });
+  const obsoleteLabel = h("label.check", { for: "ctx-obsolete" }, obsolete, t("ctxIncludeObsolete"));
+  const downloadLink = h(
+    "a.btn.small.secondary",
+    { href: api.bundleUrl(bundleParams(detail, owner)), download: "" },
+    t("ctxBundleDownload"),
+  );
+  obsolete.addEventListener("change", () => {
+    downloadLink.href = api.bundleUrl({ ...bundleParams(detail, owner), include_obsolete: obsolete.checked ? "true" : "" });
+  });
+
   const listHost = h("div", h("p", t("loading")));
   clear(
     container,
@@ -63,8 +75,9 @@ export async function renderContextPanel(container, { detail, owner, onOwner }) 
     h("h3", t("ctxTitle", { owner: ownerLabel(detail, owner) })),
     h(
       "div.toolbar",
-      smallBtn(t("ctxBundleCopy"), () => copyBundle(detail, owner), "secondary"),
-      h("a.btn.small.secondary", { href: api.bundleUrl(bundleParams(detail, owner)), download: "" }, t("ctxBundleDownload")),
+      smallBtn(t("ctxBundleCopy"), () => copyBundle(detail, owner, obsolete.checked), "secondary"),
+      downloadLink,
+      obsoleteLabel,
     ),
     h("div.callout", t("ctxReferenceNote")),
     listHost,
@@ -105,14 +118,30 @@ export async function renderContextPanel(container, { detail, owner, onOwner }) 
   );
 }
 
-async function copyBundle(detail, owner) {
+async function copyBundle(detail, owner, includeObsolete = false) {
   try {
-    const b = await api.bundle(bundleParams(detail, owner));
+    const b = await api.bundle({ ...bundleParams(detail, owner), include_obsolete: includeObsolete ? "true" : "" });
     await copyText(b.markdown);
     if (b.omitted?.length) toast(t("ctxBundleOmitted", { n: b.omitted.length }));
   } catch (e) {
     toastError(e);
   }
+}
+
+/** Document control badge (spec F10): draft | released | obsolete. */
+function docStatusBadge(d) {
+  const status = d.status || "draft";
+  return h(`span.badge.doc-status.doc-${status}`, { style: { "margin-left": "0.4rem" } }, t(`docStatus.${status}`));
+}
+
+async function setDocStatus(d, status, projectId) {
+  try {
+    await api.contextMeta(d.id, { status });
+    toast(t("ctxStatusSet", { status: t(`docStatus.${status}`) }));
+  } catch (e) {
+    toastError(e);
+  }
+  changed(projectId);
 }
 
 function docList(docs, detail) {
@@ -178,7 +207,14 @@ function docList(docs, detail) {
         h("span", { title: t(`source.${d.source}`), "aria-label": t(`source.${d.source}`) }, `${STRINGS.sourceIcon[d.source] || ""} `),
         h("strong", d.title),
         d.pinned ? h("span.badge", { style: { "margin-left": "0.4rem" } }, `📌 ${t("ctxPinned")}`) : null,
-        h("div.sub", `${fmtBytes(d.bytes)} · ${t("ctxVersion", { v: d.version })} · ${t("ctxUpdated", { when: fmtDateTime(d.updated_at), by: d.updated_by })}`),
+        docStatusBadge(d),
+        h(
+          "div.sub",
+          `${fmtBytes(d.bytes)} · ${t("ctxVersion", { v: d.version })} · ${t("ctxUpdated", { when: fmtDateTime(d.updated_at), by: d.updated_by })}`,
+        ),
+        d.status === "released" && d.released_at
+          ? h("div.sub", t("ctxReleasedBy", { when: fmtDateTime(d.released_at), by: d.released_by || t("none") }))
+          : null,
       ),
       h(
         "div.actions",
@@ -196,20 +232,12 @@ function docList(docs, detail) {
         smallBtn(t("ctxEdit"), () => openEditor(d.id)),
         smallBtn(t("ctxAppend"), () => openAppend(d.id, d.title, projectId)),
         smallBtn(t("ctxHistory"), () => openHistory(d.id)),
-        smallBtn(
-          t("delete"),
-          async () => {
-            if (!(await confirmDialog(t("confirmDelete", { name: d.title }), { okLabel: t("delete"), danger: true }))) return;
-            try {
-              await api.contextDelete(d.id);
-              toast(t("deleted"));
-            } catch (e) {
-              toastError(e);
-            }
-            changed(projectId);
-          },
-          "danger",
-        ),
+        d.status === "released" ? null : smallBtn(t("ctxRelease"), () => setDocStatus(d, "released", projectId), "secondary"),
+        menuButton(t("moreActions"), [
+          ...(d.status === "obsolete" ? [] : [{ label: t("ctxMarkObsolete"), onClick: () => setDocStatus(d, "obsolete", projectId) }]),
+          ...(d.status === "draft" ? [] : [{ label: t("ctxBackToDraft"), onClick: () => setDocStatus(d, "draft", projectId) }]),
+          { label: t("delete"), danger: true, onClick: () => deleteEntity("context_doc", d.id, d.title, projectId) },
+        ]),
       ),
     );
     list.append(li);
@@ -219,7 +247,13 @@ function docList(docs, detail) {
 
 function addSection(detail, owner) {
   const projectId = detail.project.id;
-  const fileInput = h("input", { type: "file", multiple: true, accept: ".md,.markdown,.txt,text/markdown,text/plain", class: "sr-only", id: "ctx-file" });
+  const fileInput = h("input", {
+    type: "file",
+    multiple: true,
+    accept: ".md,.markdown,.txt,text/markdown,text/plain",
+    class: "sr-only",
+    id: "ctx-file",
+  });
   const replace = h("input", { type: "checkbox", id: "ctx-replace" });
   const results = h("div", { role: "status" });
 
@@ -306,7 +340,13 @@ function addSection(detail, owner) {
     h("button.btn", { type: "submit" }, t("save")),
   );
 
-  return h("section.block", h("header", h("h3", t("add"))), zone, results, h("details", h("summary.btn.small.ghost", t("ctxPaste")), h("div", { style: { "margin-top": "0.8rem" } }, paste)));
+  return h(
+    "section.block",
+    h("header", h("h3", t("add"))),
+    zone,
+    results,
+    h("details", h("summary.btn.small.ghost", t("ctxPaste")), h("div", { style: { "margin-top": "0.8rem" } }, paste)),
+  );
 }
 
 export async function openDocViewer(docId) {
@@ -314,7 +354,10 @@ export async function openDocViewer(docId) {
     const d = await api.contextGet(docId);
     const m = openModal({ title: d.title });
     m.body.append(h("p.meta", h("code", d.header)), h("div.callout", t("ctxReferenceNote")), md(d.content_md));
-    m.foot.append(smallBtn(t("copy"), () => copyText(d.content_md), "secondary"), smallBtn(t("close"), () => m.close(), ""));
+    m.foot.append(
+      smallBtn(t("copy"), () => copyText(d.content_md), "secondary"),
+      smallBtn(t("close"), () => m.close(), ""),
+    );
   } catch (e) {
     toastError(e);
   }
@@ -373,7 +416,10 @@ export async function openEditor(docId) {
       save.disabled = false;
     }
   });
-  m.foot.append(smallBtn(t("cancel"), () => m.close()), save);
+  m.foot.append(
+    smallBtn(t("cancel"), () => m.close()),
+    save,
+  );
 }
 
 /** Append a stamped section (atomic on the server; concurrent sessions don't overwrite each other). */
@@ -410,7 +456,10 @@ export function openAppend(docId, docTitle, projectId) {
       save.disabled = false;
     }
   });
-  m.foot.append(smallBtn(t("cancel"), () => m.close()), save);
+  m.foot.append(
+    smallBtn(t("cancel"), () => m.close()),
+    save,
+  );
 }
 
 /** Revision list → line diff against the current version → restore. */

@@ -1,7 +1,8 @@
 // Project popup: Overview (description, WP tree, branches, scorecard, token cost, timeline, copy buttons) and Kontext.
 import { t, fmtDate, fmtDateTime, fmtNum, fmtPct, STRINGS } from "./i18n.js";
 import { api } from "./api.js";
-import { h, clear, openModal, statusChip, progressBar, copyText, toastError } from "./dom.js";
+import { h, clear, openModal, statusChip, progressBar, copyText, toastError, menuButton, personBadge, ageDays } from "./dom.js";
+import { closureDialog } from "./closure.js";
 import { renderMarkdown } from "./markdown.js";
 import { catChip } from "./categories.js";
 import {
@@ -117,9 +118,14 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
     } else {
       clear(m.body, overview(detail));
       m.foot.append(
-        smallBtn(t("delete"), () => deleteEntity("project", p.id, p.title, p.id).then((ok) => ok && m.close()), "danger"),
+        menuButton(t("moreActions"), [
+          { label: t("delete"), danger: true, onClick: () => deleteEntity("project", p.id, p.title, p.id).then((ok) => ok && m.close()) },
+        ]),
+        ["done", "abandoned"].includes(p.status)
+          ? null
+          : smallBtn(t("closeProject"), () => closureDialog({ project: p, workpackages: detail.workpackages }), "secondary"),
         smallBtn(t("logProgress"), () => logProgressForm(p.id, detail.workpackages), "secondary"),
-        smallBtn(t("edit"), () => projectForm(p), ""),
+        smallBtn(t("edit"), () => projectForm(p, { workpackages: detail.workpackages }), ""),
       );
     }
   }
@@ -139,6 +145,19 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       },
       `≡ ${ctxCount(kind, ownerId)}`,
     );
+
+  /** blocked_by is wp:<id>, ms:<id>, ext:<text> or free text; show titles instead of ids. */
+  function blockedLabel(raw) {
+    const m = /^(wp|ms|ext):([\s\S]*)$/.exec(String(raw).trim());
+    if (!m) return raw;
+    if (m[1] === "ext") return m[2].trim();
+    const list = m[1] === "wp" ? flatten(detail.workpackages) : detail.milestones;
+    return list.find((x) => x.id === m[2].trim())?.title ?? m[2].trim();
+  }
+  function blockedAge(w) {
+    const n = w.status === "blocked" ? ageDays(w.blocked_since) : null;
+    return n === null ? null : ` · ${t("blockedSince", { n, date: fmtDate(w.blocked_since) })}`;
+  }
 
   function wpNode(w) {
     const leaf = !w.children?.length;
@@ -192,6 +211,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
           h("strong", w.title),
           statusChip(w.status),
           w.effective_category ? catChip("w", w.effective_category, !w.category && !!w.effective_category) : null,
+          personBadge(w.effective_owner, { inherited: !w.owner, label: w.owner ? t("fOwner") : t("inheritedOwner") }),
           w.is_human ? h("span.badge.human", { title: t("human"), "aria-label": t("human") }, "👤") : null,
           w.locked ? h("span.badge.locked", { title: t("lockedBy", { name }) }, "🔒 ", t("locked")) : null,
           !leaf ? h("span.meta", t("subCount", { n: w.children.length })) : null,
@@ -201,11 +221,15 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         slider,
         h(
           "div.actions",
-          smallBtn(t("edit"), () => wpForm(id, w, detail.workpackages)),
-          smallBtn(`+ ${t("addSubWorkpackage")}`, () => wpForm(id, null, detail.workpackages, w.id)),
-          smallBtn(t("delete"), () => deleteEntity("workpackage", w.id, w.title, id), "danger"),
+          smallBtn(t("edit"), () => wpForm(id, w, detail.workpackages, null, detail.milestones)),
+          smallBtn(`+ ${t("addSubWorkpackage")}`, () => wpForm(id, null, detail.workpackages, w.id, detail.milestones)),
+          menuButton(t("moreActions"), [
+            { label: t("delete"), danger: true, onClick: () => deleteEntity("workpackage", w.id, w.title, id) },
+          ]),
         ),
-        w.blocked_by ? h("div.blocked", `${t("blockedBy")}: ${w.blocked_by}`) : null,
+        w.blocked_by ? h("div.blocked", `${t("blockedBy")}: ${blockedLabel(w.blocked_by)}`, blockedAge(w)) : null,
+        w.waiting_reason ? h("div.blocked", `${t("fWaitingReason")}: ${w.waiting_reason}`) : null,
+        w.drop_reason ? h("div.blocked", `${t("fDropReason")}: ${w.drop_reason}`) : null,
         w.description_md ? h("details.blocked", h("summary", t("description")), mdBlock(w.description_md)) : null,
       ),
       !leaf && open ? h("ul", w.children.map(wpNode)) : null,
@@ -252,6 +276,50 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       ctxBadge("project", p.id),
     );
 
+    // owner, sponsor, decision maker (spec F1): chip + name, or the free text
+    const personLine = h(
+      "div.meta.people",
+      [
+        ["owner", p.owner],
+        ["sponsor", p.sponsor],
+        ["decision_maker", p.decision_maker],
+      ].map(([role, ref]) =>
+        h(
+          "span",
+          `${t(`role.${role}`)}: `,
+          ref ? [personBadge(ref, { label: t(`role.${role}`) }), " ", h("b", ref.name || ref.text)] : h("b", t("noOwner")),
+        ),
+      ),
+    );
+    const followLinks = [
+      ...(p.follows || []).map((x) => [t("followsProject"), x]),
+      ...(p.followed_by || []).map((x) => [t("followedByProject"), x]),
+    ];
+    const closureBlocks = [];
+    if (p.closure_due)
+      closureBlocks.push(
+        h(
+          "div.callout",
+          { role: "status" },
+          h("strong", t("closureDue")),
+          " ",
+          t("closureDueHint"),
+          " ",
+          smallBtn(t("closeProject"), () => closureDialog({ project: p, workpackages: d.workpackages }), "secondary"),
+        ),
+      );
+    if (p.stalled_blocked)
+      closureBlocks.push(h("div.callout.conflict", { role: "status" }, h("strong", t("chipBlocked")), " ", t("stalledHint")));
+    if (p.closure_note_md || p.lessons_learned_md)
+      closureBlocks.push(
+        block(
+          t("closureRecord"),
+          null,
+          p.closure_note_md ? [h("h4", t("fClosureNote")), mdBlock(p.closure_note_md)] : null,
+          p.lessons_learned_md ? [h("h4", t("fLessons")), mdBlock(p.lessons_learned_md)] : null,
+        ),
+      );
+
     const branchRows = d.branches.map((b) =>
       h(
         "tr",
@@ -268,7 +336,9 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
             "div.actions",
             ctxBadge("branch", b.id),
             smallBtn(t("edit"), () => branchForm(id, b, d.workpackages)),
-            smallBtn(t("delete"), () => deleteEntity("branch", b.id, `${b.repo}@${b.name}`, id), "danger"),
+            menuButton(t("moreActions"), [
+              { label: t("delete"), danger: true, onClick: () => deleteEntity("branch", b.id, `${b.repo}@${b.name}`, id) },
+            ]),
           ),
         ),
       ),
@@ -292,7 +362,9 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         h(
           "div.actions",
           smallBtn(t("edit"), () => milestoneForm(id, ms, detail.workpackages)),
-          smallBtn(t("delete"), () => deleteEntity("milestone", ms.id, ms.title, id), "danger"),
+          menuButton(t("moreActions"), [
+            { label: t("delete"), danger: true, onClick: () => deleteEntity("milestone", ms.id, ms.title, id) },
+          ]),
         ),
       );
     });
@@ -307,17 +379,26 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         }
         render();
       }),
-      smallBtn(`+ ${t("addWorkpackage")}`, () => wpForm(id, null, d.workpackages), "secondary"),
+      smallBtn(`+ ${t("addWorkpackage")}`, () => wpForm(id, null, d.workpackages, null, d.milestones), "secondary"),
     );
 
     return h(
       "div",
       progressBar(d.progress),
-      h("div", { style: { margin: "0.8rem 0" } }, facts),
+      h("div", { style: { margin: "0.8rem 0" } }, facts, personLine),
+      followLinks.length
+        ? h(
+            "div.meta",
+            followLinks.map(([label, x]) =>
+              h("span", `${label}: `, h("button.linkbtn", { type: "button", on: { click: () => openProject(x) } }, x)),
+            ),
+          )
+        : null,
+      closureBlocks,
       copies,
       block(
         t("description"),
-        smallBtn(t("edit"), () => projectForm(p)),
+        smallBtn(t("edit"), () => projectForm(p, { workpackages: d.workpackages })),
         p.description_md ? mdBlock(p.description_md) : h("p.meta", p.summary || t("noDescription")),
       ),
       block(

@@ -1065,3 +1065,125 @@ details.inherited > summary {
 .gantt-legend .ms-diamond {
   margin: 0 0.3rem;
 }
+
+/* ---- R1: owner initials, card flag chips, counts, row menu, document status */
+.field[hidden],
+.menu-list[hidden] {
+  display: none;
+}
+.initials {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.7rem;
+  height: 1.7rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+/* inherited owner: grey, dashed */
+.initials.inherited {
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  border: 1px dashed var(--color-text-muted);
+}
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.4rem 0;
+}
+.chip.flag-blocked {
+  --c: var(--status-blocked, var(--color-danger));
+  font-weight: 600;
+}
+.chip.flag-waiting {
+  --c: var(--status-waiting, var(--status-hold));
+}
+.chip.flag-closure {
+  --c: var(--status-done);
+}
+.chip .age {
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+.wp-counts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.6rem;
+}
+.wp-count b {
+  font-variant-numeric: tabular-nums;
+}
+.blockedby {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.blockedby > * {
+  flex: 1 1 12rem;
+}
+.hint {
+  margin: 0.25rem 0 0;
+}
+.people {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.2rem;
+  align-items: center;
+  margin-top: 0.4rem;
+}
+.menu {
+  position: relative;
+  display: inline-block;
+}
+.menu-list {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  z-index: 5;
+  list-style: none;
+  margin: 0 0 0.2rem;
+  padding: 0.25rem;
+  min-width: 11rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-text);
+  border-radius: var(--radius);
+}
+.menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  padding: 0.4rem 0.6rem;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--color-text-strong);
+  cursor: pointer;
+}
+.menu-item:hover,
+.menu-item:focus-visible {
+  background: var(--color-tint);
+}
+.menu-item.danger {
+  color: var(--color-danger);
+}
+.doc-status.doc-released {
+  border-color: var(--status-done);
+  border-left-width: 4px;
+}
+.doc-status.doc-obsolete {
+  border-color: var(--status-dropped);
+  border-style: dashed;
+  color: var(--color-text-muted);
+}

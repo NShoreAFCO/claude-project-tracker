@@ -44,6 +44,38 @@ export function statusChip(status, outline = false) {
   return h(`span.chip.st-${status}`, { class: outline || status === "done" ? "outline" : "" }, t(`status.${status}`));
 }
 
+const initialsOfText = (s) =>
+  String(s || "")
+    .trim()
+    .split(/[\s-]+/)
+    .filter(Boolean)
+    .map((w) => [...w][0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase() || "?";
+
+/** Round initials badge for a person-or-text ref ({person_id,name,initials} | {text} | null); `inherited` greys it. */
+export function personBadge(ref, { inherited = false, label = "" } = {}) {
+  if (!ref) return null;
+  const name = ref.name || ref.text;
+  const text = label ? `${label}: ${name}` : name;
+  return h(
+    "span.initials",
+    { class: inherited ? "inherited" : "", title: text, "aria-label": text },
+    ref.initials || initialsOfText(ref.text),
+  );
+}
+
+/** Whole days from a YYYY-MM-DD date until today (UTC); null for no date. */
+export function ageDays(ymd, today = new Date()) {
+  if (!ymd) return null;
+  const [y, m, d] = String(ymd).slice(0, 10).split("-").map(Number);
+  return Math.max(
+    0,
+    Math.floor((Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()) - Date.UTC(y, m - 1, d)) / 86400000),
+  );
+}
+
 export function progressBar(pct, label) {
   const v = Math.max(0, Math.min(100, Number(pct) || 0));
   return h(
@@ -67,7 +99,87 @@ export function toast(msg, error = false) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => (el.hidden = true), error ? 6000 : 2500);
 }
-export const toastError = (e) => toast(e?.isAuth ? t("errorAuth") : t("errorGeneric", { msg: e?.message || String(e) }), true);
+/**
+ * Localised text for a failed call. 409s with a machine-readable `current.code` (PROJECT_CLOSED, PARENT_DELETED,
+ * SLUG_TAKEN, TARGET_CLOSED, OPEN_WORKPACKAGES ...) use the errCode.* strings; everything else shows the API message.
+ */
+export function errorText(e) {
+  if (e?.isAuth) return t("errorAuth");
+  const cur = e?.body?.current;
+  if (e?.isConflict && cur?.code) {
+    const key = `errCode.${cur.code}`;
+    const msg = t(key, {
+      list: (cur.open_workpackages || []).map((w) => w.title).join(", "),
+      fields: (cur.missing || []).join(", "),
+      date: cur.purgeable_at ? String(cur.purgeable_at).slice(0, 10) : "",
+    });
+    if (msg !== key) return msg;
+  }
+  return t("errorGeneric", { msg: e?.message || String(e) });
+}
+export const toastError = (e) => toast(errorText(e), true);
+
+/** Confirm text for a delete; `children` is the delete preview's {workpackages, milestones, context_docs}. */
+export function deleteText(kind, name, children) {
+  const c = children || {};
+  const part = (key) => (c[key] ? t(`deleteKids.${key}${c[key] === 1 ? "_one" : ""}`, { n: c[key] }) : null);
+  const parts = [part("workpackages"), part("milestones"), part("context_docs")].filter(Boolean);
+  const kids = parts.length ? t("deleteWith", { items: parts.join(", ") }) : "";
+  return t("confirmDeleteTrash", { kind: t(`entityKind.${kind}`), name, kids });
+}
+
+/** "..." row menu: items = [{ label, onClick, danger }]. Closes on outside click, Escape and after a choice. */
+export function menuButton(label, items) {
+  const list = h("ul.menu-list", { role: "menu", hidden: true });
+  const btn = h(
+    "button.btn.small.ghost.menu-btn",
+    {
+      type: "button",
+      "aria-haspopup": "menu",
+      "aria-expanded": "false",
+      "aria-label": label,
+      title: label,
+      on: { click: () => (list.hidden ? open() : close()) },
+    },
+    "⋯",
+  );
+  const wrap = h("span.menu", btn, list);
+  const onDoc = (ev) => {
+    if (!wrap.contains(ev.target)) close();
+  };
+  const onKey = (ev) => {
+    if (ev.key === "Escape" && !list.hidden) {
+      ev.stopPropagation();
+      close();
+      btn.focus();
+    }
+  };
+  function open() {
+    list.hidden = false;
+    btn.setAttribute("aria-expanded", "true");
+    document.addEventListener("click", onDoc, true);
+    document.addEventListener("keydown", onKey, true);
+  }
+  function close() {
+    list.hidden = true;
+    btn.setAttribute("aria-expanded", "false");
+    document.removeEventListener("click", onDoc, true);
+    document.removeEventListener("keydown", onKey, true);
+  }
+  for (const it of items)
+    list.append(
+      h(
+        "li",
+        { role: "none" },
+        h(
+          `button.menu-item${it.danger ? ".danger" : ""}`,
+          { type: "button", role: "menuitem", on: { click: () => (close(), it.onClick()) } },
+          it.label,
+        ),
+      ),
+    );
+  return wrap;
+}
 
 export async function copyText(text) {
   try {
@@ -141,9 +253,17 @@ export function formDialog({ title, fields, onSubmit, submitLabel = t("save"), n
     const err = h("div.callout.conflict", { role: "alert", hidden: true });
     if (intro) form.append(intro);
     const grid = h("div.grid2");
+    const wraps = {};
     for (const f of fields) {
       const id = `f-${f.name}-${Math.random().toString(36).slice(2, 7)}`;
       let input;
+      if (f.type === "person" || f.type === "blockedby") {
+        const c = f.type === "person" ? personField(f, id) : blockedByField(f, id);
+        inputs[f.name] = c;
+        wraps[f.name] = c.wrap;
+        grid.append(c.wrap);
+        continue;
+      }
       if (f.type === "checklist") {
         const selected = new Set(f.value || []);
         input = h(
@@ -153,21 +273,23 @@ export function formDialog({ title, fields, onSubmit, submitLabel = t("save"), n
           (f.options || []).map(([v, l]) => h("label.check", h("input", { type: "checkbox", value: v, checked: selected.has(v) }), l)),
         );
         inputs[f.name] = input;
-        grid.append(h("div.field", { style: { "grid-column": "1 / -1" } }, input));
+        wraps[f.name] = h("div.field", { style: { "grid-column": "1 / -1" } }, input);
+        grid.append(wraps[f.name]);
         continue;
       }
       if (f.type === "textarea") input = h("textarea", { id, name: f.name, rows: f.rows || 8 });
       else if (f.type === "select")
         input = h(
           "select",
-          { id, name: f.name },
-          (f.options || []).map(([v, l]) => h("option", { value: v }, l)),
+          { id, name: f.name, title: f.title, "aria-describedby": f.hint ? `${id}-hint` : null },
+          (f.options || []).map(([v, l, opt]) => h("option", { value: v, disabled: !!opt?.disabled, title: opt?.title }, l)),
         );
       else
         input = h("input", { id, name: f.name, type: f.type || "text", min: f.min, max: f.max, step: f.step, placeholder: f.placeholder });
       if (f.type === "checkbox") input.checked = !!f.value;
       else input.value = f.value ?? "";
       if (f.required) input.required = true;
+      if (f.disabled) input.disabled = true;
       inputs[f.name] = input;
       const wrap =
         f.type === "checkbox"
@@ -177,7 +299,9 @@ export function formDialog({ title, fields, onSubmit, submitLabel = t("save"), n
               { style: f.full || f.type === "textarea" ? { "grid-column": "1 / -1" } : undefined },
               h("label", { for: id }, f.label),
               input,
+              f.hint ? h("p.meta.hint", { id: `${id}-hint` }, f.hint) : null,
             );
+      wraps[f.name] = wrap;
       if (f.type === "range") {
         const out = h("output", { for: id }, fmtPct(input.value));
         input.addEventListener("input", () => (out.textContent = fmtPct(input.value)));
@@ -186,6 +310,14 @@ export function formDialog({ title, fields, onSubmit, submitLabel = t("save"), n
       grid.append(wrap);
     }
     form.append(grid, err);
+    // fields with showWhen: { field, values } are only shown (and submitted) while that other field has one of the values
+    const valueOf = (name) => (inputs[name]?.get ? inputs[name].get() : inputs[name]?.value);
+    const visible = (f) => !f.showWhen || f.showWhen.values.includes(valueOf(f.showWhen.field));
+    const syncShown = () => {
+      for (const f of fields) if (f.showWhen && wraps[f.name]) wraps[f.name].hidden = !visible(f);
+    };
+    for (const f of fields) if (f.showWhen) inputs[f.showWhen.field]?.addEventListener?.("change", syncShown);
+    syncShown();
     const submit = h("button.btn", { type: "submit" }, submitLabel);
     m.foot.append(h("button.btn.ghost", { type: "button", on: { click: () => m.close() } }, t("cancel")), submit);
     submit.setAttribute("form", (form.id = `form-${Math.random().toString(36).slice(2)}`));
@@ -194,6 +326,11 @@ export function formDialog({ title, fields, onSubmit, submitLabel = t("save"), n
       const values = {};
       for (const f of fields) {
         const el = inputs[f.name];
+        if (!visible(f)) continue;
+        if (el.get) {
+          values[f.name] = el.get();
+          continue;
+        }
         if (f.type === "checklist") {
           values[f.name] = [...el.querySelectorAll("input:checked")].map((x) => x.value);
           continue;
@@ -215,7 +352,7 @@ export function formDialog({ title, fields, onSubmit, submitLabel = t("save"), n
         if (result !== undefined) m.close();
         else result = null;
       } catch (e) {
-        err.textContent = e?.isAuth ? t("errorAuth") : t("errorGeneric", { msg: e?.message || String(e) });
+        err.textContent = errorText(e);
         err.hidden = false;
       } finally {
         submit.disabled = false;
@@ -231,11 +368,98 @@ export async function saveWithConflict(save, expectedVersion, describe) {
   try {
     return await save(expectedVersion);
   } catch (e) {
-    if (!e?.isConflict) throw e;
+    // 409s with a machine-readable code are refused transitions (PROJECT_CLOSED ...), not version conflicts
+    if (!e?.isConflict || e.code) throw e;
     const current = e.body?.current;
     const choice = await conflictDialog(current, describe);
     if (choice === "overwrite" && current?.version !== undefined) return save(current.version);
     if (choice === "reload") return { reload: true };
     return { cancelled: true };
   }
+}
+
+// ---- custom form fields (used by formDialog)
+
+/** Person picker: pick a person, or "other" and type free text. get() returns a person id, a text, or null. */
+function personField(f, id) {
+  const OTHER = "__other";
+  const persons = f.options || [];
+  const sel = h(
+    "select",
+    { id, name: f.name },
+    h("option", { value: "" }, f.noneLabel || t("none")),
+    persons.map(([v, l]) => h("option", { value: v }, l)),
+    h("option", { value: OTHER }, t("personOther")),
+  );
+  const text = h("input", { type: "text", "aria-label": `${f.label}: ${t("personOther")}`, maxlength: "200", hidden: true });
+  const cur = f.value;
+  if (cur?.person_id && persons.some(([v]) => v === cur.person_id)) sel.value = cur.person_id;
+  else if (cur?.text) {
+    sel.value = OTHER;
+    text.value = cur.text;
+    text.hidden = false;
+  }
+  sel.addEventListener("change", () => {
+    text.hidden = sel.value !== OTHER;
+    if (!text.hidden) text.focus();
+  });
+  const wrap = h("div.field", h("label", { for: id }, f.label), sel, text);
+  return { wrap, addEventListener: () => {}, get: () => (sel.value === OTHER ? text.value.trim() || null : sel.value || null) };
+}
+
+/** blocked_by builder: reference a WP or milestone, an external blocker, or free text. get() returns "wp:<id>", "ms:<id>", "ext:<text>", text or null. */
+function blockedByField(f, id) {
+  const m = /^(wp|ms|ext):([\s\S]*)$/.exec(String(f.value || "").trim());
+  const kind0 = f.value ? (m ? m[1] : "text") : "";
+  const kind = h(
+    "select",
+    { id, name: f.name },
+    [
+      ["", t("blockedNone")],
+      ["wp", t("blockedKindWp")],
+      ["ms", t("blockedKindMs")],
+      ["ext", t("blockedKindExt")],
+      ["text", t("blockedKindText")],
+    ].map(([v, l]) => h("option", { value: v }, l)),
+  );
+  const wpSel = h(
+    "select",
+    { "aria-label": t("blockedKindWp") },
+    (f.wps || []).map(([v, l]) => h("option", { value: v }, l)),
+  );
+  const msSel = h(
+    "select",
+    { "aria-label": t("blockedKindMs") },
+    (f.milestones || []).map(([v, l]) => h("option", { value: v }, l)),
+  );
+  const txt = h("input", { type: "text", "aria-label": t("fBlockedBy") });
+  kind.value = kind0;
+  const ref = m ? m[2].trim() : String(f.value || "");
+  if (kind0 === "wp") wpSel.value = ref;
+  if (kind0 === "ms") msSel.value = ref;
+  if (kind0 === "ext" || kind0 === "text") txt.value = ref;
+  const sync = () => {
+    wpSel.hidden = kind.value !== "wp";
+    msSel.hidden = kind.value !== "ms";
+    txt.hidden = kind.value !== "ext" && kind.value !== "text";
+  };
+  kind.addEventListener("change", sync);
+  sync();
+  const wrap = h(
+    "div.field",
+    { style: { "grid-column": "1 / -1" } },
+    h("label", { for: id }, f.label),
+    h("div.blockedby", kind, wpSel, msSel, txt),
+  );
+  return {
+    wrap,
+    addEventListener: () => {},
+    get() {
+      if (kind.value === "wp") return wpSel.value ? `wp:${wpSel.value}` : null;
+      if (kind.value === "ms") return msSel.value ? `ms:${msSel.value}` : null;
+      const v = txt.value.trim();
+      if (!v) return null;
+      return kind.value === "ext" ? `ext:${v}` : v;
+    },
+  };
 }
