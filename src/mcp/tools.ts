@@ -9,6 +9,7 @@ import { listContext, readContext, getContextBundle } from "../data/context-read
 import { writeContext, appendContext, deleteContext, setContextMeta } from "../data/context-write";
 import { search } from "../data/search";
 import { upsertMilestone } from "../data/milestones";
+import { createBaseline } from "../data/baselines";
 import { moveWorkpackages } from "../data/rules";
 import { HUMAN_DEFAULT, PROJECT_CATEGORIES, WP_CATEGORIES } from "../data/categories";
 import { ConflictError, ValidationError } from "../data/util";
@@ -339,6 +340,21 @@ export function registerTools(reg: Reg): void {
       const { project_id, expected_version, ...input } = args;
       return upsertMilestone(tc.db, project_id, omitUndefined(input), tc.by, expected_version);
     },
+  );
+
+  reg(
+    "create_baseline",
+    {
+      title: "Create baseline",
+      description:
+        "Snapshot the current start/end dates of all work packages and the due dates of all milestones of a project under a label. get_project then reports baseline_start, baseline_end and slip_days (current end minus baseline end, in days) per WP and milestone against the latest baseline.",
+      inputSchema: z.object({
+        project_id: z.string().describe("Identify the project."),
+        label: z.string().min(1).max(200).describe("Name the baseline, e.g. 'Plan approved'."),
+        on_behalf_of: onBehalfOf,
+      }),
+    },
+    async (args, tc) => createBaseline(tc.db, args.project_id, args.label, tc.by),
   );
 
   reg(

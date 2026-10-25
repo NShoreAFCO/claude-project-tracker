@@ -1,14 +1,6 @@
 import type { Caller, PersonOut, PersonRefOut, ProjectRow, WorkpackageRow } from "../types";
 import { ConflictError, LIVE, NotFoundError, ValidationError, diffFields, eventStmt, eventStmtIfChanged, now, slugify } from "./util";
-import {
-  dependsOnInput,
-  issuesOf,
-  recomputeScheduleStmts,
-  scheduleBatch,
-  storeSchedule,
-  storedDependsOn,
-  type ScheduleIssue,
-} from "./schedule";
+import { dependsOnInput, issuesOf, recomputeScheduleStmts, scheduleBatch, storeSchedule, snapWp, type ScheduleIssue } from "./schedule";
 import { WP_CATEGORIES, checkCategory, checkHuman } from "./categories";
 import { reachStmts } from "./milestones";
 import { personOuts, personRefInput, personRefOut, resolvePersonRef } from "./persons";
@@ -213,15 +205,6 @@ function normalise(input: Record<string, unknown>): Partial<Record<WpField, unkn
   return out;
 }
 
-/** The schedule view of a WP row. */
-const scheduleWp = (w: Pick<WorkpackageRow, "id" | "parent_id" | "start_date" | "end_date" | "depends_on">) => ({
-  id: w.id,
-  parent_id: w.parent_id ?? null,
-  start_date: w.start_date ?? null,
-  end_date: w.end_date ?? null,
-  depends_on: storedDependsOn(w.depends_on),
-});
-
 /** parent must be a WP of the same project and not the node itself or one of its descendants. */
 async function checkParent(db: D1Database, projectId: string, selfId: string | null, parentId: unknown): Promise<void> {
   if (parentId === null || parentId === undefined) return;
@@ -289,7 +272,7 @@ export async function upsertWorkpackage(
       return { ...(await withPersonOuts(db, project, [existing]))[0], warnings: issuesOf(issues, existing.id) };
     }
     const schedule = await recomputeScheduleStmts(db, projectId, {
-      wps: [scheduleWp(next as unknown as WorkpackageRow)],
+      wps: [snapWp(next as unknown as WorkpackageRow)],
       checkDependsOn: "depends_on" in diff ? existing.id : undefined,
     });
     const res = await scheduleBatch(db, [
@@ -358,7 +341,7 @@ export async function upsertWorkpackage(
     updated_at: ts,
   };
   const schedule = await recomputeScheduleStmts(db, projectId, {
-    wps: [scheduleWp(row)],
+    wps: [snapWp(row)],
     checkDependsOn: fields.depends_on !== undefined ? id : undefined,
   });
   const cols = ["id", "project_id", ...WRITE_COLS, "version", "created_at", "updated_at"] as const;

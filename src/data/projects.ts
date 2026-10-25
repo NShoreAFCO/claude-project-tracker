@@ -15,7 +15,16 @@ import { QUALIFIES, listMilestones, lockedWpIds } from "./milestones";
 import { PROJECT_CATEGORIES, checkCategory } from "./categories";
 import { personOuts, personRefInput, personRefOut, refInitials } from "./persons";
 import { withPersonOuts } from "./workpackages";
-import { ensureSchedule } from "./schedule";
+import { ensureSchedule, snapMs, snapWp } from "./schedule";
+import { criticalPath } from "./critical-path";
+import {
+  baselineFields,
+  baselineItemMap,
+  latestBaselineItemsStmt,
+  latestBaselineStmt,
+  type BaselineItem,
+  type BaselineRef,
+} from "./baselines";
 import {
   OPEN_WP_SQL,
   closureError,
@@ -284,7 +293,7 @@ export async function getProjectDetail(db: D1Database, id: string) {
   const project = await getProjectRow(db, id);
   // Rows written before schedule validation (or by an older Worker) are computed once on first read.
   await ensureSchedule(db, id);
-  const [wps, branches, scores, scoreCount, cost, costEntries, events, ctx] = await db.batch([
+  const [wps, branches, scores, scoreCount, cost, costEntries, events, ctx, baseline, baselineItems] = await db.batch([
     db.prepare(`SELECT * FROM workpackage WHERE project_id = ? AND ${LIVE()} ORDER BY sort, title`).bind(id),
     db.prepare("SELECT * FROM branch WHERE project_id = ? ORDER BY last_activity DESC").bind(id),
     db
@@ -309,15 +318,33 @@ export async function getProjectDetail(db: D1Database, id: string) {
         `SELECT id, owner_kind, owner_id, title, slug, source, bytes, version, pinned, sort, status, released_by, released_at, updated_at, updated_by FROM context_doc WHERE project_id = ? AND ${LIVE()} ORDER BY owner_kind, owner_id, pinned DESC, sort, title`,
       )
       .bind(id),
+    latestBaselineStmt(db, id),
+    latestBaselineItemsStmt(db, id),
   ]);
   const wpRows = wps.results as WorkpackageRow[];
-  const milestones = await listMilestones(db, id);
+  const msRows = await listMilestones(db, id);
+  // F4: baseline dates and slip against the latest baseline; critical path over the live plan.
+  const items = baselineItemMap(baselineItems.results as BaselineItem[]);
+  const critical = criticalPath({ wps: wpRows.map(snapWp), milestones: msRows.map(snapMs) });
+  const milestones = msRows.map((m) => ({
+    ...m,
+    ...baselineFields(items, "milestone", m.id, m.due_date),
+    critical: critical.has(m.id),
+  }));
   const totals = cost.results[0] as { claude_tokens: number; copilot_prompts: number };
   return {
     project: await toProjectOut(db, project, wpRows),
     progress: computeProjectProgress(project, wpRows),
-    workpackages: buildWpTree(await withPersonOuts(db, project, wpRows), { locked: lockedWpIds(milestones) }),
+    workpackages: buildWpTree(
+      (await withPersonOuts(db, project, wpRows)).map((w) => ({
+        ...w,
+        ...baselineFields(items, "workpackage", w.id, w.end_date),
+        critical: critical.has(w.id),
+      })),
+      { locked: lockedWpIds(milestones) },
+    ),
     milestones,
+    baseline: (baseline.results[0] as BaselineRef | undefined) ?? null,
     branches: branches.results as BranchRow[],
     scores: scores.results as ScoreRow[],
     score_history_count: (scoreCount.results[0] as { n: number }).n,

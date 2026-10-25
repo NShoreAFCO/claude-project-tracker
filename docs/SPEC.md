@@ -186,7 +186,7 @@ CREATE INDEX ctx_owner ON context_doc(owner_kind, owner_id);
 
 ## 5. MCP tools
 
-R1 adds owner, closure and trash fields and tools (§15–§17); the 23-tool total is counted there.
+R1 adds owner, closure and trash fields and tools (§15–§17); the 23-tool total is counted there. R2 adds `create_baseline` (§18), 24 tools.
 
 zod schemas, short imperative descriptions, compact JSON output.
 
@@ -386,3 +386,9 @@ Optional. It runs only when both `AUDIT_REPO` and `AUDIT_GITHUB_TOKEN` are set. 
 - **Document control.** `status` `draft|released|obsolete`; becoming `released` sets `released_by` (actor) and `released_at`. Bundles include drafts and leave out obsolete docs unless `include_obsolete` is true (`get_context_bundle`, `GET /api/context/bundle?include_obsolete=true`). Pinned plan documents are expected to be `released` (not enforced).
 - **REST.** `GET /api/trash` (deleted items, not their children: `{kind, id, title, project_id, deleted_at, deleted_by, children}`), `POST /api/trash/:kind/:id/restore`, `DELETE /api/trash/:kind/:id` (purge), `GET /api/delete-preview?kind=&id=` → `{kind, id, title, children: {workpackages, milestones, context_docs}}` for the confirm text, `DELETE /api/persons/:id`, `PATCH /api/context/:id` accepts `status`. Deletes return `{deleted, children}`.
 - **MCP.** `delete_entity` moves to the trash and also takes kinds `context_doc` and `person`; new tools `restore_entity(kind, id)` and `set_context_meta(doc_id, title?, pinned?, sort?, status?)`; `get_context_bundle` takes `include_obsolete` (default false). 23 tools in total.
+
+## 18. R2 additions: baselines and critical path
+
+- **Baselines.** `create_baseline(project_id, label)` (MCP, 24 tools in total) and `POST /api/projects/:id/baselines` `{label}` (REST, `201`) store a `baseline` row and one `baseline_item` per live WP (start, end) and milestone (due date as end); the result is `{id, label, items}`. Gate decisions of `go` / `go_with_conditions` are to create one automatically (`baseline.decision_id`, with the gate decision feature). A `baseline` event is logged.
+- **Detail read.** `get_project` / `GET /api/projects/:id` add `baseline` (the latest: `{id, label, decision_id, created_at, created_by}` or `null`) and, per WP node and milestone, `baseline_start`, `baseline_end` and `slip_days` (current end or due date minus the baseline end, in calendar days; `null` without a baseline item or a date) against the latest baseline, plus `critical`.
+- **Critical path.** Computed on read over `depends_on` and milestone `requires` → milestone → `unlocks` edges; a WP lasts end − start in calendar days (0 without both dates), a milestone 0. The longest path is flagged, every tied path too. A cycle or an undated plan flags nothing. A write that makes a WP's `depends_on` cyclic is refused (`400`).

@@ -213,6 +213,39 @@ export function setAfterScheduleReadForTesting(f: (() => Promise<void>) | null):
   afterScheduleRead = f;
 }
 
+/** The schedule view of a stored WP row (depends_on as stored, see storedDependsOn). */
+export const snapWp = (w: Pick<WpRow, "id" | "parent_id" | "start_date" | "end_date" | "depends_on">): SnapWp => ({
+  id: w.id,
+  parent_id: w.parent_id ?? null,
+  start_date: w.start_date ?? null,
+  end_date: w.end_date ?? null,
+  depends_on: storedDependsOn(w.depends_on),
+});
+/** The schedule view of a milestone with its requires/unlocks lists. */
+export const snapMs = (m: { id: string; due_date: string | null; requires?: string[]; unlocks?: string[] }): SnapMs => ({
+  id: m.id,
+  due_date: m.due_date ?? null,
+  requires: m.requires ?? [],
+  unlocks: m.unlocks ?? [],
+});
+
+/** A depends_on path from `id` back to itself (ids in order, `id` first and last), or null. */
+export function dependsOnCycle(s: ScheduleSnapshot, id: string): string[] | null {
+  const deps = new Map(s.wps.map((w) => [w.id, w.depends_on]));
+  const seen = new Set<string>();
+  const walk = (at: string, path: string[]): string[] | null => {
+    for (const d of deps.get(at) ?? []) {
+      if (d === id) return [...path, d];
+      if (seen.has(d) || !deps.has(d)) continue;
+      seen.add(d);
+      const found = walk(d, [...path, d]);
+      if (found) return found;
+    }
+    return null;
+  };
+  return walk(id, [id]);
+}
+
 type WpRow = {
   id: string;
   parent_id: string | null;
@@ -262,14 +295,8 @@ export async function recomputeScheduleStmts(
     (l.role === "requires" ? e.requires : e.unlocks).push(l.workpackage_id);
     links.set(l.milestone_id, e);
   }
-  const toWp = (w: WpRow): SnapWp => ({
-    id: w.id,
-    parent_id: w.parent_id,
-    start_date: w.start_date,
-    end_date: w.end_date,
-    depends_on: storedDependsOn(w.depends_on),
-  });
-  const toMs = (m: MsRow): SnapMs => ({ id: m.id, due_date: m.due_date, ...(links.get(m.id) ?? { requires: [], unlocks: [] }) });
+  const toWp = snapWp;
+  const toMs = (m: MsRow): SnapMs => snapMs({ ...m, ...links.get(m.id) });
 
   const before: ScheduleSnapshot = {
     wps: wpRows.filter((w) => !w.deleted_at).map(toWp),
@@ -289,6 +316,8 @@ export async function recomputeScheduleStmts(
     const known = new Set(after.wps.map((w) => w.id));
     const bad = (self?.depends_on ?? []).filter((d) => d === c.checkDependsOn || !known.has(d));
     if (bad.length) throw new ValidationError(`depends_on: not other workpackages of project ${projectId}: ${bad.join(", ")}`);
+    const cycle = dependsOnCycle(after, c.checkDependsOn);
+    if (cycle) throw new ValidationError(`depends_on: creates a dependency cycle: ${cycle.join(" -> ")}`);
   }
   if (change && afterScheduleRead) await afterScheduleRead();
   const issues = scheduleIssues(after);
