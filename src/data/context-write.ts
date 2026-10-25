@@ -1,4 +1,4 @@
-import type { ContextDocRow, ContextRevisionRow } from "../types";
+import type { Caller, ContextDocRow, ContextRevisionRow } from "../types";
 import { CONTEXT_DOC_MAX_BYTES, CONTEXT_OWNER_MAX_BYTES, CONTEXT_REVISIONS_KEPT } from "../types";
 import { resolveOwner, type DocMeta, type OwnerRef } from "./context-read";
 import {
@@ -41,12 +41,12 @@ function checkOwnerSize(others: number, bytes: number): void {
 }
 
 /** Revision snapshot of the doc at `version`; no-op if the doc moved on (keeps revision and update consistent). */
-function revisionStmt(db: D1Database, docId: string, version: number, actor: string): D1PreparedStatement {
+function revisionStmt(db: D1Database, docId: string, version: number, by: Caller): D1PreparedStatement {
   return db
     .prepare(
       "INSERT INTO context_revision (doc_id, version, content_md, changed_at, changed_by) SELECT id, version, content_md, ?, ? FROM context_doc WHERE id = ? AND version = ?",
     )
-    .bind(now(), actor, docId, version);
+    .bind(now(), by.actor, docId, version);
 }
 
 function pruneStmt(db: D1Database, docId: string): D1PreparedStatement {
@@ -68,7 +68,7 @@ async function replaceContent(
   db: D1Database,
   existing: ContextDocRow,
   patch: { content_md: string; title?: string; pinned?: boolean; sort?: number; source?: Source; filename?: string | null },
-  actor: string,
+  by: Caller,
   action: string,
   summarySuffix = "",
 ): Promise<ContextDocRow> {
@@ -77,7 +77,7 @@ async function replaceContent(
   checkOwnerSize(await ownerBytes(db, existing, existing.id), bytes);
   const ts = now();
   const res = await db.batch([
-    revisionStmt(db, existing.id, existing.version, actor),
+    revisionStmt(db, existing.id, existing.version, by),
     db
       .prepare(
         "UPDATE context_doc SET content_md = ?, bytes = ?, title = ?, pinned = ?, sort = ?, source = ?, filename = ?, version = version + 1, updated_at = ?, updated_by = ? WHERE id = ? AND version = ?",
@@ -91,12 +91,12 @@ async function replaceContent(
         patch.source ?? existing.source,
         patch.filename === undefined ? existing.filename : patch.filename,
         ts,
-        actor,
+        by.actor,
         existing.id,
         existing.version,
       ),
     eventStmtIfChanged(db, {
-      actor,
+      by,
       project_id: existing.project_id,
       entity: "context_doc",
       entity_id: existing.id,
@@ -127,7 +127,7 @@ export async function writeContext(
     expected_version?: number;
     replace?: boolean;
   },
-  actor: string,
+  by: Caller,
 ): Promise<ContextDocRow> {
   const title = args.title?.trim();
   if (!title) throw new ValidationError("title is required");
@@ -162,7 +162,7 @@ export async function writeContext(
       db,
       existing,
       { content_md: args.content_md, title, pinned: args.pinned, sort: args.sort, source, filename: args.filename },
-      actor,
+      by,
       "update",
     );
   }
@@ -190,11 +190,11 @@ export async function writeContext(
         bytes,
         ts,
         ts,
-        actor,
-        actor,
+        by.actor,
+        by.actor,
       ),
     eventStmt(db, {
-      actor,
+      by,
       project_id: owner.project_id,
       entity: "context_doc",
       entity_id: id,
@@ -213,13 +213,13 @@ export async function writeContext(
 export async function appendContext(
   db: D1Database,
   args: ({ doc_id: string } | (OwnerRef & { slug: string })) & { text: string; heading?: string | null; title?: string | null },
-  actor: string,
+  by: Caller,
 ): Promise<ContextDocRow> {
   const text = args.text?.trim();
   if (!text) throw new ValidationError("text is required");
   const ts = now();
   const heading = (args.heading?.trim() || "Update").replace(/\s+/g, " ");
-  const section = `\n\n## ${heading} (${ts}, ${actor})\n\n${text}\n`;
+  const section = `\n\n## ${heading} (${ts}, ${by.actor})\n\n${text}\n`;
   const add = utf8Bytes(section);
   checkDocSize(add);
 
@@ -249,7 +249,7 @@ export async function appendContext(
         .prepare(
           "INSERT INTO context_doc (id, project_id, owner_kind, owner_id, title, slug, source, filename, content_md, pinned, sort, bytes, version, created_at, updated_at, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, 'claude', NULL, '', 0, 0, 0, 1, ?, ?, ?, ?) ON CONFLICT(owner_kind, owner_id, slug) DO NOTHING",
         )
-        .bind(newId(), info.project_id, info.owner_kind, info.owner_id, args.title?.trim() || slug, slug, ts, ts, actor, actor),
+        .bind(newId(), info.project_id, info.owner_kind, info.owner_id, args.title?.trim() || slug, slug, ts, ts, by.actor, by.actor),
     );
   }
 
@@ -263,12 +263,12 @@ export async function appendContext(
       .prepare(
         `INSERT INTO context_revision (doc_id, version, content_md, changed_at, changed_by) SELECT id, version, content_md, ?, ? FROM context_doc WHERE ${guard} AND bytes > 0`,
       )
-      .bind(ts, actor, ...guardArgs),
+      .bind(ts, by.actor, ...guardArgs),
     db
       .prepare(
         `UPDATE context_doc SET content_md = content_md || ?, bytes = bytes + ?, version = version + 1, updated_at = ?, updated_by = ? WHERE ${guard}`,
       )
-      .bind(section, add, ts, actor, ...guardArgs),
+      .bind(section, add, ts, by.actor, ...guardArgs),
     // Event only if the UPDATE above applied (changes() refers to the previous statement).
     db
       .prepare(
@@ -276,7 +276,7 @@ export async function appendContext(
       )
       .bind(
         ts,
-        actor,
+        by.actor,
         owner.project_id,
         ...keyArgs,
         `${owner.owner_kind}:${owner.owner_id} append: ${heading}`,
@@ -303,12 +303,12 @@ export async function appendContext(
 }
 
 /** Delete a doc. Revisions cascade, so the previous content is kept in the event diff for the audit log. */
-export async function deleteContext(db: D1Database, docId: string, actor: string): Promise<{ deleted: string }> {
+export async function deleteContext(db: D1Database, docId: string, by: Caller): Promise<{ deleted: string }> {
   const d = await getDoc(db, docId);
   await db.batch([
     db.prepare("DELETE FROM context_doc WHERE id = ?").bind(docId),
     eventStmt(db, {
-      actor,
+      by,
       project_id: d.project_id,
       entity: "context_doc",
       entity_id: docId,
@@ -343,7 +343,7 @@ export async function restoreRevision(
   db: D1Database,
   docId: string,
   revisionId: number,
-  actor: string,
+  by: Caller,
   expectedVersion?: number,
 ): Promise<ContextDocRow> {
   const rev = await getRevision(db, revisionId);
@@ -351,7 +351,7 @@ export async function restoreRevision(
   const existing = await getDoc(db, docId);
   if (typeof expectedVersion === "number" && expectedVersion !== existing.version)
     throw new ConflictError("version conflict", stripContent(existing));
-  return replaceContent(db, existing, { content_md: rev.content_md }, actor, "restore", ` (restored v${rev.version})`);
+  return replaceContent(db, existing, { content_md: rev.content_md }, by, "restore", ` (restored v${rev.version})`);
 }
 
 /** Title / pin / sort only: no revision, no version bump. */
@@ -359,7 +359,7 @@ export async function setContextMeta(
   db: D1Database,
   docId: string,
   patch: { title?: string; pinned?: boolean; sort?: number },
-  actor: string,
+  by: Caller,
 ): Promise<ContextDocRow> {
   const d = await getDoc(db, docId);
   const title = patch.title?.trim() || d.title;
@@ -368,7 +368,7 @@ export async function setContextMeta(
   await db.batch([
     db.prepare("UPDATE context_doc SET title = ?, pinned = ?, sort = ? WHERE id = ?").bind(title, pinned, sort, docId),
     eventStmt(db, {
-      actor,
+      by,
       project_id: d.project_id,
       entity: "context_doc",
       entity_id: docId,

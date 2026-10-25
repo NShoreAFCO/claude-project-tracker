@@ -1,4 +1,4 @@
-import type { Actor } from "../types";
+import type { Caller } from "../types";
 
 /** Typed errors; REST maps them to HTTP codes, MCP to tool errors. */
 export class NotFoundError extends Error {
@@ -57,7 +57,7 @@ export function diffFields(before: Record<string, unknown> | null, after: Record
 }
 
 export interface EventInput {
-  actor: Actor;
+  by: Caller;
   project_id: string | null;
   entity: string;
   entity_id: string | null;
@@ -72,7 +72,7 @@ export function eventStmt(db: D1Database, e: EventInput): D1PreparedStatement {
     .prepare("INSERT INTO event (ts, actor, project_id, entity, entity_id, action, summary, diff_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
     .bind(
       now(),
-      e.actor,
+      e.by.actor,
       e.project_id,
       e.entity,
       e.entity_id,
@@ -93,7 +93,7 @@ export function eventStmtIfChanged(db: D1Database, e: EventInput): D1PreparedSta
     )
     .bind(
       now(),
-      e.actor,
+      e.by.actor,
       e.project_id,
       e.entity,
       e.entity_id,

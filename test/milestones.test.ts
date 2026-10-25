@@ -1,4 +1,5 @@
 import { env } from "cloudflare:test";
+import { testCaller } from "./helpers";
 import { describe, expect, it } from "vitest";
 import { createProject } from "../src/data/projects";
 import { upsertWorkpackage } from "../src/data/workpackages";
@@ -8,7 +9,7 @@ import { listMilestones, lockedWpIds, upsertMilestone } from "../src/data/milest
 import { ConflictError, ValidationError } from "../src/data/util";
 
 const db = env.DB;
-const A = "user:test@example.com";
+const A = testCaller({ actor: "user:test@example.com" });
 let n = 0;
 
 async function setup() {

@@ -1,4 +1,4 @@
-import type { WorkpackageRow } from "../types";
+import type { Caller, WorkpackageRow } from "../types";
 import {
   ConflictError,
   NotFoundError,
@@ -109,7 +109,7 @@ export async function upsertWorkpackage(
   db: D1Database,
   projectId: string,
   input: Record<string, unknown> & { id?: string },
-  actor: string,
+  by: Caller,
   expectedVersion?: number,
 ): Promise<WorkpackageRow> {
   if (!(await db.prepare("SELECT 1 FROM project WHERE id = ?").bind(projectId).first()))
@@ -134,7 +134,7 @@ export async function upsertWorkpackage(
         )
         .bind(...changed.map((f) => next[f] ?? null), now(), existing.id, existing.version),
       eventStmtIfChanged(db, {
-        actor,
+        by,
         project_id: projectId,
         entity: "workpackage",
         entity_id: existing.id,
@@ -142,7 +142,7 @@ export async function upsertWorkpackage(
         summary: `${String(next.title)}: ${changed.join(", ")}`,
         diff,
       }),
-      ...reachStmts(db, projectId, actor),
+      ...reachStmts(db, projectId, by),
     ]);
     if (!res[0].meta.changes) throw new ConflictError("version conflict", await getWp(db, existing.id));
     return (await getWp(db, existing.id))!;
@@ -185,7 +185,7 @@ export async function upsertWorkpackage(
       .prepare(`INSERT INTO workpackage (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`)
       .bind(...cols.map((c) => (row as unknown as Record<string, unknown>)[c] ?? null)),
     eventStmt(db, {
-      actor,
+      by,
       project_id: projectId,
       entity: "workpackage",
       entity_id: id,
@@ -193,7 +193,7 @@ export async function upsertWorkpackage(
       summary: title,
       diff: diffFields(null, row as unknown as Record<string, unknown>, WP_FIELDS),
     }),
-    ...reachStmts(db, projectId, actor),
+    ...reachStmts(db, projectId, by),
   ]);
   return (await getWp(db, id))!;
 }

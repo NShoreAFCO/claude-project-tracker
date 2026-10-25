@@ -2,7 +2,7 @@ import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT, type JWTPayload } from "jose";
 import worker from "../src/index";
 import { setJwksOverrideForTesting } from "../src/auth/access";
-import type { Env } from "../src/types";
+import type { Caller, Env } from "../src/types";
 
 export const BASE = "https://tracker.test";
 export const TEAM = "https://team.cloudflareaccess.com";
@@ -50,3 +50,12 @@ export async function call(
   await waitOnExecutionContext(ctx);
   return res;
 }
+
+/** Caller for direct data-layer calls; defaults to an admin system caller without a person. */
+export const testCaller = (overrides: Partial<Caller> = {}): Caller => ({
+  actor: "test",
+  personId: null,
+  role: "admin",
+  channel: "system",
+  ...overrides,
+});

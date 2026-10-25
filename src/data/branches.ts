@@ -1,4 +1,4 @@
-import type { BranchRow } from "../types";
+import type { BranchRow, Caller } from "../types";
 import { NotFoundError, ValidationError, diffFields, eventStmt, newId, now } from "./util";
 
 export type BranchInput = {
@@ -35,7 +35,7 @@ export function findBranch(db: D1Database, repo: string, name: string): Promise<
 }
 
 /** Upsert by (repo, name). undefined keeps a field, null clears it. */
-export async function linkBranch(db: D1Database, projectId: string, input: BranchInput, actor: string): Promise<BranchRow> {
+export async function linkBranch(db: D1Database, projectId: string, input: BranchInput, by: Caller): Promise<BranchRow> {
   const repo = input.repo?.trim();
   const name = input.name?.trim();
   if (!repo || !name) throw new ValidationError("repo and name are required");
@@ -71,7 +71,7 @@ export async function linkBranch(db: D1Database, projectId: string, input: Branc
     await db.batch([
       db.prepare(`UPDATE branch SET ${sets} WHERE id = ?`).bind(...changed.map((f) => next[f] ?? null), existing.id),
       eventStmt(db, {
-        actor,
+        by,
         project_id: projectId,
         entity: "branch",
         entity_id: existing.id,
@@ -119,7 +119,7 @@ export async function linkBranch(db: D1Database, projectId: string, input: Branc
         row.note,
       ),
     eventStmt(db, {
-      actor,
+      by,
       project_id: projectId,
       entity: "branch",
       entity_id: row.id,

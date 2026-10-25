@@ -1,4 +1,4 @@
-import type { BranchRow, ContextDocRow, EventRow, ProjectRow, ScoreRow, TokenCostRow, WorkpackageRow } from "../types";
+import type { BranchRow, Caller, ContextDocRow, EventRow, ProjectRow, ScoreRow, TokenCostRow, WorkpackageRow } from "../types";
 import { buildWpTree, computeProjectProgress, leafCounts } from "./progress";
 import { QUALIFIES, listMilestones, lockedWpIds } from "./milestones";
 import { PROJECT_CATEGORIES, checkCategory } from "./categories";
@@ -200,7 +200,7 @@ export async function getProjectDetail(db: D1Database, id: string) {
   };
 }
 
-export async function createProject(db: D1Database, input: ProjectInput, actor: string): Promise<ProjectOut> {
+export async function createProject(db: D1Database, input: ProjectInput, by: Caller): Promise<ProjectOut> {
   const fields = normalise(input);
   const title = String(fields.title ?? "").trim();
   if (!title) throw new ValidationError("title is required");
@@ -239,7 +239,7 @@ export async function createProject(db: D1Database, input: ProjectInput, actor: 
       .prepare(`INSERT INTO project (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`)
       .bind(...cols.map((c) => (row as unknown as Record<string, unknown>)[c] ?? null)),
     eventStmt(db, {
-      actor,
+      by,
       project_id: id,
       entity: "project",
       entity_id: id,
@@ -255,7 +255,7 @@ export async function updateProject(
   db: D1Database,
   id: string,
   patch: ProjectInput,
-  actor: string,
+  by: Caller,
   expectedVersion?: number,
 ): Promise<ProjectOut> {
   const current = await getProjectRow(db, id);
@@ -274,7 +274,7 @@ export async function updateProject(
       )
       .bind(...changed.map((f) => next[f] ?? null), now(), id, current.version),
     eventStmtIfChanged(db, {
-      actor,
+      by,
       project_id: id,
       entity: "project",
       entity_id: id,

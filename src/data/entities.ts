@@ -1,3 +1,4 @@
+import type { Caller } from "../types";
 import { NotFoundError, eventStmt } from "./util";
 import { reachStmts } from "./milestones";
 
@@ -13,7 +14,7 @@ export async function deleteEntity(
   db: D1Database,
   kind: EntityKind,
   id: string,
-  actor: string,
+  by: Caller,
 ): Promise<{ deleted: string; kind: EntityKind }> {
   let projectId: string;
   let label: string;
@@ -93,7 +94,7 @@ export async function deleteEntity(
   stmts.push(db.prepare(`DELETE FROM ${kind} WHERE id = ?`).bind(id));
   stmts.push(
     eventStmt(db, {
-      actor,
+      by,
       project_id: kind === "project" ? null : projectId,
       entity: kind,
       entity_id: id,
@@ -103,7 +104,7 @@ export async function deleteEntity(
     }),
   );
   // Removing a required WP can complete a milestone.
-  if (kind === "workpackage") stmts.push(...reachStmts(db, projectId, actor));
+  if (kind === "workpackage") stmts.push(...reachStmts(db, projectId, by));
   await db.batch(stmts);
   return { deleted: id, kind };
 }

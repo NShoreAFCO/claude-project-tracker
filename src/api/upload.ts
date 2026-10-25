@@ -1,4 +1,4 @@
-import type { ContextDocRow, OwnerKind } from "../types";
+import type { Caller, ContextDocRow, OwnerKind } from "../types";
 import { CONTEXT_DOC_MAX_BYTES } from "../types";
 import { writeContext } from "../data/context-write";
 import { ValidationError } from "../data/util";
@@ -25,7 +25,7 @@ export function decodeUtf8(bytes: ArrayBuffer): string | null {
  * a doc with the same slug, else a -2 suffix is used), pinned?, files (1..20 × .md/.markdown/.txt).
  * Each file is processed independently; one bad file does not stop the others.
  */
-export async function handleUpload(request: Request, db: D1Database, actor: string): Promise<{ results: UploadResult[] }> {
+export async function handleUpload(request: Request, db: D1Database, by: Caller): Promise<{ results: UploadResult[] }> {
   if (!(request.headers.get("Content-Type") ?? "").toLowerCase().startsWith("multipart/form-data")) {
     throw new ValidationError("expected multipart/form-data");
   }
@@ -74,7 +74,7 @@ export async function handleUpload(request: Request, db: D1Database, actor: stri
           pinned,
           replace,
         },
-        actor,
+        by,
       );
       const { content_md: _c, ...meta } = doc;
       results.push({ filename, ok: true, doc: meta });

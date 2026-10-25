@@ -151,7 +151,7 @@ export function registerTools(reg: Reg): void {
           tags: args.tags ?? [],
           category: args.category ?? null,
         },
-        tc.actor,
+        tc.by,
       ),
   );
 
@@ -184,15 +184,14 @@ export function registerTools(reg: Reg): void {
         expected_version: z.number().int().optional().describe("Require the expected project version."),
       }),
     },
-    async (args, tc) => updateProject(tc.db, args.id, omitUndefined(args.patch), tc.actor, args.expected_version),
+    async (args, tc) => updateProject(tc.db, args.id, omitUndefined(args.patch), tc.by, args.expected_version),
   );
 
   reg(
     "upsert_workpackage",
     {
       title: "Upsert work package",
-      description:
-        `Create or update a work package. category: ${WP_CATEGORIES.join("|")} (null = inherit from the parent). WPs with human=true${HUMAN_DEFAULT.length ? ` (default for ${HUMAN_DEFAULT.join(", ")})` : ""} are done off the computer: log progress the user reports, and set them to done only when the user says so.`,
+      description: `Create or update a work package. category: ${WP_CATEGORIES.join("|")} (null = inherit from the parent). WPs with human=true${HUMAN_DEFAULT.length ? ` (default for ${HUMAN_DEFAULT.join(", ")})` : ""} are done off the computer: log progress the user reports, and set them to done only when the user says so.`,
       inputSchema: z.object({
         project_id: z.string().describe("Identify the owning project."),
         id: z.string().optional().describe("Identify an existing work package (omit to create)."),
@@ -215,7 +214,7 @@ export function registerTools(reg: Reg): void {
     async (args, tc) => {
       const { project_id, expected_version, ...input } = args;
 
-      return upsertWorkpackage(tc.db, project_id, omitUndefined(input), tc.actor, expected_version);
+      return upsertWorkpackage(tc.db, project_id, omitUndefined(input), tc.by, expected_version);
     },
   );
 
@@ -240,7 +239,7 @@ export function registerTools(reg: Reg): void {
     },
     async (args, tc) => {
       const { project_id, expected_version, ...input } = args;
-      return upsertMilestone(tc.db, project_id, omitUndefined(input), tc.actor, expected_version);
+      return upsertMilestone(tc.db, project_id, omitUndefined(input), tc.by, expected_version);
     },
   );
 
@@ -261,7 +260,7 @@ export function registerTools(reg: Reg): void {
         throw new Error("Deletion requires confirm=true.");
       }
 
-      return deleteEntity(tc.db, args.kind, args.id, tc.actor);
+      return deleteEntity(tc.db, args.kind, args.id, tc.by);
     },
   );
 
@@ -278,7 +277,7 @@ export function registerTools(reg: Reg): void {
         session_id: optionalText("Link the session identifier."),
       }),
     },
-    async (args, tc) => logProgress(tc.db, args, tc.actor),
+    async (args, tc) => logProgress(tc.db, args, tc.by),
   );
 
   reg(
@@ -302,7 +301,7 @@ export function registerTools(reg: Reg): void {
     async (args, tc) => {
       const { project_id, ...input } = args;
 
-      return linkBranch(tc.db, project_id, omitUndefined(input), tc.actor);
+      return linkBranch(tc.db, project_id, omitUndefined(input), tc.by);
     },
   );
 
@@ -331,7 +330,7 @@ export function registerTools(reg: Reg): void {
         tc.db,
         args.project_id,
         args.scores.map((score) => omitUndefined(score)),
-        tc.actor,
+        tc.by,
       ),
   );
 
@@ -351,7 +350,7 @@ export function registerTools(reg: Reg): void {
     async (args, tc) => {
       const { project_id, ...input } = args;
 
-      return logTokenCost(tc.db, project_id, omitUndefined(input), tc.actor);
+      return logTokenCost(tc.db, project_id, omitUndefined(input), tc.by);
     },
   );
 
@@ -466,7 +465,7 @@ export function registerTools(reg: Reg): void {
       }),
     },
     async (args, tc) => {
-      const document = await writeContext(tc.db, { ...omitUndefined(args), source: "claude" }, tc.actor);
+      const document = await writeContext(tc.db, { ...omitUndefined(args), source: "claude" }, tc.by);
 
       const { content_md: _content, ...result } = document;
       return result;
@@ -501,7 +500,7 @@ export function registerTools(reg: Reg): void {
               heading: args.heading,
               title: args.title,
             }),
-            tc.actor,
+            tc.by,
           )
         : await appendContext(
             tc.db,
@@ -513,7 +512,7 @@ export function registerTools(reg: Reg): void {
               heading: args.heading,
               title: args.title,
             }),
-            tc.actor,
+            tc.by,
           );
 
       return {
@@ -541,7 +540,7 @@ export function registerTools(reg: Reg): void {
         throw new Error("Deletion requires confirm=true.");
       }
 
-      return deleteContext(tc.db, args.doc_id, tc.actor);
+      return deleteContext(tc.db, args.doc_id, tc.by);
     },
   );
 }

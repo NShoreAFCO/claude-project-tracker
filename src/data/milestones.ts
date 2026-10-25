@@ -1,4 +1,4 @@
-import type { MilestoneRow } from "../types";
+import type { Caller, MilestoneRow } from "../types";
 import { ConflictError, NotFoundError, ValidationError, diffFields, eventStmt, eventStmtIfChanged, newId, now } from "./util";
 
 export type MilestoneOut = MilestoneRow & { requires: string[]; unlocks: string[]; done: boolean };
@@ -30,7 +30,7 @@ export const QUALIFIES = `EXISTS (SELECT 1 FROM milestone_link l JOIN workpackag
  * Statements to append at the end of any batch that writes work packages or milestones of a project:
  * one `milestone/reached` event per newly qualifying milestone, then `reached_at` (set once, never cleared).
  */
-export function reachStmts(db: D1Database, projectId: string, actor: string): D1PreparedStatement[] {
+export function reachStmts(db: D1Database, projectId: string, by: Caller): D1PreparedStatement[] {
   const ts = now();
   return [
     db
@@ -39,7 +39,7 @@ export function reachStmts(db: D1Database, projectId: string, actor: string): D1
          SELECT ?, ?, m.project_id, 'milestone', m.id, 'reached', m.title, NULL FROM milestone m
          WHERE m.project_id = ? AND m.reached_at IS NULL AND ${QUALIFIES}`,
       )
-      .bind(ts, actor, projectId),
+      .bind(ts, by.actor, projectId),
     db
       .prepare(`UPDATE milestone AS m SET reached_at = ? WHERE m.project_id = ? AND m.reached_at IS NULL AND ${QUALIFIES}`)
       .bind(ts, projectId),
@@ -124,7 +124,7 @@ export async function upsertMilestone(
   db: D1Database,
   projectId: string,
   input: MilestoneInput,
-  actor: string,
+  by: Caller,
   expectedVersion?: number,
 ): Promise<MilestoneOut> {
   if (!(await db.prepare("SELECT 1 FROM project WHERE id = ?").bind(projectId).first()))
@@ -184,7 +184,7 @@ export async function upsertMilestone(
         )
         .bind(...changed.map((f) => next[f] ?? null), ts, existing.id, existing.version),
       eventStmtIfChanged(db, {
-        actor,
+        by,
         project_id: projectId,
         entity: "milestone",
         entity_id: existing.id,
@@ -193,7 +193,7 @@ export async function upsertMilestone(
         diff,
       }),
       ...linkStmts(existing.id, { version: existing.version + 1 }),
-      ...reachStmts(db, projectId, actor),
+      ...reachStmts(db, projectId, by),
     ]);
     if (!res[0].meta.changes) throw new ConflictError("version conflict", await getOne(db, projectId, existing.id));
     return getOne(db, projectId, existing.id);
@@ -221,7 +221,7 @@ export async function upsertMilestone(
       .prepare(`INSERT INTO milestone (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`)
       .bind(...cols.map((c) => (row as unknown as Record<string, unknown>)[c] ?? null)),
     eventStmt(db, {
-      actor,
+      by,
       project_id: projectId,
       entity: "milestone",
       entity_id: row.id,
@@ -234,7 +234,7 @@ export async function upsertMilestone(
       },
     }),
     ...linkStmts(row.id, null),
-    ...reachStmts(db, projectId, actor),
+    ...reachStmts(db, projectId, by),
   ]);
   return getOne(db, projectId, row.id);
 }

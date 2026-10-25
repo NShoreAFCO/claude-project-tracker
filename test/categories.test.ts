@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { barCategory, effectiveCategories, isHuman } from "../src/data/categories";
 import type { WorkpackageRow } from "../src/types";
+import { testCaller } from "./helpers";
 
 const wp = (id: string, o: Partial<WorkpackageRow> = {}): WorkpackageRow => ({
   id,
@@ -102,9 +103,9 @@ describe("categories from the instance", () => {
   it("legacy category survives unrelated update", async () => {
     const { env } = await import("cloudflare:test");
     const { createProject, updateProject, getProjectRow } = await import("../src/data/projects");
-    await createProject(env.DB, { id: "legacy", title: "Legacy" }, "test");
+    await createProject(env.DB, { id: "legacy", title: "Legacy" }, testCaller());
     await env.DB.prepare("UPDATE project SET category = 'retired-key' WHERE id = 'legacy'").run();
-    await updateProject(env.DB, "legacy", { title: "Legacy renamed" }, "test");
+    await updateProject(env.DB, "legacy", { title: "Legacy renamed" }, testCaller());
     const row = await getProjectRow(env.DB, "legacy");
     expect(row.title).toBe("Legacy renamed");
     expect(row.category).toBe("retired-key");
@@ -113,6 +114,8 @@ describe("categories from the instance", () => {
   it("setting an unknown category is rejected", async () => {
     const { env } = await import("cloudflare:test");
     const { createProject } = await import("../src/data/projects");
-    await expect(createProject(env.DB, { id: "bad", title: "Bad", category: "retired-key" }, "test")).rejects.toThrow(/research\|product-development\|product-launch/);
+    await expect(createProject(env.DB, { id: "bad", title: "Bad", category: "retired-key" }, testCaller())).rejects.toThrow(
+      /research\|product-development\|product-launch/,
+    );
   });
 });
