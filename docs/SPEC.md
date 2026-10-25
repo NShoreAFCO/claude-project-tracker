@@ -275,7 +275,7 @@ Optional. It runs only when both `AUDIT_REPO` and `AUDIT_GITHUB_TOKEN` are set. 
 - **Gantt.** Hand-rolled SVG. Covers work packages with dates; work packages without dates go in a side list. Dates are never invented.
 - **Forms** for every entity, plus an inline progress slider. Send `expected_version`; show a conflict dialog on 409.
 - **Inbox** of unassigned hook and webhook events, with an "assign to project" action.
-- **R1 additions.** People view (`#/people`: list, add, edit; admins set the access role) and Trash (`#/trash`: restore, admin purge). Cards show owner initials, red Blocked and amber Waiting chips with age, and a "Closure due" hint. Done is disabled with a tooltip while open work packages block it; closing a project opens a dialog for closure note, lessons learned and moving open work packages to a new or existing project. Rows have a ⋯ menu with Delete, which asks for confirmation naming the number of children. Context documents show a status badge and a release action.
+- **R1 additions.** People view (`#/people`: list, add, edit; admins set the access role) and Trash (`#/trash`: restore, admin purge). Cards show owner initials, a red Blocked chip with its age, an amber Waiting chip with the count of waiting work packages, and a "Closure due" hint. Done is disabled with a tooltip and a visible hint while open work packages block it; closing a project opens a dialog for closure note, lessons learned and moving open work packages to a new or existing project. Rows have a ⋯ menu with Delete, which asks for confirmation naming the number of children. Context documents show a status badge and a release action.
 - **Layout.** Responsive down to 375 px.
 
 ### 9.1 Theme
