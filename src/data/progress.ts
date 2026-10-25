@@ -77,16 +77,24 @@ export type WpNode<T extends WorkpackageRow> = T & {
   children: WpNode<T>[];
 };
 
-/** Leaf WPs (no children) by state: open = todo/waiting/blocked, started = doing; dropped is not counted. */
-export function leafCounts(wps: WorkpackageRow[]): { open: number; started: number; done: number } {
+export type WpCounts = { open: number; in_progress: number; waiting_blocked: number; done: number; started: number };
+
+/**
+ * Leaf WPs (no children) by state (spec F3 card counts): open = todo, in_progress = doing,
+ * waiting_blocked = waiting + blocked, done; dropped is not counted. `started` repeats in_progress
+ * for clients that still read the old key.
+ */
+export function leafCounts(wps: WorkpackageRow[]): WpCounts {
   const parents = new Set(wps.filter((w) => w.parent_id && w.parent_id !== w.id).map((w) => w.parent_id));
-  const out = { open: 0, started: 0, done: 0 };
+  const out = { open: 0, in_progress: 0, waiting_blocked: 0, done: 0, started: 0 };
   for (const w of wps) {
     if (parents.has(w.id)) continue;
     if (w.status === "done") out.done++;
-    else if (w.status === "doing") out.started++;
-    else if (w.status !== "dropped") out.open++;
+    else if (w.status === "doing") out.in_progress++;
+    else if (w.status === "waiting" || w.status === "blocked") out.waiting_blocked++;
+    else if (w.status === "todo") out.open++;
   }
+  out.started = out.in_progress;
   return out;
 }
 

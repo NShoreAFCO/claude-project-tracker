@@ -61,6 +61,9 @@ export interface ProjectRow {
   sponsor_text: string | null;
   decision_maker_person_id: string | null;
   decision_maker_text: string | null;
+  /** Closure record (spec F3): `done` and `abandoned` need the note, `done` also lessons learned. */
+  closure_note_md: string | null;
+  lessons_learned_md: string | null;
   version: number;
   created_at: string;
   updated_at: string;
@@ -85,6 +88,12 @@ export interface WorkpackageRow {
   /** Optional WP owner (person id or free text); the effective owner falls back to the project owner. */
   owner_person_id: string | null;
   owner_text: string | null;
+  /** Why a WP was dropped (required for `dropped`). */
+  drop_reason: string | null;
+  /** YYYY-MM-DD the WP became `blocked`; cleared when it leaves `blocked`. */
+  blocked_since: string | null;
+  /** Optional reason for a deferral (`waiting`); cleared when it leaves `waiting`. */
+  waiting_reason: string | null;
   version: number;
   created_at: string;
   updated_at: string;

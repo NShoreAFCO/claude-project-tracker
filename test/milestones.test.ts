@@ -74,13 +74,13 @@ describe("milestones", () => {
     const p = await createProject(db, { title: `MS ${++n}` }, A);
     const w = await upsertWorkpackage(db, p.id, { title: "w" }, A);
     const m = await upsertMilestone(db, p.id, { title: "dropped", requires: [w.id] }, A);
-    await upsertWorkpackage(db, p.id, { id: w.id, status: "dropped" }, A);
+    await upsertWorkpackage(db, p.id, { id: w.id, status: "dropped", drop_reason: "not needed" }, A);
     expect((await get(p.id, m.id)).reached_at).toBeNull();
   });
 
   it("dropped requires ignored", async () => {
     const { p, w1, w2, m } = await setup();
-    await upsertWorkpackage(db, p.id, { id: w1.id, status: "dropped" }, A);
+    await upsertWorkpackage(db, p.id, { id: w1.id, status: "dropped", drop_reason: "not needed" }, A);
     await upsertWorkpackage(db, p.id, { id: w2.id, status: "done" }, A);
     expect((await get(p.id, m.id)).done).toBe(true);
   });

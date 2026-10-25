@@ -1,0 +1,347 @@
+/**
+ * Status rules and closure (spec F3): which transitions need what, how blockers are referenced,
+ * and moving open work packages to a follow-up project.
+ */
+import type { Caller, ProjectRow, WorkpackageRow } from "../types";
+import { reachStmts } from "./milestones";
+import { ConflictError, NotFoundError, ValidationError, eventStmtWhere, now, parseJsonArray, type Diff } from "./util";
+
+/** Machine-readable details of a refused transition (the 409 body's `current`). */
+export type TransitionDetails = {
+  code: string;
+  open_workpackages?: Array<{ id: string; title: string; status: string }>;
+  missing?: string[];
+};
+
+/** A status transition that the rules refuse (HTTP 409); `current` says why. */
+export class TransitionError extends ConflictError {
+  declare readonly current: TransitionDetails;
+  constructor(message: string, current: TransitionDetails) {
+    super(message, current);
+  }
+}
+
+/** WP statuses that keep a project from being closed (and that may be moved to a follow-up project). */
+export const OPEN_WP_STATUSES = ["todo", "doing", "blocked", "waiting"] as const;
+/** Closed project statuses. */
+export const CLOSED_PROJECT_STATUSES = ["done", "abandoned"] as const;
+
+export const isOpenWpStatus = (s: string): boolean => (OPEN_WP_STATUSES as readonly string[]).includes(s);
+export const isClosedProjectStatus = (s: string): boolean => (CLOSED_PROJECT_STATUSES as readonly string[]).includes(s);
+
+/** SQL condition on a workpackage row (no alias): open and not soft-deleted. */
+export const OPEN_WP_SQL = `deleted_at IS NULL AND status IN (${OPEN_WP_STATUSES.map((s) => `'${s}'`).join(", ")})`;
+
+export const todayUtc = (): string => new Date().toISOString().slice(0, 10);
+
+const filled = (v: unknown): boolean => typeof v === "string" && v.trim() !== "";
+
+// ---- projects
+
+export async function openWorkpackages(db: D1Database, projectId: string): Promise<Array<{ id: string; title: string; status: string }>> {
+  const { results } = await db
+    .prepare(`SELECT id, title, status FROM workpackage WHERE project_id = ? AND ${OPEN_WP_SQL} ORDER BY sort, title`)
+    .bind(projectId)
+    .all<{ id: string; title: string; status: string }>();
+  return results;
+}
+
+export function openWorkpackagesError(open: Array<{ id: string; title: string; status: string }>): TransitionError {
+  return new TransitionError(
+    `project has ${open.length} open work package${open.length === 1 ? "" : "s"}; finish, drop or move them before closing it as done`,
+    { code: "OPEN_WORKPACKAGES", open_workpackages: open },
+  );
+}
+
+/** Closure fields a project still needs for `status` (done: note and lessons learned; abandoned: note). */
+export function closureMissing(status: string, row: Pick<ProjectRow, "closure_note_md" | "lessons_learned_md">): string[] {
+  if (!isClosedProjectStatus(status)) return [];
+  const missing: string[] = [];
+  if (!filled(row.closure_note_md)) missing.push("closure_note_md");
+  if (status === "done" && !filled(row.lessons_learned_md)) missing.push("lessons_learned_md");
+  return missing;
+}
+
+export function closureError(status: string, missing: string[]): TransitionError {
+  return new TransitionError(`status ${status} requires ${missing.join(" and ")} (lessons learned may be "none")`, {
+    code: "CLOSURE_FIELDS_MISSING",
+    missing,
+  });
+}
+
+/** A closed project gets no new or reopened WPs; the way back is reopening the project. */
+export function projectClosedError(projectId: string, status: string): TransitionError {
+  return new TransitionError(
+    `project ${projectId} is ${status}: work packages cannot be added or reopened; reopen the project (status active or on_hold) first`,
+    { code: "PROJECT_CLOSED" },
+  );
+}
+
+/** Derived project flags (computed on read). */
+export function projectFlags(
+  status: string,
+  wps: WorkpackageRow[],
+  derivedProgress: (wps: WorkpackageRow[]) => number,
+): { stalled_blocked: boolean; closure_due: boolean } {
+  const live = wps.filter((w) => !(w as { deleted_at?: string | null }).deleted_at);
+  const ids = new Set(live.map((w) => w.id));
+  const top = live.filter((w) => !w.parent_id || !ids.has(w.parent_id));
+  const allClosed = live.every((w) => w.status === "done" || w.status === "dropped");
+  return {
+    stalled_blocked: top.some((w) => w.status === "blocked"),
+    closure_due: !isClosedProjectStatus(status) && allClosed && live.some((w) => w.status === "done") && derivedProgress(live) >= 100,
+  };
+}
+
+/** follows: projects this one continues; followed_by: its follow-up projects. */
+export async function projectLinks(db: D1Database, projectId: string): Promise<{ follows: string[]; followed_by: string[] }> {
+  const { results } = await db
+    .prepare(
+      "SELECT from_project_id, to_project_id FROM project_link WHERE kind = 'follows' AND (from_project_id = ? OR to_project_id = ?) ORDER BY created_at, from_project_id, to_project_id",
+    )
+    .bind(projectId, projectId)
+    .all<{ from_project_id: string; to_project_id: string }>();
+  return {
+    follows: results.filter((r) => r.from_project_id === projectId).map((r) => r.to_project_id),
+    followed_by: results.filter((r) => r.to_project_id === projectId).map((r) => r.from_project_id),
+  };
+}
+
+// ---- work packages
+
+export type BlockedRef = { kind: "wp" | "ms" | "ext" | "text"; ref: string };
+
+/**
+ * Classify a `blocked_by` value: `wp:<id>`, `ms:<id>`, `ext:<text>`, or free text (legacy values and
+ * anything else stay valid as kind "text"). Empty → null.
+ */
+export function parseBlockedBy(v: string | null): BlockedRef | null {
+  if (v == null) return null;
+  const s = v.trim();
+  if (!s) return null;
+  const m = /^(wp|ms|ext):([\s\S]*)$/.exec(s);
+  if (m && m[2].trim()) return { kind: m[1] as "wp" | "ms" | "ext", ref: m[2].trim() };
+  return { kind: "text", ref: s };
+}
+
+/** `wp:` and `ms:` references must name an existing work package or milestone. */
+export async function checkBlockedRef(db: D1Database, v: unknown): Promise<void> {
+  const ref = typeof v === "string" ? parseBlockedBy(v) : null;
+  if (!ref || (ref.kind !== "wp" && ref.kind !== "ms")) return;
+  const table = ref.kind === "wp" ? "workpackage" : "milestone";
+  if (!(await db.prepare(`SELECT 1 FROM ${table} WHERE id = ?`).bind(ref.ref).first()))
+    throw new ValidationError(`blocked_by: ${table} ${ref.ref} not found (use ext:<text> for external blockers)`);
+}
+
+type WpRuleState = Pick<WorkpackageRow, "status" | "progress" | "drop_reason" | "blocked_since" | "waiting_reason">;
+
+/**
+ * Apply the WP status rules to a write (mutates `fields`). `before` is the stored row, null on create.
+ * - Auto-start: a `todo` WP whose progress rises above 0 becomes `doing`, unless the write sets a status.
+ * - `blocked_since` defaults to today when the WP becomes `blocked`; cleared when it is not blocked.
+ * - `waiting_reason` is cleared when the WP is not `waiting`.
+ * - `dropped` needs a `drop_reason` (given in the write or already stored).
+ */
+export function applyWpRules(before: WpRuleState | null, fields: Record<string, unknown>, today = todayUtc()): void {
+  const prev = before?.status ?? "todo";
+  const progress = fields.progress;
+  if (
+    fields.status === undefined &&
+    prev === "todo" &&
+    typeof progress === "number" &&
+    progress > 0 &&
+    progress !== (before?.progress ?? 0)
+  )
+    fields.status = "doing";
+  const next = String(fields.status ?? prev);
+  if (next === "blocked") {
+    if ((prev !== "blocked" || !before) && fields.blocked_since == null) fields.blocked_since = today;
+  } else fields.blocked_since = null;
+  if (next !== "waiting") fields.waiting_reason = null;
+  if (next === "dropped" && (prev !== "dropped" || !before || "drop_reason" in fields)) {
+    const reason = "drop_reason" in fields ? fields.drop_reason : before?.drop_reason;
+    if (!filled(reason))
+      throw new TransitionError("status dropped requires drop_reason", { code: "DROP_REASON_MISSING", missing: ["drop_reason"] });
+  }
+}
+
+// ---- follow-up projects
+
+/** Test seam: runs between the reads and the guarded batch of moveWorkpackages. */
+let beforeMoveWrite: (() => Promise<void>) | null = null;
+export function setBeforeMoveWriteForTesting(f: (() => Promise<void>) | null): void {
+  beforeMoveWrite = f;
+}
+
+/**
+ * Move open work packages (with all their sub-WPs) from one project to a follow-up project, and link the
+ * projects (`follows`). WP ids stay the same; context docs of moved WPs and branches linked to them (with
+ * their docs) follow. Milestone links of the old project to moved WPs and dependencies that would cross
+ * the two projects are removed. All writes happen in one batch, guarded so that a concurrent change to
+ * any affected WP makes the whole move a no-op (409).
+ */
+export async function moveWorkpackages(
+  db: D1Database,
+  fromProjectId: string,
+  toProjectId: string,
+  ids: string[],
+  by: Caller,
+): Promise<{ moved: string[] }> {
+  if (!Array.isArray(ids) || !ids.length || ids.length > 200 || ids.some((x) => typeof x !== "string" || !x))
+    throw new ValidationError("ids must list 1..200 workpackage ids");
+  if (typeof toProjectId !== "string" || !toProjectId) throw new ValidationError("to_project_id is required");
+  if (fromProjectId === toProjectId) throw new ValidationError("source and target project are the same");
+  const [fromRes, toRes, wpRes] = await db.batch([
+    db.prepare("SELECT id, status FROM project WHERE id = ?").bind(fromProjectId),
+    db.prepare("SELECT id, status FROM project WHERE id = ?").bind(toProjectId),
+    db.prepare("SELECT * FROM workpackage WHERE project_id = ? ORDER BY sort, title").bind(fromProjectId),
+  ]);
+  const from = fromRes.results[0] as { id: string; status: string } | undefined;
+  const to = toRes.results[0] as { id: string; status: string } | undefined;
+  if (!from) throw new NotFoundError(`project ${fromProjectId} not found`);
+  if (!to) throw new NotFoundError(`project ${toProjectId} not found`);
+  if (isClosedProjectStatus(to.status))
+    throw new TransitionError(`target project ${to.id} is ${to.status}; choose an open project`, { code: "TARGET_CLOSED" });
+
+  const all = wpRes.results as WorkpackageRow[];
+  const byId = new Map(all.map((w) => [w.id, w]));
+  const unknown = ids.filter((id) => !byId.has(id));
+  if (unknown.length) throw new ValidationError(`not workpackages of project ${from.id}: ${unknown.join(", ")}`);
+  const notOpen = ids.filter((id) => !isOpenWpStatus(byId.get(id)!.status));
+  if (notOpen.length)
+    throw new ValidationError(
+      `only open work packages (${OPEN_WP_STATUSES.join("|")}) can be moved: ${notOpen.map((id) => `${id} (${byId.get(id)!.status})`).join(", ")}`,
+    );
+
+  // the given WPs and all their descendants
+  const kids = new Map<string, string[]>();
+  for (const w of all) if (w.parent_id) kids.set(w.parent_id, [...(kids.get(w.parent_id) ?? []), w.id]);
+  const moved = new Set<string>();
+  const stack = [...ids];
+  while (stack.length) {
+    const id = stack.pop()!;
+    if (moved.has(id)) continue;
+    moved.add(id);
+    stack.push(...(kids.get(id) ?? []));
+  }
+  const movedList = all.filter((w) => moved.has(w.id)).map((w) => w.id);
+
+  // dependencies that would cross the two projects after the move, in both directions
+  const removedDeps: string[] = [];
+  const newDeps = new Map<string, string>();
+  for (const w of all) {
+    const deps = parseJsonArray(w.depends_on);
+    const keep = deps.filter((d) => !byId.has(d) || moved.has(d) === moved.has(w.id));
+    if (keep.length === deps.length) continue;
+    for (const d of deps) if (!keep.includes(d)) removedDeps.push(`${w.id}->${d}`);
+    newDeps.set(w.id, JSON.stringify(keep));
+  }
+  const movedJson = JSON.stringify(movedList);
+  const { results: links } = await db
+    .prepare(
+      "SELECT l.milestone_id, l.workpackage_id, l.role FROM milestone_link l JOIN milestone m ON m.id = l.milestone_id WHERE m.project_id = ? AND l.workpackage_id IN (SELECT value FROM json_each(?)) ORDER BY l.milestone_id, l.role, l.workpackage_id",
+    )
+    .bind(from.id, movedJson)
+    .all<{ milestone_id: string; workpackage_id: string; role: string }>();
+  const removedLinks = links.map((l) => `${l.milestone_id}:${l.role}:${l.workpackage_id}`);
+
+  // Guard: every affected WP still has the version read above (rows this batch already wrote carry
+  // updated_at = ts and are skipped), and the target is still open. D1 runs a batch as one transaction,
+  // so the guard holds for all statements or for none.
+  if (beforeMoveWrite) await beforeMoveWrite();
+  const ts = now();
+  const versions = JSON.stringify(
+    Object.fromEntries(all.filter((w) => moved.has(w.id) || newDeps.has(w.id)).map((w) => [w.id, w.version])),
+  );
+  const guard = `NOT EXISTS (SELECT 1 FROM workpackage gw JOIN json_each(?) gj ON gw.id = gj.key
+      WHERE (gw.version != gj.value OR gw.project_id != ?) AND gw.updated_at != ?)
+    AND EXISTS (SELECT 1 FROM project gp WHERE gp.id = ? AND gp.status NOT IN ('done', 'abandoned'))`;
+  const g = [versions, from.id, ts, to.id];
+
+  const stmts: D1PreparedStatement[] = [];
+  for (const [id, deps] of newDeps)
+    if (!moved.has(id))
+      stmts.push(
+        db
+          .prepare(`UPDATE workpackage SET depends_on = ?, version = version + 1, updated_at = ? WHERE id = ? AND ${guard}`)
+          .bind(deps, ts, id, ...g),
+      );
+  const firstMove = stmts.length;
+  for (const id of movedList) {
+    const w = byId.get(id)!;
+    stmts.push(
+      db
+        .prepare(
+          `UPDATE workpackage SET project_id = ?, parent_id = ?, depends_on = ?, version = version + 1, updated_at = ? WHERE id = ? AND ${guard}`,
+        )
+        .bind(to.id, w.parent_id && moved.has(w.parent_id) ? w.parent_id : null, newDeps.get(id) ?? w.depends_on, ts, id, ...g),
+    );
+  }
+  const inMoved = "(SELECT value FROM json_each(?))";
+  stmts.push(
+    db
+      .prepare(
+        `DELETE FROM milestone_link WHERE workpackage_id IN ${inMoved} AND milestone_id IN (SELECT id FROM milestone WHERE project_id = ?) AND ${guard}`,
+      )
+      .bind(movedJson, from.id, ...g),
+    db
+      .prepare(
+        `UPDATE milestone SET workpackage_id = NULL, version = version + 1, updated_at = ? WHERE project_id = ? AND workpackage_id IN ${inMoved} AND ${guard}`,
+      )
+      .bind(ts, from.id, movedJson, ...g),
+    db
+      .prepare(
+        `UPDATE context_doc SET project_id = ? WHERE ((owner_kind = 'workpackage' AND owner_id IN ${inMoved})
+          OR (owner_kind = 'branch' AND owner_id IN (SELECT id FROM branch WHERE workpackage_id IN ${inMoved}))) AND ${guard}`,
+      )
+      .bind(to.id, movedJson, movedJson, ...g),
+    db.prepare(`UPDATE branch SET project_id = ? WHERE workpackage_id IN ${inMoved} AND ${guard}`).bind(to.id, movedJson, ...g),
+    db
+      .prepare(
+        `INSERT OR IGNORE INTO project_link (from_project_id, to_project_id, kind, created_at) SELECT ?, ?, 'follows', ? WHERE ${guard}`,
+      )
+      .bind(to.id, from.id, ts, ...g),
+    db.prepare(`UPDATE project SET updated_at = ? WHERE id IN (?, ?) AND ${guard}`).bind(ts, from.id, to.id, ...g),
+  );
+  const removed: Diff = {};
+  if (removedLinks.length) removed.removed_milestone_links = [removedLinks, null];
+  if (removedDeps.length) removed.removed_dependencies = [removedDeps, null];
+  const n = movedList.length;
+  const label = `${n} work package${n === 1 ? "" : "s"}`;
+  stmts.push(
+    eventStmtWhere(
+      db,
+      {
+        by,
+        project_id: from.id,
+        entity: "project",
+        entity_id: from.id,
+        action: "move_workpackages",
+        summary: `moved ${label} to follow-up project ${to.id}`,
+        diff: { moved_workpackages: [null, movedList], to_project: [null, to.id], ...removed },
+      },
+      guard,
+      g,
+    ),
+    eventStmtWhere(
+      db,
+      {
+        by,
+        project_id: to.id,
+        entity: "project",
+        entity_id: to.id,
+        action: "move_workpackages",
+        summary: `received ${label} from ${from.id}`,
+        diff: { moved_workpackages: [null, movedList], from_project: [null, from.id], ...removed },
+      },
+      guard,
+      g,
+    ),
+    ...reachStmts(db, from.id, by),
+    ...reachStmts(db, to.id, by),
+  );
+  const res = await db.batch(stmts);
+  const changed = res.slice(firstMove, firstMove + n).reduce((s, r) => s + (r.meta.changes ?? 0), 0);
+  if (changed !== n) throw new ConflictError("work packages or the target project changed meanwhile; nothing was moved", null);
+  return { moved: movedList };
+}

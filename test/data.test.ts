@@ -81,11 +81,11 @@ describe("list and detail enrichment", () => {
     const parent = await upsertWorkpackage(db, p.id, { title: "P" }, A);
     await upsertWorkpackage(db, p.id, { title: "c1", parent_id: parent.id, status: "doing" }, A);
     await upsertWorkpackage(db, p.id, { title: "c2", parent_id: parent.id, status: "done" }, A);
-    await upsertWorkpackage(db, p.id, { title: "c3", parent_id: parent.id, status: "dropped" }, A);
+    await upsertWorkpackage(db, p.id, { title: "c3", parent_id: parent.id, status: "dropped", drop_reason: "not needed" }, A);
     await upsertWorkpackage(db, p.id, { title: "leaf", status: "waiting" }, A);
     const card = (await listProjects(db, { category: "research" })).find((c) => c.id === p.id)!;
     expect(card.category).toBe("research");
-    expect(card.wp_counts).toEqual({ open: 1, started: 1, done: 1 });
+    expect(card.wp_counts).toEqual({ open: 0, in_progress: 1, waiting_blocked: 1, done: 1, started: 1 });
     expect((await listProjects(db, { category: "other" })).some((c) => c.id === p.id)).toBe(false);
     expect((await listProjects(db, { category: "none" })).some((c) => c.id === p.id)).toBe(false);
   });
@@ -131,7 +131,7 @@ describe("progress", () => {
     const parent = await upsertWorkpackage(db, p.id, { title: "P", weight: 3 }, A);
     await upsertWorkpackage(db, p.id, { title: "c1", parent_id: parent.id, progress: 100 }, A);
     await upsertWorkpackage(db, p.id, { title: "c2", parent_id: parent.id, progress: 0 }, A);
-    await upsertWorkpackage(db, p.id, { title: "c3", parent_id: parent.id, progress: 0, status: "dropped" }, A);
+    await upsertWorkpackage(db, p.id, { title: "c3", parent_id: parent.id, progress: 0, status: "dropped", drop_reason: "not needed" }, A);
     await upsertWorkpackage(db, p.id, { title: "Other", weight: 1, status: "done" }, A);
     const d = await getProjectDetail(db, p.id);
     // parent = 50 (c3 dropped); project = (50*3 + 100*1) / 4

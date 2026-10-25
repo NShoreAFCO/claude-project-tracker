@@ -1,6 +1,6 @@
 import type { Caller, EventOut, EventRow, ScoreRow, TokenCostRow, WorkpackageRow } from "../types";
 import { reachStmts } from "./milestones";
-import { NotFoundError, ValidationError, eventStmt, newId, now } from "./util";
+import { NotFoundError, ValidationError, eventStmt, newId, now, type Diff } from "./util";
 
 async function requireProject(db: D1Database, id: string): Promise<void> {
   if (!(await db.prepare("SELECT 1 FROM project WHERE id = ?").bind(id).first())) throw new NotFoundError(`project ${id} not found`);
@@ -115,15 +115,28 @@ export async function logProgress(
   }
   const ts = now();
   const stmts: D1PreparedStatement[] = [];
+  // Auto-start (spec F3): any progress log on a todo WP moves it to doing; progress ≥ 100 finishes it.
+  const nextStatus = wp ? (progress !== null && progress >= 100 ? "done" : wp.status === "todo" ? "doing" : wp.status) : null;
   if (wp && progress !== null) {
     stmts.push(
       db
         .prepare(
-          "UPDATE workpackage SET progress = ?, status = CASE WHEN ? >= 100 THEN 'done' WHEN status = 'todo' THEN 'doing' ELSE status END, version = version + 1, updated_at = ? WHERE id = ?",
+          `UPDATE workpackage SET progress = ?, status = CASE WHEN ? >= 100 THEN 'done' WHEN status = 'todo' THEN 'doing' ELSE status END,
+            blocked_since = CASE WHEN ? >= 100 THEN NULL ELSE blocked_since END, waiting_reason = CASE WHEN ? >= 100 THEN NULL ELSE waiting_reason END,
+            version = version + 1, updated_at = ? WHERE id = ?`,
         )
-        .bind(progress, progress, ts, wp.id),
+        .bind(progress, progress, progress, progress, ts, wp.id),
+    );
+  } else if (wp && wp.status === "todo") {
+    stmts.push(
+      db
+        .prepare("UPDATE workpackage SET status = 'doing', version = version + 1, updated_at = ? WHERE id = ? AND status = 'todo'")
+        .bind(ts, wp.id),
     );
   }
+  const diff: Diff = {};
+  if (wp && progress !== null) diff.progress = [wp.progress, progress];
+  if (wp && nextStatus !== wp.status) diff.status = [wp.status, nextStatus];
   if (input.session_id) {
     stmts.push(
       db
@@ -141,10 +154,10 @@ export async function logProgress(
       entity_id: wp ? wp.id : input.project_id,
       action: "progress",
       summary,
-      diff: wp && progress !== null ? { progress: [wp.progress, progress] } : null,
+      diff,
     }),
   );
-  const reach = wp && progress !== null ? reachStmts(db, input.project_id, by) : [];
+  const reach = Object.keys(diff).length ? reachStmts(db, input.project_id, by) : [];
   const res = await db.batch([...stmts, ...reach]);
   const eventId = Number(res[stmts.length - 1].meta.last_row_id);
   if (!wp) return { event_id: eventId };

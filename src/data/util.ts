@@ -110,6 +110,26 @@ export function eventStmtIfChanged(db: D1Database, e: EventInput): D1PreparedSta
     );
 }
 
+/** Like eventStmt, but only inserts while the SQL condition `where` (with its bound `params`) holds. */
+export function eventStmtWhere(db: D1Database, e: EventInput, where: string, params: unknown[]): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO event (ts, actor, person_id, project_id, entity, entity_id, action, summary, diff_json) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${where}`,
+    )
+    .bind(
+      now(),
+      e.by.actor,
+      e.by.personId,
+      e.project_id,
+      e.entity,
+      e.entity_id,
+      e.action,
+      e.summary ?? null,
+      e.diff && Object.keys(e.diff).length ? JSON.stringify(e.diff) : null,
+      ...params,
+    );
+}
+
 /** JSON-array TEXT column helpers. */
 export const toJsonArray = (v: unknown): string | null => (Array.isArray(v) ? JSON.stringify(v) : v == null ? null : String(v));
 export function parseJsonArray(v: string | null): string[] {

@@ -45,7 +45,7 @@ describe("MCP server", () => {
     expect(r.result.instructions).toContain("get_context_bundle");
   });
 
-  it("lists all 20 tools", async () => {
+  it("lists all 21 tools", async () => {
     const r = await rpc("tools/list");
     const names = r.result.tools.map((t: { name: string }) => t.name).sort();
     expect(names).toEqual(
@@ -62,6 +62,7 @@ describe("MCP server", () => {
         "list_projects",
         "log_progress",
         "log_token_cost",
+        "move_workpackages",
         "read_context",
         "search",
         "set_scores",
@@ -101,7 +102,7 @@ describe("MCP server", () => {
     const card = listed.find((x: { id: string }) => x.id === p.id);
     expect([card.category, card.wp_counts, card.next_milestone.title]).toEqual([
       "process-optimisation",
-      { open: 1, started: 0, done: 0 },
+      { open: 1, in_progress: 0, waiting_blocked: 0, done: 0, started: 0 },
       "Lab done",
     ]);
     const del = await call("delete_entity", { kind: "milestone", id: m.id, confirm: true });
