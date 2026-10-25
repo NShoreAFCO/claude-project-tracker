@@ -4,6 +4,8 @@ import { api } from "./api.js";
 import { h, clear, toast, toastError, confirmDialog } from "./dom.js";
 import { changed } from "./forms.js";
 
+const capital = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
 async function restore(item) {
   try {
     await api.restoreTrash(item.kind, item.id);
@@ -32,12 +34,16 @@ export async function renderTrash(main) {
   const rows = items.map((it) =>
     h(
       "tr",
-      h("td.kind", t(`entityKind.${it.kind}`)),
-      h("td", h("strong", it.title), it.project_id && it.kind !== "project" ? h("div.meta", it.project_id) : null),
-      h("td", fmtDateTime(it.deleted_at), h("div.meta", it.deleted_by)),
-      h("td.num", it.children ? t("trashChildren", { n: it.children }) : t("none")),
+      h("td.kind", { dataset: { label: t("colKind") } }, capital(t(`entityKind.${it.kind}`))),
+      h("td.p-name", h("strong", it.title), it.project_id && it.kind !== "project" ? h("div.meta", it.project_id) : null),
+      h("td", { dataset: { label: t("colDeleted") } }, fmtDateTime(it.deleted_at), h("div.meta", it.deleted_by)),
       h(
-        "td",
+        `td.num${it.children ? "" : ".empty"}`,
+        { dataset: { label: t("colChildren") } },
+        it.children ? t("trashChildren", { n: it.children }) : t("none"),
+      ),
+      h(
+        "td.row-actions",
         h(
           "div.actions",
           h("button.btn.small.secondary", { type: "button", on: { click: () => restore(it) } }, t("restore")),
@@ -54,7 +60,7 @@ export async function renderTrash(main) {
       ? h(
           "div.table-wrap",
           h(
-            "table",
+            "table.stack",
             h(
               "thead",
               h(

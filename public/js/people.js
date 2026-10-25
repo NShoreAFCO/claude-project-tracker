@@ -117,19 +117,30 @@ export async function renderPeople(main) {
     h(
       "tr",
       h(
-        "td",
+        "td.p-name",
         personBadge({ name: p.name, initials: initialsOf(p) }),
         " ",
         h("strong", p.name),
         p.display_name ? h("div.meta", p.display_name) : null,
+        // phones show a stacked card: function and company on a second line
+        [p.function, p.company].some(Boolean) ? h("div.meta.p-sub", [p.function, p.company].filter(Boolean).join(" · ")) : null,
       ),
-      h("td", p.company || t("none")),
-      h("td", p.function || t("none")),
-      h("td", p.internal ? t("internal") : t("external")),
-      h("td", p.email || t("none"), p.phone ? h("div.meta", p.phone) : null),
-      h("td", p.access_role ? t(`accessRole.${p.access_role}`) : t("none")),
+      h("td.p-company", p.company || t("none")),
+      h("td.p-function", p.function || t("none")),
+      h("td", { dataset: { label: t("colType") } }, p.internal ? t("internal") : t("external")),
       h(
-        "td",
+        `td${p.email || p.phone ? "" : ".empty"}`,
+        { dataset: { label: t("colContact") } },
+        p.email || (p.phone ? "" : t("none")),
+        p.phone ? h("div.meta", p.phone) : null,
+      ),
+      h(
+        `td${p.access_role ? "" : ".empty"}`,
+        { dataset: { label: t("fAccessRole") } },
+        p.access_role ? t(`accessRole.${p.access_role}`) : t("none"),
+      ),
+      h(
+        "td.row-actions",
         h(
           "div.actions",
           h("button.btn.small.ghost", { type: "button", on: { click: () => personForm(p, canAdmin) } }, t("edit")),
@@ -153,7 +164,7 @@ export async function renderPeople(main) {
       ? h(
           "div.table-wrap",
           h(
-            "table",
+            "table.stack",
             h(
               "thead",
               h(

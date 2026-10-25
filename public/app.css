@@ -1202,6 +1202,61 @@ details.inherited > summary {
   color: var(--color-text-muted);
 }
 
-td.kind::first-letter {
-  text-transform: uppercase;
+/* ---- stacked cards for people and trash on phones */
+.p-sub {
+  display: none;
+}
+@media (max-width: 600px) {
+  table.stack thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  table.stack,
+  table.stack tbody {
+    display: block;
+  }
+  table.stack tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 0.5rem;
+    align-items: start;
+    padding: 0.7rem 0.6rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    margin-bottom: 0.6rem;
+  }
+  table.stack td {
+    display: block;
+    grid-column: 1 / -1;
+    border: 0;
+    padding: 0.1rem 0;
+    overflow-wrap: anywhere;
+  }
+  table.stack td.p-name {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  table.stack td.row-actions {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  table.stack td.p-company,
+  table.stack td.p-function,
+  table.stack td.empty {
+    display: none;
+  }
+  table.stack .p-sub {
+    display: block;
+  }
+  table.stack td[data-label]::before {
+    content: attr(data-label) ": ";
+    color: var(--color-text-muted);
+    font-size: 0.85rem;
+  }
+  table.stack td.num {
+    text-align: left;
+  }
 }
