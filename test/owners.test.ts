@@ -243,4 +243,43 @@ describe("persons API and tools", () => {
     const ev = await db.prepare("SELECT actor, person_id FROM event WHERE entity = 'person' AND entity_id = ?").bind(p.id).first();
     expect(ev).toEqual({ actor: "mcp:Claude", person_id: me.id });
   });
+
+  it("person event diff redacts email, phone and contact_note", async () => {
+    const p = await upsertPerson(
+      db,
+      { name: uniq("Redact Me"), email: `redact${n}@example.org`, phone: "+00 5551", contact_note: "call after 5551" },
+      testCaller(),
+    );
+    await upsertPerson(db, { id: p.id, email: `redact${n}b@example.org`, phone: "+00 5552", contact_note: null }, testCaller());
+    const { results } = await db
+      .prepare("SELECT action, diff_json FROM event WHERE entity = 'person' AND entity_id = ? ORDER BY id")
+      .bind(p.id)
+      .all<{ action: string; diff_json: string }>();
+    expect(results.map((e) => e.action)).toEqual(["create", "update"]);
+    for (const e of results) {
+      expect(e.diff_json).toContain("[changed]");
+      expect(e.diff_json).not.toMatch(/redact\d+b?@example\.org|5551|5552/);
+    }
+    expect(JSON.parse(results[0].diff_json)).toMatchObject({
+      email: [null, "[changed]"],
+      phone: [null, "[changed]"],
+      contact_note: [null, "[changed]"],
+    });
+    expect(JSON.parse(results[1].diff_json)).toEqual({
+      email: ["[changed]", "[changed]"],
+      phone: ["[changed]", "[changed]"],
+      contact_note: ["[changed]", null],
+    });
+  });
+
+  it("upsert_person version conflict does not reveal phone or contact_note", async () => {
+    const p = await upsertPerson(db, { name: uniq("Conflict Contact"), phone: "+00 7771", contact_note: "secret note 7771" }, testCaller());
+    const r = await mcp("upsert_person", { id: p.id, function: "Buyer", expected_version: 99 });
+    expect(r.isError).toBe(true);
+    const err = JSON.parse(r.content[0].text);
+    expect(err).toMatchObject({ error: "conflict", current: { id: p.id, version: 1 } });
+    expect(err.current.phone).toBeUndefined();
+    expect(err.current.contact_note).toBeUndefined();
+    expect(r.content[0].text).not.toContain("7771");
+  });
 });

@@ -7,6 +7,7 @@ import {
   NotFoundError,
   ValidationError,
   diffFields,
+  type Diff,
   eventStmt,
   eventStmtIfChanged,
   newId,
@@ -31,8 +32,21 @@ export const PERSON_FIELDS = [
   "locale",
 ] as const;
 type PersonField = (typeof PERSON_FIELDS)[number];
-/** Fields that may appear in event diffs (and so in the audit export). Contact data and comments never do (spec §4.1). */
-const EVENT_FIELDS = ["name", "display_name", "company", "internal", "function", "access_role", "locale"] as const;
+/**
+ * Event diffs reach the audit export, so contact data and comments never appear there with their values
+ * (spec §4.1): they show up as "[changed]" (null where the field is empty), so history still shows that
+ * they changed.
+ */
+const REDACTED_FIELDS: readonly string[] = ["email", "phone", "contact_note", "comment"];
+const REDACTED = "[changed]";
+function personEventDiff(before: Record<string, unknown> | null, after: Record<string, unknown>): Diff {
+  const diff = diffFields(before, after, PERSON_FIELDS);
+  for (const f of REDACTED_FIELDS) {
+    if (!diff[f]) continue;
+    diff[f] = diff[f].map((v) => (v === null ? null : REDACTED)) as [unknown, unknown];
+  }
+  return diff;
+}
 
 export type PersonRef = { person_id: string | null; text: string | null };
 
@@ -266,7 +280,7 @@ export async function upsertPerson(
         entity_id: existing.id,
         action: "update",
         summary: `${String(next.name)}: ${changed.join(", ")}`,
-        diff: diffFields(existing as unknown as Record<string, unknown>, next, EVENT_FIELDS),
+        diff: personEventDiff(existing as unknown as Record<string, unknown>, next),
       }),
     ]);
     if (!res[0].meta.changes) throw new ConflictError("version conflict", await getPerson(db, existing.id));
@@ -298,7 +312,7 @@ export async function upsertPerson(
         entity_id: String(row.id),
         action: "create",
         summary: String(row.name),
-        diff: diffFields(null, row, EVENT_FIELDS),
+        diff: personEventDiff(null, row),
       }),
     ]);
   } catch (e) {

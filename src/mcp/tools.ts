@@ -10,7 +10,7 @@ import { writeContext, appendContext, deleteContext } from "../data/context-writ
 import { search } from "../data/search";
 import { upsertMilestone } from "../data/milestones";
 import { HUMAN_DEFAULT, PROJECT_CATEGORIES, WP_CATEGORIES } from "../data/categories";
-import { ValidationError } from "../data/util";
+import { ConflictError, ValidationError } from "../data/util";
 import { listPersons, upsertPerson } from "../data/persons";
 import type { PersonRow } from "../types";
 
@@ -648,7 +648,14 @@ export function registerTools(reg: Reg): void {
     },
     async (args, tc) => {
       const { expected_version, ...input } = args;
-      return personForAgent(await upsertPerson(tc.db, omitUndefined(input), tc.by, expected_version));
+      try {
+        return personForAgent(await upsertPerson(tc.db, omitUndefined(input), tc.by, expected_version));
+      } catch (e) {
+        // A version conflict carries the current row; agents get the same trimmed shape as on success.
+        if (e instanceof ConflictError && e.current && typeof e.current === "object" && "phone" in e.current)
+          throw new ConflictError(e.message, personForAgent(e.current as PersonRow));
+        throw e;
+      }
     },
   );
 }
