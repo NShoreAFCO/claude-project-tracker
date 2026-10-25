@@ -264,6 +264,8 @@ claude mcp add --transport http tracker https://project-tracker.<subdomain>.work
 
 Then start `claude`, type `/mcp`, choose `tracker` → **Authenticate**, and sign in in the browser.
 
+If `claude mcp list` already shows a server named `tracker` (for example from another organisation's tracker), pick a different name for this one, such as `tracker-<org>`, in the command above and in `/mcp`. Give the claude.ai connector a distinct name the same way.
+
 ## 10. Install the Claude Code session hook (optional, recommended)
 
 The hook tells the tracker each time a Claude Code session ends: which folder, branch and last commit, plus the folder's `session.md` handover notes. The tracker files this under the matching project, or in the **Inbox** if it can't match the folder.
