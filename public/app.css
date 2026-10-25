@@ -1245,7 +1245,7 @@ details.inherited > summary {
   }
   table.stack td.p-company,
   table.stack td.p-function,
-  table.stack td.empty {
+  table.stack td.blank {
     display: none;
   }
   table.stack .p-sub {

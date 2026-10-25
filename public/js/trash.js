@@ -38,7 +38,7 @@ export async function renderTrash(main) {
       h("td.p-name", h("strong", it.title), it.project_id && it.kind !== "project" ? h("div.meta", it.project_id) : null),
       h("td", { dataset: { label: t("colDeleted") } }, fmtDateTime(it.deleted_at), h("div.meta", it.deleted_by)),
       h(
-        `td.num${it.children ? "" : ".empty"}`,
+        `td.num${it.children ? "" : ".blank"}`,
         { dataset: { label: t("colChildren") } },
         it.children ? t("trashChildren", { n: it.children }) : t("none"),
       ),

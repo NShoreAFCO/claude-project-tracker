@@ -129,13 +129,13 @@ export async function renderPeople(main) {
       h("td.p-function", p.function || t("none")),
       h("td", { dataset: { label: t("colType") } }, p.internal ? t("internal") : t("external")),
       h(
-        `td${p.email || p.phone ? "" : ".empty"}`,
+        `td${p.email || p.phone ? "" : ".blank"}`,
         { dataset: { label: t("colContact") } },
         p.email || (p.phone ? "" : t("none")),
         p.phone ? h("div.meta", p.phone) : null,
       ),
       h(
-        `td${p.access_role ? "" : ".empty"}`,
+        `td${p.access_role ? "" : ".blank"}`,
         { dataset: { label: t("fAccessRole") } },
         p.access_role ? t(`accessRole.${p.access_role}`) : t("none"),
       ),
