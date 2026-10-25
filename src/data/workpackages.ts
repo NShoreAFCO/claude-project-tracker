@@ -3,6 +3,7 @@ import { ConflictError, LIVE, NotFoundError, ValidationError, diffFields, eventS
 import { dependsOnInput, issuesOf, recomputeScheduleStmts, scheduleBatch, storeSchedule, snapWp, type ScheduleIssue } from "./schedule";
 import { WP_CATEGORIES, checkCategory, checkHuman } from "./categories";
 import { reachStmts } from "./milestones";
+import { agentStartGuard, gateGuardedBatch } from "./gates";
 import { personOuts, personRefInput, personRefOut, resolvePersonRef } from "./persons";
 import {
   applyWpRules,
@@ -252,6 +253,8 @@ export async function upsertWorkpackage(
       throw new ValidationError(`workpackage ${existing.id} belongs to project ${existing.project_id}`);
     if (typeof expectedVersion === "number" && expectedVersion !== existing.version) throw new ConflictError("version conflict", existing);
     applyWpRules(existing, fields);
+    // F5: an agent may not start a gate-locked WP (pre-check here, guard statement in the batch).
+    const gateGuard = await agentStartGuard(db, by, existing, fields);
     // A done/abandoned project gets no open work back (edits that keep the status stay possible).
     if (closed && fields.status !== undefined && fields.status !== existing.status && isOpenWpStatus(String(fields.status)))
       throw projectClosedError(projectId, project.status);
@@ -275,26 +278,31 @@ export async function upsertWorkpackage(
       wps: [snapWp(next as unknown as WorkpackageRow)],
       checkDependsOn: "depends_on" in diff ? existing.id : undefined,
     });
-    const res = await scheduleBatch(db, [
-      ...stakeStmts,
-      db
-        .prepare(
-          `UPDATE workpackage SET ${changed.map((f) => `${f} = ?, `).join("")}version = version + 1, updated_at = ? WHERE id = ? AND version = ?`,
-        )
-        .bind(...changed.map((f) => next[f] ?? null), now(), existing.id, existing.version),
-      eventStmtIfChanged(db, {
-        by,
-        project_id: projectId,
-        entity: "workpackage",
-        entity_id: existing.id,
-        action: "update",
-        summary: `${String(next.title)}: ${Object.keys(diff).join(", ")}`,
-        diff,
-      }),
-      ...reachStmts(db, projectId, by),
-      ...schedule.stmts,
-    ]);
-    if (!res[stakeStmts.length].meta.changes) {
+    const res = await gateGuardedBatch(
+      db,
+      [
+        ...gateGuard,
+        ...stakeStmts,
+        db
+          .prepare(
+            `UPDATE workpackage SET ${changed.map((f) => `${f} = ?, `).join("")}version = version + 1, updated_at = ? WHERE id = ? AND version = ?`,
+          )
+          .bind(...changed.map((f) => next[f] ?? null), now(), existing.id, existing.version),
+        eventStmtIfChanged(db, {
+          by,
+          project_id: projectId,
+          entity: "workpackage",
+          entity_id: existing.id,
+          action: "update",
+          summary: `${String(next.title)}: ${Object.keys(diff).join(", ")}`,
+          diff,
+        }),
+        ...reachStmts(db, projectId, by),
+        ...schedule.stmts,
+      ],
+      existing.id,
+    );
+    if (!res[gateGuard.length + stakeStmts.length].meta.changes) {
       // The batch stored issues computed for this write; put back the ones of the stored plan.
       await storeSchedule(db, projectId);
       throw new ConflictError("version conflict", await getWp(db, existing.id));

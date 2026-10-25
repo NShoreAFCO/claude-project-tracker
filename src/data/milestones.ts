@@ -1,8 +1,43 @@
-import type { Caller, MilestoneRow } from "../types";
-import { ConflictError, LIVE, NotFoundError, ValidationError, diffFields, eventStmt, eventStmtIfChanged, newId, now } from "./util";
+import type { Caller, MilestoneRow, PersonOut } from "../types";
+import {
+  ConflictError,
+  LIVE,
+  NotFoundError,
+  ValidationError,
+  diffFields,
+  eventStmt,
+  eventStmtIfChanged,
+  newId,
+  now,
+  parseJsonArray,
+} from "./util";
 import { issuesOf, recomputeScheduleStmts, scheduleBatch, storeSchedule, type ScheduleIssue } from "./schedule";
+import { OPENING_DECISIONS, agentGateRemovalError, gateClosedSql, gatesEnforced, type Decision } from "./gates";
+import { initials } from "./persons";
+import { isAgent } from "../auth/caller";
 
-export type MilestoneOut = MilestoneRow & { requires: string[]; unlocks: string[]; done: boolean };
+/** A recorded gate decision as returned to clients (history, oldest first). */
+export type DecisionOut = {
+  id: string;
+  decision: Decision;
+  decided_by: PersonOut;
+  decided_at: string;
+  note_md: string | null;
+  evidence: string[];
+  conditions: Array<{ title: string; workpackage_id: string }>;
+  on_behalf: boolean;
+  baseline_id: string | null;
+};
+/** none = no gate, or a gate neither reached nor decided; pending = reached gate without a decision; else the latest decision. */
+export type DecisionState = "none" | "pending" | Decision;
+export type MilestoneOut = Omit<MilestoneRow, "gate"> & {
+  requires: string[];
+  unlocks: string[];
+  done: boolean;
+  gate: boolean;
+  decision_state: DecisionState;
+  decisions: DecisionOut[];
+};
 /** Write result: the milestone plus the schedule issues that concern it (spec F4). */
 export type MilestoneWriteOut = MilestoneOut & { warnings: ScheduleIssue[] };
 export type MilestoneInput = {
@@ -14,9 +49,10 @@ export type MilestoneInput = {
   sort?: unknown;
   requires?: unknown;
   unlocks?: unknown;
+  gate?: unknown;
 };
 
-const MS_FIELDS = ["title", "description_md", "due_date", "workpackage_id", "sort"] as const;
+const MS_FIELDS = ["title", "description_md", "due_date", "workpackage_id", "sort", "gate"] as const;
 type MsField = (typeof MS_FIELDS)[number];
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -49,8 +85,46 @@ export function reachStmts(db: D1Database, projectId: string, by: Caller): D1Pre
   ];
 }
 
+type DecisionRow = {
+  id: string;
+  milestone_id: string;
+  decision: Decision;
+  decided_by: string;
+  decided_at: string;
+  decision_note_md: string | null;
+  evidence: string | null;
+  conditions: string | null;
+  on_behalf: number;
+  baseline_id: string | null;
+  person_name: string | null;
+  person_display_name: string | null;
+};
+
+function decisionOut(d: DecisionRow): DecisionOut {
+  // Persons in the trash keep their name here: the decision history needs it.
+  const name = d.person_name ?? d.decided_by;
+  let conditions: DecisionOut["conditions"] = [];
+  try {
+    const c = d.conditions ? JSON.parse(d.conditions) : [];
+    if (Array.isArray(c)) conditions = c;
+  } catch {
+    /* unreadable conditions stay empty */
+  }
+  return {
+    id: d.id,
+    decision: d.decision,
+    decided_by: { person_id: d.decided_by, name, initials: initials({ name, display_name: d.person_display_name }) },
+    decided_at: d.decided_at,
+    note_md: d.decision_note_md,
+    evidence: parseJsonArray(d.evidence),
+    conditions,
+    on_behalf: d.on_behalf === 1,
+    baseline_id: d.baseline_id,
+  };
+}
+
 export async function listMilestones(db: D1Database, projectId: string): Promise<MilestoneOut[]> {
-  const [ms, links] = await db.batch([
+  const [ms, links, decisions] = await db.batch([
     db
       .prepare(
         `SELECT m.*, (${QUALIFIES}) AS done FROM milestone m WHERE m.project_id = ? AND ${LIVE("m")} ORDER BY m.due_date IS NULL, m.due_date, m.sort, m.title`,
@@ -62,6 +136,13 @@ export async function listMilestones(db: D1Database, projectId: string): Promise
          WHERE m.project_id = ? AND ${LIVE("m")} AND ${LIVE("w")} ORDER BY l.workpackage_id`,
       )
       .bind(projectId),
+    db
+      .prepare(
+        `SELECT d.id, d.milestone_id, d.decision, d.decided_by, d.decided_at, d.decision_note_md, d.evidence, d.conditions, d.on_behalf,
+           d.baseline_id, p.name AS person_name, p.display_name AS person_display_name
+         FROM decision d LEFT JOIN person p ON p.id = d.decided_by WHERE d.project_id = ? ORDER BY d.decided_at, d.rowid`,
+      )
+      .bind(projectId),
   ]);
   const by = new Map<string, { requires: string[]; unlocks: string[] }>();
   for (const l of links.results as Array<{ milestone_id: string; workpackage_id: string; role: string }>) {
@@ -69,16 +150,30 @@ export async function listMilestones(db: D1Database, projectId: string): Promise
     (l.role === "requires" ? e.requires : e.unlocks).push(l.workpackage_id);
     by.set(l.milestone_id, e);
   }
-  return (ms.results as Array<MilestoneRow & { done: number }>).map((m) => ({
-    ...m,
-    done: m.done === 1,
-    ...(by.get(m.id) ?? { requires: [], unlocks: [] }),
-  }));
+  const hist = new Map<string, DecisionOut[]>();
+  for (const d of decisions.results as DecisionRow[]) hist.set(d.milestone_id, [...(hist.get(d.milestone_id) ?? []), decisionOut(d)]);
+  return (ms.results as Array<MilestoneRow & { done: number }>).map((m) => {
+    const list = hist.get(m.id) ?? [];
+    const gate = m.gate === 1;
+    const last = list[list.length - 1];
+    return {
+      ...m,
+      done: m.done === 1,
+      ...(by.get(m.id) ?? { requires: [], unlocks: [] }),
+      gate,
+      decision_state: !gate ? "none" : last ? last.decision : m.reached_at ? "pending" : "none",
+      decisions: list,
+    };
+  });
 }
 
-/** WPs unlocked by a milestone that has never been reached. */
+/**
+ * Display lock from milestones: WPs unlocked by a milestone that has never been reached. Gates are left
+ * out while gate decisions are required: their lock is gateLockedWpIds (decision, start state, override).
+ */
 export function lockedWpIds(ms: MilestoneOut[]): Set<string> {
-  return new Set(ms.filter((m) => !m.reached_at).flatMap((m) => m.unlocks));
+  const enforced = gatesEnforced();
+  return new Set(ms.filter((m) => !m.reached_at && !(m.gate && enforced)).flatMap((m) => m.unlocks));
 }
 
 function normalise(input: MilestoneInput): Partial<Record<MsField, unknown>> {
@@ -92,6 +187,10 @@ function normalise(input: MilestoneInput): Partial<Record<MsField, unknown>> {
     } else if (f === "sort") {
       if (typeof v !== "number" || !Number.isFinite(v)) throw new ValidationError("sort must be a number");
       v = Math.trunc(v);
+    } else if (f === "gate") {
+      // spec F5: a gate unlocks on a go decision, not on being reached
+      if (typeof v !== "boolean") throw new ValidationError("gate must be true or false");
+      v = v ? 1 : 0;
     } else {
       if (v === "") v = null;
       if (v !== null && typeof v !== "string") throw new ValidationError(`${f} must be a string`);
@@ -178,6 +277,13 @@ export async function upsertMilestone(
     if (typeof expectedVersion === "number" && expectedVersion !== existing.version)
       throw new ConflictError("version conflict", await getOne(db, projectId, existing.id));
     const current = await getOne(db, projectId, existing.id);
+    // F5: agents never lift a gate lock, so they may not clear the gate flag or drop unlocked WPs while
+    // the gate is undecided. The UPDATE re-checks the gate state (a hold recorded meanwhile → conflict).
+    const agentRemoval =
+      isAgent(by) && (fields.gate === 0 || (unlocks !== undefined && current.unlocks.some((id) => !unlocks.includes(id))));
+    if (agentRemoval && current.gate && gatesEnforced() && !(OPENING_DECISIONS as string[]).includes(current.decision_state))
+      throw agentGateRemovalError(existing.title);
+    const gateGuard = agentRemoval && gatesEnforced() ? ` AND NOT ${gateClosedSql("milestone")}` : "";
     const next = { ...existing, ...fields } as Record<string, unknown>;
     const diff = diffFields(existing as unknown as Record<string, unknown>, next, MS_FIELDS);
     const same = (a: string[] | undefined, b: string[]) => a === undefined || [...a].sort().join() === [...b].sort().join();
@@ -201,7 +307,7 @@ export async function upsertMilestone(
     const res = await scheduleBatch(db, [
       db
         .prepare(
-          `UPDATE milestone SET ${changed.map((f) => `${f} = ?, `).join("")}version = version + 1, updated_at = ? WHERE id = ? AND version = ?`,
+          `UPDATE milestone SET ${changed.map((f) => `${f} = ?, `).join("")}version = version + 1, updated_at = ? WHERE id = ? AND version = ?${gateGuard}`,
         )
         .bind(...changed.map((f) => next[f] ?? null), ts, existing.id, existing.version),
       eventStmtIfChanged(db, {
@@ -236,6 +342,7 @@ export async function upsertMilestone(
     due_date: null,
     reached_at: null,
     sort: 0,
+    gate: 0,
     ...(fields as Partial<MilestoneRow>),
     version: 1,
     created_at: ts,

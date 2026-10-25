@@ -3,6 +3,7 @@ import { createProject, getProjectDetail, listProjects, updateProject } from "..
 import { listWorkpackagesOut, upsertWorkpackage } from "../data/workpackages";
 import { listMilestones, upsertMilestone } from "../data/milestones";
 import { createBaseline } from "../data/baselines";
+import { overrideGateLock, recordGateDecision, type DecisionInput } from "../data/gates";
 import { linkBranch } from "../data/branches";
 import { assignInboxEvent, listEvents, listInbox, logProgress, logTokenCost, setScores } from "../data/logs";
 import { deleteEntity, deletePreview, listTrash, purgeEntity, restoreEntity, type EntityKind } from "../data/entities";
@@ -117,6 +118,11 @@ route("PATCH", "/api/workpackages/:id", async ({ db, req, by, params }) => {
   return upsertWorkpackage(db, reqStr(project_id, "project_id"), { ...input, id: params[0] }, by, optNum(expected_version));
 });
 route("DELETE", "/api/workpackages/:id", async ({ db, by, params }) => deleteEntity(db, "workpackage", params[0], by));
+/** F5: let a gate-locked WP start before the decision; body {reason}. Dashboard persons only (editor or above). */
+route("POST", "/api/workpackages/:id/gate-override", async ({ db, req, by, params }) => {
+  const { reason } = await readJson(req);
+  return overrideGateLock(db, params[0], reqStr(reason, "reason"), by);
+});
 
 route("GET", "/api/milestones", async ({ db, url }) => listMilestones(db, reqStr(url.searchParams.get("project_id"), "project_id")));
 route("POST", "/api/milestones", async ({ db, req, by }) => {
@@ -128,6 +134,11 @@ route("PATCH", "/api/milestones/:id", async ({ db, req, by, params }) => {
   return upsertMilestone(db, reqStr(project_id, "project_id"), { ...input, id: params[0] }, by, optNum(expected_version));
 });
 route("DELETE", "/api/milestones/:id", async ({ db, by, params }) => deleteEntity(db, "milestone", params[0], by));
+/** F5: record a gate decision; body {decision, note_md?, evidence?, conditions?, on_behalf_of_decision_maker?}. */
+route("POST", "/api/milestones/:id/decisions", async ({ db, req, by, params }) => {
+  const { decision, note_md, evidence, conditions, on_behalf_of_decision_maker } = await readJson(req);
+  return recordGateDecision(db, params[0], { decision, note_md, evidence, conditions, on_behalf_of_decision_maker } as DecisionInput, by);
+});
 
 // ---- persons (spec §4.1): editors add and edit stakeholders; only admins change access roles or a user's email
 route("GET", "/api/persons", async ({ db, url }) =>
@@ -316,6 +327,7 @@ export async function handleApi(request: Request, env: Env, identity: Identity &
           path !== "/api/context/upload" &&
           !path.endsWith("/assign") &&
           !path.endsWith("/move-workpackages") &&
+          !path.endsWith("/gate-override") &&
           !path.startsWith("/api/trash/");
         return json(out, created ? 201 : 200);
       }

@@ -45,7 +45,7 @@ CREATE TABLE decision (
   decided_at TEXT NOT NULL,
   decision_note_md TEXT,
   evidence TEXT,                        -- JSON array of context doc ids or URLs
-  conditions TEXT,                      -- JSON array of condition titles (go_with_conditions)
+  conditions TEXT,                      -- JSON array of {title, workpackage_id}: the WPs created for the conditions (go_with_conditions)
   on_behalf INTEGER NOT NULL DEFAULT 0, -- 1 = an admin recorded it for the named decision maker
   actor TEXT NOT NULL,                  -- technical actor of the write
   baseline_id TEXT,                     -- baseline created by a go / go_with_conditions decision

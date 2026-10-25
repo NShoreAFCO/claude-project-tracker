@@ -13,8 +13,8 @@ export type BaselineFields = { baseline_start: string | null; baseline_end: stri
 const LABEL_MAX = 200;
 
 /**
- * Snapshot every live WP (start, end) and milestone (due date as end) of the project. `auto` marks a
- * baseline created by a gate decision (R2.3). No schedule statements: the plan itself is unchanged.
+ * Snapshot every live WP (start, end) and milestone (due date as end) of the project in a batch of its
+ * own. `auto` marks a baseline created by a gate decision. No schedule statements: the plan is unchanged.
  */
 export async function createBaseline(
   db: D1Database,
@@ -23,13 +23,30 @@ export async function createBaseline(
   by: Caller,
   auto?: { decision_id: string },
 ): Promise<{ id: string; label: string; items: number }> {
+  const b = createBaselineStmts(db, projectId, label, by, auto);
+  if (!(await db.prepare(`SELECT 1 FROM project WHERE id = ? AND ${LIVE()}`).bind(projectId).first()))
+    throw new NotFoundError(`project ${projectId} not found`);
+  const res = await db.batch(b.stmts);
+  return { id: b.id, label: b.label, items: (res[1].meta.changes ?? 0) + (res[2].meta.changes ?? 0) };
+}
+
+/**
+ * The statements of a baseline snapshot, for a caller that runs them in its own batch (a gate decision
+ * takes its baseline atomically with the decision row). No reads: the caller checks that the project
+ * exists. stmts[1] and stmts[2] insert the WP and milestone items.
+ */
+export function createBaselineStmts(
+  db: D1Database,
+  projectId: string,
+  label: string,
+  by: Caller,
+  auto?: { decision_id: string },
+): { id: string; label: string; stmts: D1PreparedStatement[] } {
   const text = typeof label === "string" ? label.trim() : "";
   if (!text) throw new ValidationError("label is required");
   if (text.length > LABEL_MAX) throw new ValidationError(`label must be at most ${LABEL_MAX} characters`);
-  if (!(await db.prepare(`SELECT 1 FROM project WHERE id = ? AND ${LIVE()}`).bind(projectId).first()))
-    throw new NotFoundError(`project ${projectId} not found`);
   const id = newId();
-  const res = await db.batch([
+  const stmts = [
     db
       .prepare("INSERT INTO baseline (id, project_id, label, decision_id, created_at, created_by, person_id) VALUES (?, ?, ?, ?, ?, ?, ?)")
       .bind(id, projectId, text, auto?.decision_id ?? null, now(), by.actor, by.personId),
@@ -54,8 +71,8 @@ export async function createBaseline(
       summary: text,
       diff: auto ? { decision_id: [null, auto.decision_id] } : null,
     }),
-  ]);
-  return { id, label: text, items: (res[1].meta.changes ?? 0) + (res[2].meta.changes ?? 0) };
+  ];
+  return { id, label: text, stmts };
 }
 
 /** The project's latest baseline (newest created_at, then the last inserted). */

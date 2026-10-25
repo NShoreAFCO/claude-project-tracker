@@ -34,7 +34,9 @@ import {
   openWorkpackagesError,
   projectFlags,
   projectLinks,
+  TransitionError,
 } from "./rules";
+import { gateLockedWpIds } from "./gates";
 import {
   ConflictError,
   LIVE,
@@ -332,6 +334,9 @@ export async function getProjectDetail(db: D1Database, id: string) {
     critical: critical.has(m.id),
   }));
   const totals = cost.results[0] as { claude_tokens: number; copilot_prompts: number };
+  // F5: `locked` = unlocked by a never-reached milestone, or gate-locked (`gate_locked` names the gate).
+  const gateLocks = await gateLockedWpIds(db, id);
+  const locked = new Set([...lockedWpIds(milestones), ...gateLocks.keys()]);
   return {
     project: await toProjectOut(db, project, wpRows),
     progress: computeProjectProgress(project, wpRows),
@@ -340,8 +345,9 @@ export async function getProjectDetail(db: D1Database, id: string) {
         ...w,
         ...baselineFields(items, "workpackage", w.id, w.end_date),
         critical: critical.has(w.id),
+        gate_locked: gateLocks.get(w.id) ?? null,
       })),
-      { locked: lockedWpIds(milestones) },
+      { locked },
     ),
     milestones,
     baseline: (baseline.results[0] as BaselineRef | undefined) ?? null,
@@ -468,18 +474,30 @@ export async function updateProject(
     const open = await openWorkpackages(db, id);
     if (open.length) throw openWorkpackagesError(open);
   }
+  // F5: once the project has a gate, its decision maker (person or text) can be changed but not cleared;
+  // the UPDATE re-checks, so a gate added meanwhile is caught.
+  const hadDm = !!(current.decision_maker_person_id || current.decision_maker_text);
+  const clearsDm = hadDm && !next.decision_maker_person_id && !next.decision_maker_text;
+  const hasGate = async () => !!(await db.prepare(`SELECT 1 FROM milestone WHERE ${GATE_OF_PROJECT}`).bind(id).first());
+  if (clearsDm && (await hasGate())) throw decisionMakerRequiredError();
   const diff = diffFields(current as unknown as Record<string, unknown>, next, WRITE_COLS);
+  // F5: a stop decision's closure_decision_pending ends when the project is reactivated or closed.
+  if (current.closure_decision_pending && status !== "on_hold") {
+    next.closure_decision_pending = 0;
+    diff.closure_decision_pending = [current.closure_decision_pending, 0];
+  }
   const changed = Object.keys(diff);
   if (!changed.length) return { ...(await toProjectOut(db, current)), warnings: [] };
 
   if (toDone && beforeCloseWrite) await beforeCloseWrite();
   const noOpenWps = toDone ? ` AND NOT EXISTS (SELECT 1 FROM workpackage WHERE project_id = ? AND ${OPEN_WP_SQL})` : "";
+  const noGate = clearsDm ? ` AND NOT EXISTS (SELECT 1 FROM milestone WHERE ${GATE_OF_PROJECT})` : "";
   const res = await db.batch([
     db
       .prepare(
-        `UPDATE project SET ${changed.map((f) => `${f} = ?`).join(", ")}, version = version + 1, updated_at = ? WHERE id = ? AND version = ?${noOpenWps}`,
+        `UPDATE project SET ${changed.map((f) => `${f} = ?`).join(", ")}, version = version + 1, updated_at = ? WHERE id = ? AND version = ?${noOpenWps}${noGate}`,
       )
-      .bind(...changed.map((f) => next[f] ?? null), now(), id, current.version, ...(toDone ? [id] : [])),
+      .bind(...changed.map((f) => next[f] ?? null), now(), id, current.version, ...(toDone ? [id] : []), ...(clearsDm ? [id] : [])),
     eventStmtIfChanged(db, {
       by,
       project_id: id,
@@ -497,7 +515,17 @@ export async function updateProject(
       const open = await openWorkpackages(db, id);
       if (open.length) throw openWorkpackagesError(open);
     }
+    if (clearsDm && fresh.version === current.version && (await hasGate())) throw decisionMakerRequiredError();
     throw new ConflictError("version conflict", await toProjectOut(db, fresh));
   }
   return { ...(await toProjectOut(db, await getProjectRow(db, id))), warnings: [] };
 }
+
+/** SQL (one bound project id): a live gate milestone of the project. */
+const GATE_OF_PROJECT = "project_id = ? AND gate = 1 AND deleted_at IS NULL";
+
+const decisionMakerRequiredError = () =>
+  new TransitionError("the project has gate milestones: its decision_maker can be changed but not cleared", {
+    code: "DECISION_MAKER_REQUIRED",
+    missing: ["decision_maker"],
+  });

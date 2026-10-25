@@ -1,5 +1,6 @@
 import type { Caller, EventOut, EventRow, ScoreRow, TokenCostRow, WorkpackageRow } from "../types";
 import { reachStmts } from "./milestones";
+import { agentStartGuard, gateGuardedBatch, gateLockedSql, lockingGates } from "./gates";
 import { LIVE, NotFoundError, ValidationError, eventStmt, newId, now, type Diff } from "./util";
 
 async function requireProject(db: D1Database, id: string): Promise<void> {
@@ -117,7 +118,17 @@ export async function logProgress(
   const ts = now();
   const stmts: D1PreparedStatement[] = [];
   // Auto-start (spec F3): any progress log on a todo WP moves it to doing; progress ≥ 100 finishes it.
-  const nextStatus = wp ? (progress !== null && progress >= 100 ? "done" : wp.status === "todo" ? "doing" : wp.status) : null;
+  // F5: a log without progress does not start a gate-locked WP (any caller); an agent's progress on one
+  // is refused (pre-check, and a guard statement first in the batch).
+  const autoStartLocked = !!wp && progress === null && wp.status === "todo" && (await lockingGates(db, wp.id)).length > 0;
+  const nextStatus = wp
+    ? progress !== null && progress >= 100
+      ? "done"
+      : wp.status === "todo" && !autoStartLocked
+        ? "doing"
+        : wp.status
+    : null;
+  const gateGuard = wp && progress !== null ? await agentStartGuard(db, by, wp, { status: nextStatus, progress }) : [];
   if (wp && progress !== null) {
     stmts.push(
       db
@@ -128,10 +139,12 @@ export async function logProgress(
         )
         .bind(progress, progress, progress, progress, ts, wp.id),
     );
-  } else if (wp && wp.status === "todo") {
+  } else if (wp && wp.status === "todo" && !autoStartLocked) {
     stmts.push(
       db
-        .prepare("UPDATE workpackage SET status = 'doing', version = version + 1, updated_at = ? WHERE id = ? AND status = 'todo'")
+        .prepare(
+          `UPDATE workpackage AS w SET status = 'doing', version = version + 1, updated_at = ? WHERE w.id = ? AND w.status = 'todo' AND NOT ${gateLockedSql("w")}`,
+        )
         .bind(ts, wp.id),
     );
   }
@@ -159,8 +172,9 @@ export async function logProgress(
     }),
   );
   const reach = Object.keys(diff).length ? reachStmts(db, input.project_id, by) : [];
-  const res = await db.batch([...stmts, ...reach]);
-  const eventId = Number(res[stmts.length - 1].meta.last_row_id);
+  const batch = [...gateGuard, ...stmts, ...reach];
+  const res = wp ? await gateGuardedBatch(db, batch, wp.id) : await db.batch(batch);
+  const eventId = Number(res[gateGuard.length + stmts.length - 1].meta.last_row_id);
   if (!wp) return { event_id: eventId };
   return {
     event_id: eventId,

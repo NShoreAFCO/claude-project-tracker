@@ -6,6 +6,8 @@ import type { Caller, ProjectRow, WorkpackageRow } from "../types";
 import { reachStmts } from "./milestones";
 import { recomputeScheduleStmts, scheduleBatch, storeSchedule, storedDependsOn, type ScheduleIssue } from "./schedule";
 import { ConflictError, LIVE, NotFoundError, ValidationError, eventStmtWhere, now, parseJsonArray, type Diff } from "./util";
+import { gateLockedError, gateLockedSql, gatesEnforced, lockingGates } from "./gates";
+import { isAgent } from "../auth/caller";
 
 /** Machine-readable details of a refused transition (the 409 body's `current`). */
 export type TransitionDetails = {
@@ -16,6 +18,8 @@ export type TransitionDetails = {
   purgeable_at?: string;
   /** SCHEDULE_STRICT: the schedule issues the refused write would add. */
   issues?: ScheduleIssue[];
+  /** GATE_LOCKED: the undecided gates that lock the work package. */
+  gates?: Array<{ milestone_id: string; title: string }>;
 };
 
 /** A status transition that the rules refuse (HTTP 409); `current` says why. */
@@ -253,9 +257,20 @@ export async function moveWorkpackages(
     .all<{ milestone_id: string; workpackage_id: string; role: string }>();
   const removedLinks = links.map((l) => `${l.milestone_id}:${l.role}:${l.workpackage_id}`);
 
+  // Moving drops the old project's milestone links, so an agent moving a gate-locked WP away would lift
+  // the lock (spec F5: agents never override). Refused here and re-checked in the batch guard below.
+  const agentLock = isAgent(by) && gatesEnforced();
+  if (agentLock) {
+    const { results: locked } = await db
+      .prepare(`SELECT w.id FROM workpackage w JOIN json_each(?) j ON w.id = j.value WHERE ${gateLockedSql("w")} ORDER BY w.id`)
+      .bind(movedJson)
+      .all<{ id: string }>();
+    if (locked.length) throw gateLockedError(locked[0].id, await lockingGates(db, locked[0].id));
+  }
+
   // Guard: every affected WP still has the version read above (rows this batch already wrote carry
-  // updated_at = ts and are skipped), and the target is still open. D1 runs a batch as one transaction,
-  // so the guard holds for all statements or for none.
+  // updated_at = ts and are skipped), the target is still open, and (agents) no moved WP is gate-locked.
+  // D1 runs a batch as one transaction, so the guard holds for all statements or for none.
   if (beforeMoveWrite) await beforeMoveWrite();
   const ts = now();
   const versions = JSON.stringify(
@@ -263,8 +278,12 @@ export async function moveWorkpackages(
   );
   const guard = `NOT EXISTS (SELECT 1 FROM workpackage gw JOIN json_each(?) gj ON gw.id = gj.key
       WHERE (gw.version != gj.value OR gw.project_id != ?) AND gw.updated_at != ?)
-    AND EXISTS (SELECT 1 FROM project gp WHERE gp.id = ? AND gp.deleted_at IS NULL AND gp.status NOT IN ('done', 'abandoned'))`;
-  const g = [versions, from.id, ts, to.id];
+    AND EXISTS (SELECT 1 FROM project gp WHERE gp.id = ? AND gp.deleted_at IS NULL AND gp.status NOT IN ('done', 'abandoned'))${
+      agentLock
+        ? ` AND NOT EXISTS (SELECT 1 FROM workpackage lw JOIN json_each(?) lj ON lw.id = lj.value WHERE ${gateLockedSql("lw")})`
+        : ""
+    }`;
+  const g = [versions, from.id, ts, to.id, ...(agentLock ? [movedJson] : [])];
 
   const stmts: D1PreparedStatement[] = [];
   for (const [id, deps] of newDeps)
