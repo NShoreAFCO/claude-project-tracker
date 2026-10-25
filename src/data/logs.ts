@@ -1,6 +1,6 @@
 import type { Caller, EventOut, EventRow, ScoreRow, TokenCostRow, WorkpackageRow } from "../types";
 import { reachStmts } from "./milestones";
-import { agentStartGuard, gateGuardedBatch, gateLockedSql, lockingGates } from "./gates";
+import { gateGuardedBatch, gateLockedSql, lockingGates, startGuard } from "./gates";
 import { LIVE, NotFoundError, ValidationError, eventStmt, newId, now, type Diff } from "./util";
 
 async function requireProject(db: D1Database, id: string): Promise<void> {
@@ -101,6 +101,12 @@ export async function logTokenCost(
   return row;
 }
 
+/** Test seam: runs between the reads of logProgress and its batch. */
+let beforeProgressWrite: (() => Promise<void>) | null = null;
+export function setBeforeProgressWriteForTesting(f: (() => Promise<void>) | null): void {
+  beforeProgressWrite = f;
+}
+
 /** Main "log what we did" call: event, optional WP progress, optional session id. */
 export async function logProgress(
   db: D1Database,
@@ -118,8 +124,8 @@ export async function logProgress(
   const ts = now();
   const stmts: D1PreparedStatement[] = [];
   // Auto-start (spec F3): any progress log on a todo WP moves it to doing; progress ≥ 100 finishes it.
-  // F5: a log without progress does not start a gate-locked WP (any caller); an agent's progress on one
-  // is refused (pre-check, and a guard statement first in the batch).
+  // F5: a log without progress does not start a gate-locked WP (any caller); progress on one (agents, and
+  // dashboard persons without an override) is refused (pre-check, and a guard statement first in the batch).
   const autoStartLocked = !!wp && progress === null && wp.status === "todo" && (await lockingGates(db, wp.id)).length > 0;
   const nextStatus = wp
     ? progress !== null && progress >= 100
@@ -128,7 +134,12 @@ export async function logProgress(
         ? "doing"
         : wp.status
     : null;
-  const gateGuard = wp && progress !== null ? await agentStartGuard(db, by, wp, { status: nextStatus, progress }) : [];
+  // `always`: the CASE below can still start the WP if its status changes meanwhile, so a progress log is
+  // guarded even when it leaves status and progress as read.
+  const gateGuard =
+    wp && progress !== null
+      ? await startGuard(db, by, wp, { status: nextStatus, progress }, { always: true })
+      : { stmts: [] as D1PreparedStatement[], ids: [] as string[] };
   if (wp && progress !== null) {
     stmts.push(
       db
@@ -172,9 +183,10 @@ export async function logProgress(
     }),
   );
   const reach = Object.keys(diff).length ? reachStmts(db, input.project_id, by) : [];
-  const batch = [...gateGuard, ...stmts, ...reach];
-  const res = wp ? await gateGuardedBatch(db, batch, wp.id) : await db.batch(batch);
-  const eventId = Number(res[gateGuard.length + stmts.length - 1].meta.last_row_id);
+  const batch = [...gateGuard.stmts, ...stmts, ...reach];
+  if (beforeProgressWrite) await beforeProgressWrite();
+  const res = await gateGuardedBatch(db, batch, gateGuard.ids, by);
+  const eventId = Number(res[gateGuard.stmts.length + stmts.length - 1].meta.last_row_id);
   if (!wp) return { event_id: eventId };
   return {
     event_id: eventId,

@@ -3,10 +3,10 @@ import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { call, installTestKeys, testCaller, userJwt } from "./helpers";
 import { gatedPlan } from "./fixtures/gated-plan";
-import { createProject, getProjectDetail, updateProject } from "../src/data/projects";
+import { createProject, getProjectDetail, setBeforeProjectWriteForTesting, updateProject } from "../src/data/projects";
 import { upsertWorkpackage } from "../src/data/workpackages";
 import { listMilestones, upsertMilestone } from "../src/data/milestones";
-import { logProgress, listEvents } from "../src/data/logs";
+import { logProgress, listEvents, setBeforeProgressWriteForTesting } from "../src/data/logs";
 import { deleteEntity } from "../src/data/entities";
 import { moveWorkpackages } from "../src/data/rules";
 import { gateLockedWpIds, overrideGateLock, recordGateDecision, setBeforeDecisionWriteForTesting } from "../src/data/gates";
@@ -101,6 +101,8 @@ afterAll(async () => {
   await db.prepare("UPDATE person SET access_role = ? WHERE email = 'user@example.com'").bind(userRole).run();
   setAfterScheduleReadForTesting(null);
   setBeforeDecisionWriteForTesting(null);
+  setBeforeProjectWriteForTesting(null);
+  setBeforeProgressWriteForTesting(null);
 });
 
 describe("gate lock", () => {
@@ -445,5 +447,123 @@ describe("gate decisions", () => {
     // upsert_milestone takes gate
     const ms = await mcp("upsert_milestone", { project_id: g.p.id, id: g.m2, gate: true });
     expect(body(ms).gate).toBe(true);
+  });
+});
+
+describe("gate fix round 1", () => {
+  it("agent cannot change decision maker while a gate is undecided", async () => {
+    const g = await gated();
+    const bot = await agent("user@example.com");
+    for (const decision_maker of ["user@example.com", "Steering board", null])
+      await expect(updateProject(db, g.p.id, { decision_maker }, bot)).rejects.toMatchObject(conflict("DECISION_MAKER_LOCKED"));
+    await expect(updateProject(db, g.p.id, { decision_maker: "Board" }, await svc())).rejects.toMatchObject(
+      conflict("DECISION_MAKER_LOCKED"),
+    );
+    // via MCP update_project too
+    const r = await mcp("update_project", { id: g.p.id, patch: { decision_maker: "user@example.com" } });
+    expect(r.isError).toBe(true);
+    expect(body(r).current.code).toBe("DECISION_MAKER_LOCKED");
+    // other agent edits of the project still work
+    expect((await updateProject(db, g.p.id, { summary: "edited by agent" }, bot)).summary).toBe("edited by agent");
+    // a person in the dashboard may change it
+    expect((await updateProject(db, g.p.id, { decision_maker: "other@example.com" }, EDITOR)).decision_maker).toMatchObject({
+      name: "other",
+    });
+    // re-checked in the UPDATE: a hold recorded between the agent's read and write still refuses it
+    await recordGateDecision(db, g.m1, { decision: "go" }, OTHER);
+    expect((await updateProject(db, g.p.id, { decision_maker: "dm@example.com" }, bot)).decision_maker).toMatchObject({ name: "dm" });
+    setBeforeProjectWriteForTesting(async () => {
+      setBeforeProjectWriteForTesting(null);
+      await recordGateDecision(db, g.m1, { decision: "hold", note_md: "wait" }, DM);
+    });
+    await expect(updateProject(db, g.p.id, { decision_maker: "user@example.com" }, bot)).rejects.toMatchObject(
+      conflict("DECISION_MAKER_LOCKED"),
+    );
+    expect((await getProjectDetail(db, g.p.id)).project.decision_maker).toMatchObject({ name: "dm" });
+  });
+
+  it("sub-WP of a locked WP is locked for agents", async () => {
+    const g = await gated();
+    const bot = await agent("user@example.com");
+    const child = await upsertWorkpackage(db, g.p.id, { title: "WP2 child", parent_id: g.wp2 }, SYS);
+    const grand = await upsertWorkpackage(db, g.p.id, { title: "WP2 grandchild", parent_id: child.id }, SYS);
+    const locks = await gateLockedWpIds(db, g.p.id);
+    expect([...locks.keys()].sort()).toEqual([g.wp2, child.id, grand.id].sort());
+    expect(locks.get(grand.id)).toEqual({ milestone_id: g.m1, title: "M1" });
+    for (const patch of [{ status: "doing" }, { status: "done" }, { progress: 30 }])
+      await expect(upsertWorkpackage(db, g.p.id, { id: grand.id, ...patch }, bot)).rejects.toMatchObject(conflict("GATE_LOCKED"));
+    await expect(logProgress(db, { project_id: g.p.id, summary: "x", workpackage_id: child.id, progress: 10 }, bot)).rejects.toMatchObject(
+      conflict("GATE_LOCKED"),
+    );
+    expect((await logProgress(db, { project_id: g.p.id, summary: "x", workpackage_id: child.id }, bot)).workpackage!.status).toBe("todo");
+    // creating a started sub-WP, or moving a started WP under the locked one, is refused; a todo sub-WP is fine
+    await expect(upsertWorkpackage(db, g.p.id, { title: "new", parent_id: g.wp2, status: "doing" }, bot)).rejects.toMatchObject(
+      conflict("GATE_LOCKED"),
+    );
+    await expect(upsertWorkpackage(db, g.p.id, { title: "new", parent_id: child.id, progress: 5 }, bot)).rejects.toMatchObject(
+      conflict("GATE_LOCKED"),
+    );
+    expect((await upsertWorkpackage(db, g.p.id, { title: "new todo", parent_id: g.wp2 }, bot)).status).toBe("todo");
+    const started = await upsertWorkpackage(db, g.p.id, { title: "started elsewhere", status: "doing" }, SYS);
+    await expect(upsertWorkpackage(db, g.p.id, { id: started.id, parent_id: g.wp2 }, bot)).rejects.toMatchObject(conflict("GATE_LOCKED"));
+    // taking a sub-WP out of the locked subtree would lift its lock
+    await expect(upsertWorkpackage(db, g.p.id, { id: grand.id, parent_id: null }, bot)).rejects.toMatchObject(conflict("GATE_LOCKED"));
+    // the guard on the new parent runs in the batch: a hold recorded meanwhile refuses the create
+    await recordGateDecision(db, g.m1, { decision: "go" }, DM);
+    setAfterScheduleReadForTesting(async () => {
+      setAfterScheduleReadForTesting(null);
+      await recordGateDecision(db, g.m1, { decision: "hold", note_md: "re-check" }, DM);
+    });
+    await expect(upsertWorkpackage(db, g.p.id, { title: "raced", parent_id: g.wp2, status: "doing" }, bot)).rejects.toMatchObject(
+      conflict("GATE_LOCKED"),
+    );
+    expect(await db.prepare("SELECT 1 FROM workpackage WHERE title = 'raced' AND project_id = ?").bind(g.p.id).first()).toBeNull();
+    // after go the subtree is free
+    await recordGateDecision(db, g.m1, { decision: "go" }, DM);
+    expect((await upsertWorkpackage(db, g.p.id, { id: grand.id, status: "doing" }, bot)).status).toBe("doing");
+  });
+
+  it("dashboard start of a locked WP without override → 409, with override → ok", async () => {
+    const g = await gated();
+    const err = await upsertWorkpackage(db, g.p.id, { id: g.wp2, status: "doing" }, EDITOR).catch((e) => e);
+    expect(err).toMatchObject(conflict("GATE_LOCKED"));
+    expect(err.current.override_endpoint).toBe(`POST /api/workpackages/${g.wp2}/gate-override`);
+    for (const patch of [{ status: "done" }, { progress: 10 }])
+      await expect(upsertWorkpackage(db, g.p.id, { id: g.wp2, ...patch }, EDITOR)).rejects.toMatchObject(conflict("GATE_LOCKED"));
+    await expect(logProgress(db, { project_id: g.p.id, summary: "x", workpackage_id: g.wp2, progress: 10 }, EDITOR)).rejects.toMatchObject(
+      conflict("GATE_LOCKED"),
+    );
+    // REST PATCH says the same
+    const jwt = await userJwt();
+    const res = await call(`/api/workpackages/${g.wp2}`, {
+      method: "PATCH",
+      body: JSON.stringify({ project_id: g.p.id, status: "doing" }),
+      jwt,
+    });
+    expect(res.status).toBe(409);
+    const b = (await res.json()) as { current: { code: string; override_endpoint: string } };
+    expect(b.current).toMatchObject({ code: "GATE_LOCKED", override_endpoint: `POST /api/workpackages/${g.wp2}/gate-override` });
+    // edits that do not start it stay possible
+    expect((await upsertWorkpackage(db, g.p.id, { id: g.wp2, description_md: "notes" }, EDITOR)).description_md).toBe("notes");
+    // with an override the start goes through
+    await overrideGateLock(db, g.wp2, "customer needs the prototype early", EDITOR);
+    expect((await upsertWorkpackage(db, g.p.id, { id: g.wp2, status: "doing" }, EDITOR)).status).toBe("doing");
+  });
+
+  it("agent progress log that leaves status and progress unchanged is still guarded in the batch", async () => {
+    const g = await gated();
+    await recordGateDecision(db, g.m1, { decision: "go" }, DM);
+    await upsertWorkpackage(db, g.p.id, { id: g.wp2, status: "blocked", blocked_by: "ext:supplier" }, SYS);
+    const bot = await agent("user@example.com");
+    // between the read and the batch: the gate is put on hold and the WP is reset to todo
+    setBeforeProgressWriteForTesting(async () => {
+      setBeforeProgressWriteForTesting(null);
+      await recordGateDecision(db, g.m1, { decision: "hold", note_md: "re-check" }, DM);
+      await db.prepare("UPDATE workpackage SET status = 'todo', blocked_since = NULL, blocked_by = NULL WHERE id = ?").bind(g.wp2).run();
+    });
+    await expect(logProgress(db, { project_id: g.p.id, summary: "x", workpackage_id: g.wp2, progress: 0 }, bot)).rejects.toMatchObject(
+      conflict("GATE_LOCKED"),
+    );
+    expect((await wpRow(g.wp2)).status).toBe("todo");
   });
 });

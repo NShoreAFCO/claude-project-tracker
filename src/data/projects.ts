@@ -36,7 +36,8 @@ import {
   projectLinks,
   TransitionError,
 } from "./rules";
-import { gateLockedWpIds } from "./gates";
+import { gateClosedSql, gateLockedWpIds } from "./gates";
+import { isAgent } from "../auth/caller";
 import {
   ConflictError,
   LIVE,
@@ -216,6 +217,12 @@ const activeError = (missing: string[]) =>
 let beforeCloseWrite: (() => Promise<void>) | null = null;
 export function setBeforeCloseWriteForTesting(f: (() => Promise<void>) | null): void {
   beforeCloseWrite = f;
+}
+
+/** Test seam: runs between the reads of updateProject and its batch (any update). */
+let beforeProjectWrite: (() => Promise<void>) | null = null;
+export function setBeforeProjectWriteForTesting(f: (() => Promise<void>) | null): void {
+  beforeProjectWrite = f;
 }
 
 export async function getProjectRow(db: D1Database, id: string): Promise<ProjectRow> {
@@ -479,6 +486,15 @@ export async function updateProject(
   const hadDm = !!(current.decision_maker_person_id || current.decision_maker_text);
   const clearsDm = hadDm && !next.decision_maker_person_id && !next.decision_maker_text;
   const hasGate = async () => !!(await db.prepare(`SELECT 1 FROM milestone WHERE ${GATE_OF_PROJECT}`).bind(id).first());
+  // F5: agents may not set or clear the decision maker while a gate is undecided (else an agent could make
+  // its own login, or free text, the decider and record a go). Re-checked in the UPDATE.
+  const dmChanged =
+    (next.decision_maker_person_id ?? null) !== (current.decision_maker_person_id ?? null) ||
+    (next.decision_maker_text ?? null) !== (current.decision_maker_text ?? null);
+  const agentDm = isAgent(by) && dmChanged;
+  const hasUndecidedGate = async () =>
+    !!(await db.prepare(`SELECT 1 FROM milestone gm WHERE ${undecidedGateOfProject()}`).bind(id).first());
+  if (agentDm && (await hasUndecidedGate())) throw decisionMakerLockedError();
   if (clearsDm && (await hasGate())) throw decisionMakerRequiredError();
   const diff = diffFields(current as unknown as Record<string, unknown>, next, WRITE_COLS);
   // F5: a stop decision's closure_decision_pending ends when the project is reactivated or closed.
@@ -490,14 +506,24 @@ export async function updateProject(
   if (!changed.length) return { ...(await toProjectOut(db, current)), warnings: [] };
 
   if (toDone && beforeCloseWrite) await beforeCloseWrite();
+  if (beforeProjectWrite) await beforeProjectWrite();
   const noOpenWps = toDone ? ` AND NOT EXISTS (SELECT 1 FROM workpackage WHERE project_id = ? AND ${OPEN_WP_SQL})` : "";
   const noGate = clearsDm ? ` AND NOT EXISTS (SELECT 1 FROM milestone WHERE ${GATE_OF_PROJECT})` : "";
+  const noUndecided = agentDm ? ` AND NOT EXISTS (SELECT 1 FROM milestone gm WHERE ${undecidedGateOfProject()})` : "";
   const res = await db.batch([
     db
       .prepare(
-        `UPDATE project SET ${changed.map((f) => `${f} = ?`).join(", ")}, version = version + 1, updated_at = ? WHERE id = ? AND version = ?${noOpenWps}${noGate}`,
+        `UPDATE project SET ${changed.map((f) => `${f} = ?`).join(", ")}, version = version + 1, updated_at = ? WHERE id = ? AND version = ?${noOpenWps}${noGate}${noUndecided}`,
       )
-      .bind(...changed.map((f) => next[f] ?? null), now(), id, current.version, ...(toDone ? [id] : []), ...(clearsDm ? [id] : [])),
+      .bind(
+        ...changed.map((f) => next[f] ?? null),
+        now(),
+        id,
+        current.version,
+        ...(toDone ? [id] : []),
+        ...(clearsDm ? [id] : []),
+        ...(agentDm ? [id] : []),
+      ),
     eventStmtIfChanged(db, {
       by,
       project_id: id,
@@ -515,6 +541,7 @@ export async function updateProject(
       const open = await openWorkpackages(db, id);
       if (open.length) throw openWorkpackagesError(open);
     }
+    if (agentDm && fresh.version === current.version && (await hasUndecidedGate())) throw decisionMakerLockedError();
     if (clearsDm && fresh.version === current.version && (await hasGate())) throw decisionMakerRequiredError();
     throw new ConflictError("version conflict", await toProjectOut(db, fresh));
   }
@@ -523,6 +550,14 @@ export async function updateProject(
 
 /** SQL (one bound project id): a live gate milestone of the project. */
 const GATE_OF_PROJECT = "project_id = ? AND gate = 1 AND deleted_at IS NULL";
+/** SQL (alias gm, one bound project id): a live gate of the project without a go / go_with_conditions decision. */
+const undecidedGateOfProject = (): string => `gm.project_id = ? AND ${gateClosedSql("gm")}`;
+
+const decisionMakerLockedError = () =>
+  new TransitionError(
+    "the project has an undecided gate: agents cannot change its decision_maker; a person can change it in the dashboard",
+    { code: "DECISION_MAKER_LOCKED" },
+  );
 
 const decisionMakerRequiredError = () =>
   new TransitionError("the project has gate milestones: its decision_maker can be changed but not cleared", {

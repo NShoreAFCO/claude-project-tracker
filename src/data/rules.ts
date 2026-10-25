@@ -20,6 +20,8 @@ export type TransitionDetails = {
   issues?: ScheduleIssue[];
   /** GATE_LOCKED: the undecided gates that lock the work package. */
   gates?: Array<{ milestone_id: string; title: string }>;
+  /** GATE_LOCKED for a dashboard caller: the override endpoint that lets the WP start. */
+  override_endpoint?: string;
 };
 
 /** A status transition that the rules refuse (HTTP 409); `current` says why. */

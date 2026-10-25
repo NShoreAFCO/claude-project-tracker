@@ -8,7 +8,6 @@
  */
 import type { Caller, ProjectRow, Role, WorkpackageRow } from "../types";
 import { POLICY } from "../policy";
-import { isAgent } from "../auth/caller";
 import { createBaselineStmts } from "./baselines";
 import { isClosedProjectStatus, projectClosedError, TransitionError } from "./rules";
 import { recomputeScheduleStmts, scheduleBatch, snapWp } from "./schedule";
@@ -62,23 +61,34 @@ export const gateClosedSql = (m: string): string =>
  * blocked/waiting/dropped without progress is still unstarted, so such a detour does not unlock it.
  */
 const unstartedSql = (w: string): string => `(${w}.status NOT IN ('doing', 'done') AND ${w}.progress = 0)`;
-/** SQL: WP alias `w` is gate-locked: unstarted, not overridden, unlocked by a closed gate. Uses aliases gl, gm. */
+
+/**
+ * SQL: the CTE `glk(id, milestone_id, title, due_date, sort)` of all gate-locked WPs with the gate that
+ * locks them. Roots: live, unstarted, not overridden WPs in the `unlocks` of a closed gate. The lock covers
+ * every live descendant of a root (sub-WPs would otherwise raise the derived progress behind the gate),
+ * except a descendant overridden on its own (and its subtree). Not correlated, so it can sit in any statement.
+ */
+const lockedCte = (): string => `WITH RECURSIVE glk(id, milestone_id, title, due_date, sort) AS (
+    SELECT gw.id, gm.id, gm.title, gm.due_date, gm.sort FROM milestone_link gl
+      JOIN milestone gm ON gm.id = gl.milestone_id JOIN workpackage gw ON gw.id = gl.workpackage_id
+      WHERE gl.role = 'unlocks' AND ${gateClosedSql("gm")} AND gw.deleted_at IS NULL AND gw.gate_override_at IS NULL AND ${unstartedSql("gw")}
+    UNION
+    SELECT gc.id, glk.milestone_id, glk.title, glk.due_date, glk.sort FROM workpackage gc JOIN glk ON gc.parent_id = glk.id
+      WHERE gc.deleted_at IS NULL AND gc.gate_override_at IS NULL)`;
+/** SQL: WP alias `w` is gate-locked (always false when the policy turns gate decisions off). */
 export const gateLockedSql = (w: string): string =>
-  gatesEnforced()
-    ? `(${w}.deleted_at IS NULL AND ${w}.gate_override_at IS NULL AND ${unstartedSql(w)} AND EXISTS (SELECT 1 FROM milestone_link gl JOIN milestone gm ON gm.id = gl.milestone_id WHERE gl.workpackage_id = ${w}.id AND gl.role = 'unlocks' AND ${gateClosedSql("gm")}))`
-    : "0";
+  gatesEnforced() ? `(${w}.deleted_at IS NULL AND ${w}.id IN (${lockedCte()} SELECT id FROM glk))` : "0";
 
-const GATE_ORDER = "ORDER BY gm.due_date IS NULL, gm.due_date, gm.sort, gm.title, gm.id";
+const GATE_ORDER = "ORDER BY glk.due_date IS NULL, glk.due_date, glk.sort, glk.title, glk.milestone_id";
 
-/** Gate-locked WPs of a project, each with the (first) gate that locks it. */
+/** Gate-locked WPs of a project (sub-WPs of locked WPs included), each with the (first) gate that locks it. */
 export async function gateLockedWpIds(db: D1Database, projectId: string): Promise<Map<string, GateRef>> {
   const out = new Map<string, GateRef>();
   if (!gatesEnforced()) return out;
   const { results } = await db
     .prepare(
-      `SELECT w.id AS wp_id, gm.id AS milestone_id, gm.title FROM workpackage w
-       JOIN milestone_link gl ON gl.workpackage_id = w.id AND gl.role = 'unlocks' JOIN milestone gm ON gm.id = gl.milestone_id
-       WHERE w.project_id = ? AND w.deleted_at IS NULL AND w.gate_override_at IS NULL AND ${unstartedSql("w")} AND ${gateClosedSql("gm")} ${GATE_ORDER}`,
+      `${lockedCte()} SELECT glk.id AS wp_id, glk.milestone_id, glk.title FROM glk JOIN workpackage w ON w.id = glk.id
+       WHERE w.project_id = ? ${GATE_ORDER}`,
     )
     .bind(projectId)
     .all<{ wp_id: string } & GateRef>();
@@ -86,65 +96,118 @@ export async function gateLockedWpIds(db: D1Database, projectId: string): Promis
   return out;
 }
 
-/** The gates that lock one WP right now ([] = not locked). */
+/** The gates that lock one WP right now, directly or through a locked ancestor ([] = not locked). */
 export async function lockingGates(db: D1Database, wpId: string): Promise<GateRef[]> {
   if (!gatesEnforced()) return [];
   const { results } = await db
-    .prepare(
-      `SELECT gm.id AS milestone_id, gm.title FROM workpackage w
-       JOIN milestone_link gl ON gl.workpackage_id = w.id AND gl.role = 'unlocks' JOIN milestone gm ON gm.id = gl.milestone_id
-       WHERE w.id = ? AND w.deleted_at IS NULL AND w.gate_override_at IS NULL AND ${unstartedSql("w")} AND ${gateClosedSql("gm")} ${GATE_ORDER}`,
-    )
+    .prepare(`${lockedCte()} SELECT DISTINCT glk.milestone_id, glk.title, glk.due_date, glk.sort FROM glk WHERE glk.id = ? ${GATE_ORDER}`)
     .bind(wpId)
     .all<GateRef>();
   return results.map((r) => ({ milestone_id: r.milestone_id, title: r.title }));
 }
 
-export function gateLockedError(wpId: string, gates: GateRef[]): TransitionError {
+/**
+ * 409 GATE_LOCKED for `wpId`. For a dashboard caller `current.override_endpoint` names the way through
+ * (`overrideId`: the WP to override, default `wpId`); agents cannot override.
+ */
+export function gateLockedError(wpId: string, gates: GateRef[], by?: Caller, overrideId?: string): TransitionError {
   const names = gates.map((g) => `"${g.title}" (${g.milestone_id})`).join(", ") || "a gate";
+  const person = by?.channel === "dashboard";
+  const endpoint = `POST /api/workpackages/${overrideId ?? wpId}/gate-override`;
   return new TransitionError(
-    `work package ${wpId} is locked by gate ${names} until a go decision is recorded; ask the decision maker to decide, or a person can override the lock in the dashboard`,
-    { code: "GATE_LOCKED", gates },
+    `work package ${wpId} is locked by gate ${names} until a go decision is recorded; ` +
+      (person
+        ? `to start it before the decision, record an override with a reason (${endpoint})`
+        : "ask the decision maker to decide, or a person can override the lock in the dashboard"),
+    { code: "GATE_LOCKED", gates, ...(person ? { override_endpoint: endpoint } : {}) },
   );
 }
 
 const GATE_GUARD_FAILED = /NOT NULL constraint failed: workpackage\.status/i;
 
-/**
- * Guard statement for a batch that starts WP `wpId` on behalf of an agent: a no-op while the WP is not
- * gate-locked, else it fails a NOT NULL constraint and D1 rolls the whole batch back. Put it first.
- */
-export const gateGuardStmt = (db: D1Database, wpId: string): D1PreparedStatement =>
-  db.prepare(`UPDATE workpackage AS w SET status = NULL WHERE w.id = ? AND ${gateLockedSql("w")}`).bind(wpId);
+/** SQL: WP alias `w` is a lock root itself (in the unlocks of a closed gate), not only below one. */
+const directLockedSql = (w: string): string =>
+  `(${w}.deleted_at IS NULL AND ${w}.gate_override_at IS NULL AND ${unstartedSql(w)} AND EXISTS (SELECT 1 FROM milestone_link dl
+    JOIN milestone dm ON dm.id = dl.milestone_id WHERE dl.workpackage_id = ${w}.id AND dl.role = 'unlocks' AND ${gateClosedSql("dm")}))`;
 
 /**
- * Agent writes that would start a WP (status doing/done, or a progress change) are refused while it is
- * gate-locked: a pre-check for a clear error, and the guard statement for the write's batch (the lock
- * can appear between the read and the write, e.g. a `hold` recorded meanwhile). Persons and the system
- * are not restricted (they override in the dashboard).
+ * Guard statement for a batch: a no-op while WP `wpId` is not gate-locked (with `onlyViaAncestor`: not
+ * locked through an ancestor alone), else it fails a NOT NULL constraint and D1 rolls the whole batch
+ * back. Put it first.
  */
-export async function agentStartGuard(
+export const gateGuardStmt = (db: D1Database, wpId: string, onlyViaAncestor = false): D1PreparedStatement =>
+  db
+    .prepare(
+      `UPDATE workpackage AS w SET status = NULL WHERE w.id = ? AND ${gateLockedSql("w")}${onlyViaAncestor ? ` AND NOT ${directLockedSql("w")}` : ""}`,
+    )
+    .bind(wpId);
+
+const isStartedStatus = (s: unknown): boolean => s === "doing" || s === "done";
+
+/**
+ * Writes that would start a gate-locked WP are refused for every caller but the system: agents always,
+ * dashboard persons until the WP has an override (spec F5, §3: humans override with a reason). Refused:
+ * - setting a locked WP to doing/done or changing its progress (`always`: any progress write);
+ * - moving a WP that is locked only through its ancestors to another parent (that would lift the lock);
+ * - creating a started WP under a locked WP, or moving a started WP under one.
+ * Each refusal is a pre-check (clear 409) plus a guard statement for the write's batch, so a lock that
+ * appears between the read and the write (a `hold` recorded meanwhile) still refuses it.
+ * `wp` is the stored row (null on create); `next` the write's fields.
+ */
+export async function startGuard(
   db: D1Database,
   by: Caller,
-  wp: Pick<WorkpackageRow, "id" | "status" | "progress">,
-  next: { status?: unknown; progress?: unknown },
-): Promise<D1PreparedStatement[]> {
-  if (!isAgent(by) || !gatesEnforced()) return [];
-  const toStarted = (next.status === "doing" || next.status === "done") && next.status !== wp.status;
-  const progress = typeof next.progress === "number" && next.progress !== wp.progress;
-  if (!toStarted && !progress) return [];
-  const gates = await lockingGates(db, wp.id);
-  if (gates.length) throw gateLockedError(wp.id, gates);
-  return [gateGuardStmt(db, wp.id)];
+  wp: Pick<WorkpackageRow, "id" | "status" | "progress" | "parent_id"> | null,
+  next: { status?: unknown; progress?: unknown; parent_id?: unknown },
+  opts: { always?: boolean } = {},
+): Promise<{ stmts: D1PreparedStatement[]; ids: string[] }> {
+  const out: { stmts: D1PreparedStatement[]; ids: string[] } = { stmts: [], ids: [] };
+  if (by.channel === "system" || !gatesEnforced()) return out;
+  const status = next.status !== undefined ? next.status : (wp?.status ?? "todo");
+  const progress = typeof next.progress === "number" ? next.progress : (wp?.progress ?? 0);
+  const startedAfter = isStartedStatus(status) || progress > 0;
+  const oldParent = wp?.parent_id ?? null;
+  const parent = next.parent_id !== undefined ? ((next.parent_id as string | null) ?? null) : oldParent;
+  const parentChanged = !!wp && next.parent_id !== undefined && parent !== oldParent;
+  if (wp) {
+    const toStarted = isStartedStatus(next.status) && next.status !== wp.status;
+    const progressChange = typeof next.progress === "number" && next.progress !== wp.progress;
+    if (opts.always || toStarted || progressChange) {
+      const gates = await lockingGates(db, wp.id);
+      if (gates.length) throw gateLockedError(wp.id, gates, by);
+      out.stmts.push(gateGuardStmt(db, wp.id));
+      out.ids.push(wp.id);
+    }
+    if (parentChanged) {
+      const viaAncestor = await db
+        .prepare(`SELECT 1 FROM workpackage w WHERE w.id = ? AND ${gateLockedSql("w")} AND NOT ${directLockedSql("w")}`)
+        .bind(wp.id)
+        .first();
+      if (viaAncestor) throw gateLockedError(wp.id, await lockingGates(db, wp.id), by);
+      out.stmts.push(gateGuardStmt(db, wp.id, true));
+      out.ids.push(wp.id);
+    }
+  }
+  if (parent && startedAfter && (parentChanged || !wp)) {
+    const gates = await lockingGates(db, parent);
+    if (gates.length) throw gateLockedError(parent, gates, by);
+    out.stmts.push(gateGuardStmt(db, parent));
+    out.ids.push(parent);
+  }
+  return out;
 }
 
-/** scheduleBatch for a batch that may carry gate guards: a failed guard becomes 409 GATE_LOCKED. */
-export async function gateGuardedBatch(db: D1Database, stmts: D1PreparedStatement[], wpId: string): Promise<D1Result[]> {
+/** scheduleBatch for a batch that carries startGuard statements: a failed guard becomes 409 GATE_LOCKED. */
+export async function gateGuardedBatch(db: D1Database, stmts: D1PreparedStatement[], ids: string[], by: Caller): Promise<D1Result[]> {
   try {
     return await scheduleBatch(db, stmts);
   } catch (e) {
-    if (GATE_GUARD_FAILED.test(String((e as Error)?.message ?? e))) throw gateLockedError(wpId, await lockingGates(db, wpId));
-    throw e;
+    if (!GATE_GUARD_FAILED.test(String((e as Error)?.message ?? e))) throw e;
+    for (const id of ids) {
+      const gates = await lockingGates(db, id);
+      if (gates.length) throw gateLockedError(id, gates, by);
+    }
+    throw gateLockedError(ids[0] ?? "?", [], by);
   }
 }
 
