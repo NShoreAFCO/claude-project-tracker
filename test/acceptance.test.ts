@@ -165,13 +165,18 @@ describe("acceptance (SPEC §13)", () => {
     const ids = JSON.parse(list.result.content[0].text).map((p: { id: string }) => p.id);
     for (const id of SEED_IDS) expect(ids).toContain(id);
 
-    // a write through MCP is attributed to the registered client name
+    // a write through MCP is attributed to the registered client name and to the login's person
     const created = await mcp(access_token, "tools/call", { name: "create_project", arguments: { title: "Acceptance via MCP" } });
     expect(created.result.isError).toBeFalsy();
-    const ev = await env.DB.prepare("SELECT actor FROM event WHERE entity = 'project' AND summary = 'Acceptance via MCP'").first<{
+    const ev = await env.DB.prepare(
+      "SELECT actor, person_id FROM event WHERE entity = 'project' AND summary = 'Acceptance via MCP'",
+    ).first<{
       actor: string;
+      person_id: string | null;
     }>();
     expect(ev?.actor).toBe("mcp:claude.ai");
+    const person = await env.DB.prepare("SELECT id FROM person WHERE email = 'user@example.com'").first<{ id: string }>();
+    expect(ev?.person_id).toBe(person!.id);
 
     // the same token does not open the dashboard API (Access-only)
     expect((await call("/api/projects", { headers: { Authorization: `Bearer ${access_token}` } })).status).toBe(401);

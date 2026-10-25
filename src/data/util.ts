@@ -10,6 +10,9 @@ export class ValidationError extends Error {
 export class TooLargeError extends Error {
   readonly status = 413;
 }
+export class ForbiddenError extends Error {
+  readonly status = 403;
+}
 export class ConflictError extends Error {
   readonly status = 409;
   constructor(
@@ -66,13 +69,16 @@ export interface EventInput {
   diff?: Diff | null;
 }
 
-/** Prepared INSERT for the event table; put it in the same db.batch() as the mutation. */
+/** Prepared INSERT for the event table (actor + person_id from the caller); put it in the same db.batch() as the mutation. */
 export function eventStmt(db: D1Database, e: EventInput): D1PreparedStatement {
   return db
-    .prepare("INSERT INTO event (ts, actor, project_id, entity, entity_id, action, summary, diff_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .prepare(
+      "INSERT INTO event (ts, actor, person_id, project_id, entity, entity_id, action, summary, diff_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
     .bind(
       now(),
       e.by.actor,
+      e.by.personId,
       e.project_id,
       e.entity,
       e.entity_id,
@@ -89,11 +95,12 @@ export function eventStmt(db: D1Database, e: EventInput): D1PreparedStatement {
 export function eventStmtIfChanged(db: D1Database, e: EventInput): D1PreparedStatement {
   return db
     .prepare(
-      "INSERT INTO event (ts, actor, project_id, entity, entity_id, action, summary, diff_json) SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE changes() > 0",
+      "INSERT INTO event (ts, actor, person_id, project_id, entity, entity_id, action, summary, diff_json) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE changes() > 0",
     )
     .bind(
       now(),
       e.by.actor,
+      e.by.personId,
       e.project_id,
       e.entity,
       e.entity_id,

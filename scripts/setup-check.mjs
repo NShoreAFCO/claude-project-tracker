@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { runAccessChecks } from "./lib/access-checks.mjs";
 import { readSecrets } from "./lib/secrets.mjs";
 import { WORKER_SECRETS } from "./lib/setup-steps.mjs";
+import { validatePolicy } from "./lib/instance.mjs";
 
 /** @returns {Promise<Array<{ name: string, ok: boolean, detail: string }>>} */
 export async function runSetupCheck({ root, fetch: doFetch, retries = 0 }) {
@@ -14,7 +15,17 @@ export async function runSetupCheck({ root, fetch: doFetch, retries = 0 }) {
   const cfgFile = join(root, "instance", "instance.config.json");
   add("instance/instance.config.json exists", existsSync(cfgFile), "run npm run setup");
   if (!existsSync(cfgFile)) return out;
-  const d = JSON.parse(readFileSync(cfgFile, "utf8")).deploy ?? {};
+  const cfg = JSON.parse(readFileSync(cfgFile, "utf8"));
+  const d = cfg.deploy ?? {};
+  const policyProblems = validatePolicy(cfg);
+  add("config policy block is valid", !policyProblems.length, policyProblems.join("; "));
+  const admins = Array.isArray(cfg.policy?.admins) ? cfg.policy.admins.map((e) => String(e).trim().toLowerCase()) : [];
+  const allowed = (d.allowedEmails ?? []).map((e) => String(e).trim().toLowerCase());
+  add(
+    "config policy.admins names allowed emails",
+    admins.length > 0 && admins.every((e) => allowed.includes(e)),
+    "run npm run setup (it asks for the admin email)",
+  );
   for (const [k, v] of Object.entries({
     accountId: d.accountId,
     publicUrl: d.publicUrl,

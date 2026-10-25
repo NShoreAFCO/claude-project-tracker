@@ -30,7 +30,7 @@ Say, in this order, waiting for "done" each time:
 1. INSTALL §5.1, workers.dev subdomain: "Open dash.cloudflare.com → Workers & Pages. If it asks for a subdomain, choose a short name."
 2. INSTALL §5.2, Zero Trust: "Open Zero Trust in the left menu, choose a team name and the Free plan."
 3. INSTALL §6, API token: give the permission table exactly as in INSTALL. Remind them to copy the token and **not** paste it into the chat.
-4. "In a separate terminal window, in this folder, run: `npm run setup`." Explain the questions briefly (INSTALL §7 table). Suggest: allowed emails = everyone who should use it; language; types to switch off (show the README tables if they want to choose).
+4. "In a separate terminal window, in this folder, run: `npm run setup`." Explain the questions briefly (INSTALL §7 table). Suggest: allowed emails = everyone who should use it; admin email(s) = the person setting it up (Enter keeps the first allowed address); language; types to switch off (show the README tables if they want to choose).
 5. When they report back, run `npm run setup:check`. If a step failed, the setup printed a plain fix. Ask them to paste **only the ✗ line and the line below it** (these never contain secrets) and explain the fix from INSTALL §15.
 
 The Claude Code `!` prefix does not work for setup: it gives the script no interactive terminal, so setup refuses to ask for the token (`docs/VERIFIED.md`). Always a separate terminal window.

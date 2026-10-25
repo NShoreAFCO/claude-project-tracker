@@ -19,6 +19,7 @@ import { search } from "../data/search";
 import { ConflictError, ValidationError } from "../data/util";
 import { handleUpload } from "./upload";
 import { userCaller } from "../auth/caller";
+import { getPerson } from "../data/persons";
 import { handleClaudeCodeHook, type HookBody } from "./hooks";
 import { isAuditConfigured, runAuditExport } from "../audit/export";
 
@@ -36,6 +37,7 @@ export function json(body: unknown, status = 200, headers?: HeadersInit): Respon
 export function errorResponse(e: unknown): Response {
   const err = e as { status?: number; message?: string; current?: unknown };
   if (err?.status === 409) return json({ error: "conflict", message: err.message, current: err.current }, 409);
+  if (err?.status === 403) return json({ error: "forbidden", message: err.message }, 403);
   if (err?.status === 404) return json({ error: "not_found", message: err.message }, 404);
   if (err?.status === 413) return json({ error: "too_large", message: err.message }, 413);
   if (err?.status === 400) return json({ error: "invalid", message: err.message }, 400);
@@ -243,7 +245,7 @@ export async function handleApi(request: Request, env: Env, identity: Identity &
   try {
     // Person resolution happens once per request (creates the person on first login).
     const by = await userCaller(db, identity.email);
-    if (path === "/api/whoami") return json({ identity });
+    if (path === "/api/whoami") return json({ identity, person: by.personId ? await getPerson(db, by.personId) : null });
     if (path === "/api/context/bundle" && request.method === "GET") return await bundle(url, db);
     for (const [method, re, h] of routes) {
       const m = re.exec(path);

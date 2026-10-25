@@ -35,11 +35,11 @@ export function reachStmts(db: D1Database, projectId: string, by: Caller): D1Pre
   return [
     db
       .prepare(
-        `INSERT INTO event (ts, actor, project_id, entity, entity_id, action, summary, diff_json)
-         SELECT ?, ?, m.project_id, 'milestone', m.id, 'reached', m.title, NULL FROM milestone m
+        `INSERT INTO event (ts, actor, person_id, project_id, entity, entity_id, action, summary, diff_json)
+         SELECT ?, ?, ?, m.project_id, 'milestone', m.id, 'reached', m.title, NULL FROM milestone m
          WHERE m.project_id = ? AND m.reached_at IS NULL AND ${QUALIFIES}`,
       )
-      .bind(ts, by.actor, projectId),
+      .bind(ts, by.actor, by.personId, projectId),
     db
       .prepare(`UPDATE milestone AS m SET reached_at = ? WHERE m.project_id = ? AND m.reached_at IS NULL AND ${QUALIFIES}`)
       .bind(ts, projectId),

@@ -5,6 +5,7 @@ import type { Caller, Env } from "../types";
 import { readContext } from "../data/context-read";
 import { registerTools } from "./tools";
 import { mcpActor, mcpCaller } from "../auth/caller";
+import { isAllowedEmail } from "../auth/access";
 
 export { mcpActor };
 
@@ -43,7 +44,10 @@ export function errorText(e: unknown): string {
   const err = e as { status?: number; message?: string; current?: unknown };
   if (err?.status === 409) return JSON.stringify({ error: "conflict", message: err.message, current: err.current });
   if (err?.status)
-    return JSON.stringify({ error: err.status === 404 ? "not_found" : err.status === 413 ? "too_large" : "invalid", message: err.message });
+    return JSON.stringify({
+      error: err.status === 404 ? "not_found" : err.status === 413 ? "too_large" : err.status === 403 ? "forbidden" : "invalid",
+      message: err.message,
+    });
   return JSON.stringify({ error: "internal", message: "Unexpected error" });
 }
 
@@ -91,6 +95,8 @@ export const mcpApiHandler = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const props = ((ctx as unknown as { props?: GrantProps }).props ?? {}) as GrantProps;
     const host = new URL(env.PUBLIC_URL).hostname;
+    // A grant outlives an allow-list change: removing the email ends MCP access too (the person row stays).
+    if (!isAllowedEmail(env, props.email)) return Response.json({ error: "forbidden" }, { status: 403 });
     // Person resolution happens once per request, before the per-request server is built.
     const by = await mcpCaller(env.DB, props);
     return createMcpHandler(() => buildServer(env, props, by), {

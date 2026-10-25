@@ -272,11 +272,12 @@ export async function appendContext(
     // Event only if the UPDATE above applied (changes() refers to the previous statement).
     db
       .prepare(
-        `INSERT INTO event (ts, actor, project_id, entity, entity_id, action, summary, diff_json) SELECT ?, ?, ?, 'context_doc', (SELECT id FROM context_doc WHERE ${keySql}), 'append', ?, ? WHERE changes() > 0`,
+        `INSERT INTO event (ts, actor, person_id, project_id, entity, entity_id, action, summary, diff_json) SELECT ?, ?, ?, ?, 'context_doc', (SELECT id FROM context_doc WHERE ${keySql}), 'append', ?, ? WHERE changes() > 0`,
       )
       .bind(
         ts,
         by.actor,
+        by.personId,
         owner.project_id,
         ...keyArgs,
         `${owner.owner_kind}:${owner.owner_id} append: ${heading}`,

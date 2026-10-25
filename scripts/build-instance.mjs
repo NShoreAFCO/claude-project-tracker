@@ -4,7 +4,7 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { InstanceError, LOCALES, enabledCategories, loadInstance, publicConfig, renderWrangler } from "./lib/instance.mjs";
+import { InstanceError, LOCALES, enabledCategories, loadInstance, publicConfig, renderWrangler, resolvePolicy } from "./lib/instance.mjs";
 
 const args = process.argv.slice(2);
 const rootArg = args.indexOf("--root");
@@ -25,7 +25,7 @@ export function buildInstance(root) {
 
   mkdirSync(join(root, "src", "generated"), { recursive: true });
   const categories = enabledCategories(config);
-  const serverPart = { app: config.app, categories };
+  const serverPart = { app: config.app, categories, policy: resolvePolicy(config) };
   writeFileSync(
     join(root, "src", "generated", "instance.ts"),
     `${header}export const INSTANCE = ${JSON.stringify(serverPart, null, 2)} as const;\n`,

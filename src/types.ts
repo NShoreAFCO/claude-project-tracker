@@ -135,6 +135,8 @@ export interface EventRow {
   id: number;
   ts: string;
   actor: string;
+  /** The human behind the write (login person, or on_behalf_of for service tokens); null for none. */
+  person_id: string | null;
   project_id: string | null;
   entity: string;
   entity_id: string | null;

@@ -24,9 +24,28 @@ After any change: `npm run check`, then `npm run deploy` (it rebuilds the genera
 | `app.locale` | `en` or `de` |
 | `app.logo`, `app.favicon` | paths inside `instance/` |
 | `categories.project`, `categories.workpackage` | project and work types (README: "Choosing your project and work-package types") |
+| `policy.*` | rules for this deployment, see the next table. Every field is optional; missing fields use the defaults shown. |
 | `deploy.*` | written by setup: Cloudflare ids, address, allowed emails, audit repository. Edit `allowedEmails` by hand if you like, then run setup again. |
 | `upstream` | `false` in your instance; only the package's own repository uses `true` |
 | `checks.denylist` | `false` in your instance (the package uses it to keep itself brand-free) |
+
+### policy
+
+| Field | Default | Meaning |
+|---|---|---|
+| `admins` | the admin email(s) you gave in setup | these people get the `admin` role when they first sign in |
+| `default_role` | `editor` | role of everyone else on first sign-in: `viewer`, `editor`, `decider` or `admin` |
+| `locales` | `app.locale` first, then the other language | languages people may choose in the dashboard |
+| `stale_days` | `14` | days without activity before a project counts as stale; a project type may set its own `stale_days` |
+| `schedule_strict_default` | `false` | default for a project's strict schedule mode (schedule warnings become errors) |
+| `target_date_required_categories` | `research`, `product-development`, `product-launch`, `quality-regulatory` (those that exist) | project types that need a target date before they can become active |
+| `gates.require_decision` | `true` | gate milestones need a recorded decision |
+| `retention_days` | `30` | deleted items can be purged by an admin after this many days (never automatically) |
+| `hide_empty_categories` | `collapse` | `hide` or `collapse` empty type groups on the dashboard |
+| `report.paper`, `report.pdf` | `a4`, `true` | paper size and PDF button of project reports |
+| `score_scales` | short texts for `value`, `quality`, `risk`, `effort`, `token_efficiency` | per criterion: what `0`, `5` and `10` mean, one text per language (`en`, `de`) |
+
+`npm run build:instance` and `npm run setup:check` report a field with a wrong value by name.
 
 ## Texts
 

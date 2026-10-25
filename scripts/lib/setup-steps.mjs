@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { buildInstance } from "../build-instance.mjs";
 import { buildSeed } from "../../seed/build-seed.mjs";
 import { createCf } from "./cf.mjs";
-import { normaliseEmails } from "./instance.mjs";
+import { normaliseEmails, resolvePolicy } from "./instance.mjs";
 import { putWorkerSecrets, readSecrets, scrubber, writeSecrets } from "./secrets.mjs";
 import { runSteps } from "./steps.mjs";
 import { runAccessChecks } from "./access-checks.mjs";
@@ -103,6 +103,19 @@ export async function runSetup(o) {
         if (!emails.length || emails.some((e) => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)))
           throw new Error("Enter at least one valid email address (for example jane@example.com).");
         c.deploy.allowedEmails = emails;
+        // Admins (policy.admins) get the admin role on first login; everyone else gets policy.default_role.
+        const currentAdmins = (c.policy?.admins ?? []).filter((e) => emails.includes(e));
+        const admins = normaliseEmails(
+          await io.ask(
+            "Admin email(s), comma-separated (must be among the allowed addresses):",
+            (currentAdmins.length ? currentAdmins : [emails[0]]).join(", "),
+          ),
+        );
+        const notAllowed = admins.filter((e) => !emails.includes(e));
+        if (!admins.length) throw new Error("Enter at least one admin email address.");
+        if (notAllowed.length)
+          throw new Error(`Admin ${notAllowed.join(", ")} is not among the allowed email addresses. Add it there first.`);
+        c.policy = { ...resolvePolicy(c), ...(c.policy ?? {}), admins };
         const base =
           o.prefix ||
           (await io.ask(

@@ -35,7 +35,9 @@ describe("Access JWT (App A) — fail closed", () => {
   it("valid JWT, allow-listed email (case-insensitive) → 200 with identity", async () => {
     const res = await call("/api/whoami", { jwt: await userJwt("User@Example.com") });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ identity: { kind: "user", email: "user@example.com" } });
+    const body = (await res.json()) as { identity: unknown; person: { email: string } | null };
+    expect(body.identity).toEqual({ kind: "user", email: "user@example.com" });
+    expect(body.person?.email).toBe("user@example.com");
   });
   it("placeholder ACCESS_AUD config → 401 even with a matching token", async () => {
     const jwt = await userJwt(undefined, { aud: "REPLACE_WITH_APP_A_AUD_TAG" });
