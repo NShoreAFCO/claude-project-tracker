@@ -69,6 +69,14 @@ export function closureError(status: string, missing: string[]): TransitionError
   });
 }
 
+/** A closed project gets no new or reopened WPs; the way back is reopening the project. */
+export function projectClosedError(projectId: string, status: string): TransitionError {
+  return new TransitionError(
+    `project ${projectId} is ${status}: work packages cannot be added or reopened; reopen the project (status active or on_hold) first`,
+    { code: "PROJECT_CLOSED" },
+  );
+}
+
 /** Derived project flags (computed on read). */
 export function projectFlags(
   status: string,

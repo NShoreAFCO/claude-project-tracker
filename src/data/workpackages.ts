@@ -13,7 +13,15 @@ import {
 import { WP_CATEGORIES, checkCategory, checkHuman } from "./categories";
 import { reachStmts } from "./milestones";
 import { personOuts, personRefInput, personRefOut, resolvePersonRef } from "./persons";
-import { applyWpRules, checkBlockedRef, parseBlockedBy, type BlockedRef } from "./rules";
+import {
+  applyWpRules,
+  checkBlockedRef,
+  isClosedProjectStatus,
+  isOpenWpStatus,
+  parseBlockedBy,
+  projectClosedError,
+  type BlockedRef,
+} from "./rules";
 
 export const WP_FIELDS = [
   "parent_id",
@@ -222,10 +230,11 @@ export async function upsertWorkpackage(
   expectedVersion?: number,
 ): Promise<WpOut> {
   const project = await db
-    .prepare("SELECT owner_person_id, owner_text FROM project WHERE id = ?")
+    .prepare("SELECT owner_person_id, owner_text, status FROM project WHERE id = ?")
     .bind(projectId)
-    .first<Pick<ProjectRow, "owner_person_id" | "owner_text">>();
+    .first<Pick<ProjectRow, "owner_person_id" | "owner_text" | "status">>();
   if (!project) throw new NotFoundError(`project ${projectId} not found`);
+  const closed = isClosedProjectStatus(project.status);
   const fields: Partial<Record<(typeof WRITE_COLS)[number], unknown>> = normalise(input);
   if (fields.status === "done" && fields.progress === undefined) fields.progress = 100;
   const owner = await personRefInput(db, input.owner, "owner");
@@ -242,6 +251,9 @@ export async function upsertWorkpackage(
       throw new ValidationError(`workpackage ${existing.id} belongs to project ${existing.project_id}`);
     if (typeof expectedVersion === "number" && expectedVersion !== existing.version) throw new ConflictError("version conflict", existing);
     applyWpRules(existing, fields);
+    // A done/abandoned project gets no open work back (edits that keep the status stay possible).
+    if (closed && fields.status !== undefined && fields.status !== existing.status && isOpenWpStatus(String(fields.status)))
+      throw projectClosedError(projectId, project.status);
     if ("parent_id" in fields) await checkParent(db, projectId, existing.id, fields.parent_id);
     const next = { ...existing, ...fields } as Record<string, unknown>;
     const diff = diffFields(existing as unknown as Record<string, unknown>, next, WRITE_COLS);
@@ -277,6 +289,7 @@ export async function upsertWorkpackage(
     return getWpOut(db, project, existing.id);
   }
 
+  if (closed) throw projectClosedError(projectId, project.status);
   const title = String(fields.title ?? "");
   if (!title) throw new ValidationError("title is required");
   if (input.id !== undefined && !ID_RE.test(String(input.id))) throw new ValidationError("id must match ^[a-z0-9][a-z0-9-]{0,62}$");

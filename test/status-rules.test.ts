@@ -161,6 +161,63 @@ describe("project closure", () => {
   });
 });
 
+describe("closed projects stay closed", () => {
+  it("creating a WP in a done project is refused (PROJECT_CLOSED)", async () => {
+    const p = await owned("Closed create");
+    await updateProject(db, p.id, { status: "done", ...CLOSURE }, A);
+    for (const status of [undefined, "done"]) {
+      const err = await upsertWorkpackage(db, p.id, { title: "late", ...(status ? { status } : {}) }, A).catch((e) => e);
+      expect(err).toBeInstanceOf(TransitionError);
+      expect(err.current.code).toBe("PROJECT_CLOSED");
+    }
+    const r = await api("/api/workpackages", { method: "POST", body: { project_id: p.id, title: "late" } });
+    expect(r.status).toBe(409);
+    expect(r.body.current.code).toBe("PROJECT_CLOSED");
+    expect((await getProjectDetail(db, p.id)).workpackages).toHaveLength(0);
+  });
+
+  it("reopening a WP in an abandoned project is refused", async () => {
+    const p = await owned("Closed reopen");
+    const done = await upsertWorkpackage(db, p.id, { title: "finished", status: "done" }, A);
+    const dropped = await upsertWorkpackage(db, p.id, { title: "gone", status: "dropped", drop_reason: "no" }, A);
+    await updateProject(db, p.id, { status: "abandoned", closure_note_md: "Stopped." }, A);
+    for (const [id, status] of [
+      [done.id, "doing"],
+      [dropped.id, "todo"],
+      [done.id, "blocked"],
+      [dropped.id, "waiting"],
+    ]) {
+      const err = await upsertWorkpackage(db, p.id, { id, status }, A).catch((e) => e);
+      expect(err).toBeInstanceOf(TransitionError);
+      expect(err.current.code).toBe("PROJECT_CLOSED");
+    }
+    const m = await mcp("upsert_workpackage", { project_id: p.id, id: done.id, status: "todo" });
+    expect(m.isError).toBe(true);
+    expect(JSON.parse(m.content[0].text).current.code).toBe("PROJECT_CLOSED");
+    expect((await wpRow(done.id))!.status).toBe("done");
+    expect((await wpRow(dropped.id))!.status).toBe("dropped");
+  });
+
+  it("editing a done WP's title in a done project succeeds", async () => {
+    const p = await owned("Closed edit");
+    const w = await upsertWorkpackage(db, p.id, { title: "finished", status: "done" }, A);
+    await updateProject(db, p.id, { status: "done", ...CLOSURE }, A);
+    const edited = await upsertWorkpackage(db, p.id, { id: w.id, title: "finished (final)", description_md: "Report filed." }, A);
+    expect([edited.title, edited.status]).toEqual(["finished (final)", "done"]);
+    // log_progress on a closed project's WP stays allowed and cannot reopen it
+    const r = await logProgress(db, { project_id: p.id, workpackage_id: w.id, summary: "archived the files" }, A);
+    expect(r.workpackage!.status).toBe("done");
+  });
+
+  it("after reopening the project a WP can be added", async () => {
+    const p = await owned("Closed then reopened");
+    await updateProject(db, p.id, { status: "done", ...CLOSURE }, A);
+    await updateProject(db, p.id, { status: "active" }, A);
+    const w = await upsertWorkpackage(db, p.id, { title: "follow-up check" }, A);
+    expect(w.status).toBe("todo");
+  });
+});
+
 describe("work package rules", () => {
   it("dropping a WP requires drop_reason", async () => {
     const p = await owned("Drop");
