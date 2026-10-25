@@ -14,6 +14,7 @@ import { isAgent } from "../auth/caller";
 import { reachStmts } from "./milestones";
 import { REDACTED_FIELDS } from "./persons";
 import { TransitionError } from "./rules";
+import { recomputeScheduleStmts, scheduleBatch, storeSchedule } from "./schedule";
 import { ForbiddenError, NotFoundError, ValidationError, eventStmt, eventStmtIfChanged, eventStmtWhere, now, type Diff } from "./util";
 
 export type EntityKind = "project" | "workpackage" | "branch" | "milestone" | "context_doc" | "person";
@@ -263,8 +264,23 @@ export async function deleteEntity(
       );
   // Removing a required WP can complete a milestone.
   if (kind === "workpackage") stmts.push(...reachStmts(db, projectId!, by));
-  const res = await db.batch(stmts);
-  if (!res[0].meta.changes) throw new NotFoundError(`${kind} ${id} not found`);
+  // The schedule of the remaining plan is stored in the same batch (spec F4); never refused by strict mode.
+  const scheduled = kind === "workpackage" || kind === "milestone";
+  if (scheduled)
+    stmts.push(
+      ...(
+        await recomputeScheduleStmts(db, projectId!, {
+          removeWps: kind === "workpackage" ? [id, ...children.workpackages] : [],
+          removeMilestones: kind === "milestone" ? [id] : [],
+          strict: false,
+        })
+      ).stmts,
+    );
+  const res = await scheduleBatch(db, stmts);
+  if (!res[0].meta.changes) {
+    if (scheduled) await storeSchedule(db, projectId!);
+    throw new NotFoundError(`${kind} ${id} not found`);
+  }
   return { deleted: id, children: total(children) };
 }
 
@@ -349,15 +365,30 @@ export async function restoreEntity(
           .prepare(`UPDATE ${table} SET deleted_at = NULL, deleted_by = NULL WHERE id ${IN_IDS} AND deleted_at = ? AND ${restoredAgain}`)
           .bind(JSON.stringify(children[key]), stamp, id),
       );
-  if (kind === "project" || kind === "workpackage" || kind === "milestone") stmts.push(...reachStmts(db, projectId!, by));
+  const scheduled = kind === "project" || kind === "workpackage" || kind === "milestone";
+  if (scheduled) stmts.push(...reachStmts(db, projectId!, by));
+  // Restored entities bring their schedule issues back, stored in the same batch (spec F4).
+  if (scheduled)
+    stmts.push(
+      ...(
+        await recomputeScheduleStmts(db, projectId!, {
+          restoreWps: [...(kind === "workpackage" ? [id] : []), ...children.workpackages],
+          restoreMilestones: [...(kind === "milestone" ? [id] : []), ...children.milestones],
+          strict: false,
+        })
+      ).stmts,
+    );
   let res: D1Result[];
   try {
-    res = await db.batch(stmts);
+    res = await scheduleBatch(db, stmts);
   } catch (e) {
     if (slug && /UNIQUE/i.test(String((e as Error)?.message))) throw slugTaken(slug);
     throw e;
   }
-  if (!res[0].meta.changes) throw new NotFoundError(`${kind} ${id} is not in the trash`);
+  if (!res[0].meta.changes) {
+    if (scheduled) await storeSchedule(db, projectId!);
+    throw new NotFoundError(`${kind} ${id} is not in the trash`);
+  }
   return { restored: id, children: total(children) };
 }
 

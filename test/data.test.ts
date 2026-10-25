@@ -102,14 +102,14 @@ describe("list and detail enrichment", () => {
   it("detail nodes carry category, human, locked and bar category; milestones listed", async () => {
     const p = await createProject(db, { title: uniq("Detail") }, A);
     const parent = await upsertWorkpackage(db, p.id, { title: "P", category: "pm" }, A);
-    const kid = await upsertWorkpackage(db, p.id, { title: "k", parent_id: parent.id, depends_on: ["x"] }, A);
+    const kid = await upsertWorkpackage(db, p.id, { title: "k", parent_id: parent.id, depends_on: [parent.id] }, A);
     const docs = await upsertWorkpackage(db, p.id, { title: "d", parent_id: parent.id, category: "docs", weight: 3 }, A);
     const m = await upsertMilestone(db, p.id, { title: "M", requires: [kid.id], unlocks: [docs.id] }, A);
     const d = await getProjectDetail(db, p.id);
     const P = d.workpackages.find((w) => w.id === parent.id)!;
     const K = P.children.find((w) => w.id === kid.id)!;
     const D = P.children.find((w) => w.id === docs.id)!;
-    expect([K.effective_category, K.is_human, K.locked, K.depends_ids]).toEqual(["pm", true, false, ["x"]]);
+    expect([K.effective_category, K.is_human, K.locked, K.depends_ids]).toEqual(["pm", true, false, [parent.id]]);
     expect([D.effective_category, D.is_human, D.locked]).toEqual(["docs", false, true]);
     expect(P.bar_category).toBe("docs");
     expect(d.milestones.map((x) => x.id)).toEqual([m.id]);

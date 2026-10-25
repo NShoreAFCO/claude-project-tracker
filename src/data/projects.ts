@@ -15,6 +15,7 @@ import { QUALIFIES, listMilestones, lockedWpIds } from "./milestones";
 import { PROJECT_CATEGORIES, checkCategory } from "./categories";
 import { personOuts, personRefInput, personRefOut, refInitials } from "./persons";
 import { withPersonOuts } from "./workpackages";
+import { ensureSchedule } from "./schedule";
 import {
   OPEN_WP_SQL,
   closureError,
@@ -57,6 +58,7 @@ export const PROJECT_FIELDS = [
   "category",
   "closure_note_md",
   "lessons_learned_md",
+  "schedule_strict",
 ] as const;
 type ProjectField = (typeof PROJECT_FIELDS)[number];
 /** Person-or-text roles of a project; each is stored as <role>_person_id or <role>_text. */
@@ -115,7 +117,11 @@ function normalise(input: ProjectInput): Partial<Record<ProjectField, unknown>> 
     if (!(f in input) || input[f] === undefined) continue;
     let v = input[f];
     if (f === "tags") v = toJsonArray(v);
-    else if (f === "category") v = checkCategory(v, PROJECT_CATEGORIES);
+    else if (f === "schedule_strict") {
+      // true/false, or null to follow the policy default (spec F4)
+      if (v !== null && typeof v !== "boolean") throw new ValidationError("schedule_strict must be true, false or null");
+      v = v === null ? null : v ? 1 : 0;
+    } else if (f === "category") v = checkCategory(v, PROJECT_CATEGORIES);
     else if (f === "progress_manual") {
       if (v !== null && (typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > 100))
         throw new ValidationError("progress_manual must be 0..100");
@@ -276,6 +282,8 @@ export async function listProjects(
 
 export async function getProjectDetail(db: D1Database, id: string) {
   const project = await getProjectRow(db, id);
+  // Rows written before schedule validation (or by an older Worker) are computed once on first read.
+  await ensureSchedule(db, id);
   const [wps, branches, scores, scoreCount, cost, costEntries, events, ctx] = await db.batch([
     db.prepare(`SELECT * FROM workpackage WHERE project_id = ? AND ${LIVE()} ORDER BY sort, title`).bind(id),
     db.prepare("SELECT * FROM branch WHERE project_id = ? ORDER BY last_activity DESC").bind(id),

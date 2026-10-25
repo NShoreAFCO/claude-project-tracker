@@ -1,5 +1,6 @@
 import type { ContextDocRow, OwnerKind } from "../types";
 import { LIVE, NotFoundError, ValidationError, utf8Bytes } from "./util";
+import { ensureSchedule } from "./schedule";
 
 export type OwnerRef = { owner_kind: OwnerKind; owner_id: string };
 export type OwnerInfo = OwnerRef & { project_id: string; title: string };
@@ -142,6 +143,8 @@ export async function getContextBundle(
       : { owner_kind: "project", owner_id: args.project_id };
   const chain = await ownerChain(db, start);
   if (chain.some((o) => o.project_id !== args.project_id)) throw new ValidationError(`owner is not part of project ${args.project_id}`);
+  // Rows written before schedule validation are computed once on first read (spec F4).
+  await ensureSchedule(db, args.project_id);
   if (args.branch_id && args.workpackage_id && !chain.some((o) => o.owner_kind === "workpackage" && o.owner_id === args.workpackage_id)) {
     throw new ValidationError("branch is not linked to the given workpackage");
   }

@@ -1,7 +1,10 @@
 import type { Caller, MilestoneRow } from "../types";
 import { ConflictError, LIVE, NotFoundError, ValidationError, diffFields, eventStmt, eventStmtIfChanged, newId, now } from "./util";
+import { issuesOf, recomputeScheduleStmts, scheduleBatch, storeSchedule, type ScheduleIssue } from "./schedule";
 
 export type MilestoneOut = MilestoneRow & { requires: string[]; unlocks: string[]; done: boolean };
+/** Write result: the milestone plus the schedule issues that concern it (spec F4). */
+export type MilestoneWriteOut = MilestoneOut & { warnings: ScheduleIssue[] };
 export type MilestoneInput = {
   id?: string;
   title?: unknown;
@@ -130,7 +133,7 @@ export async function upsertMilestone(
   input: MilestoneInput,
   by: Caller,
   expectedVersion?: number,
-): Promise<MilestoneOut> {
+): Promise<MilestoneWriteOut> {
   if (!(await db.prepare(`SELECT 1 FROM project WHERE id = ? AND ${LIVE()}`).bind(projectId).first()))
     throw new NotFoundError(`project ${projectId} not found`);
   const fields = normalise(input);
@@ -181,8 +184,21 @@ export async function upsertMilestone(
     if (!same(requires, current.requires)) diff.requires = [current.requires, requires];
     if (!same(unlocks, current.unlocks)) diff.unlocks = [current.unlocks, unlocks];
     const changed = Object.keys(diff).filter((k) => (MS_FIELDS as readonly string[]).includes(k));
-    if (!Object.keys(diff).length) return current;
-    const res = await db.batch([
+    if (!Object.keys(diff).length) {
+      const { issues } = await recomputeScheduleStmts(db, projectId);
+      return { ...current, warnings: issuesOf(issues, current.id) };
+    }
+    const schedule = await recomputeScheduleStmts(db, projectId, {
+      milestones: [
+        {
+          id: existing.id,
+          due_date: (next.due_date as string | null) ?? null,
+          requires: requires ?? current.requires,
+          unlocks: unlocks ?? current.unlocks,
+        },
+      ],
+    });
+    const res = await scheduleBatch(db, [
       db
         .prepare(
           `UPDATE milestone SET ${changed.map((f) => `${f} = ?, `).join("")}version = version + 1, updated_at = ? WHERE id = ? AND version = ?`,
@@ -199,9 +215,14 @@ export async function upsertMilestone(
       }),
       ...linkStmts(existing.id, { version: existing.version + 1 }),
       ...reachStmts(db, projectId, by),
+      ...schedule.stmts,
     ]);
-    if (!res[0].meta.changes) throw new ConflictError("version conflict", await getOne(db, projectId, existing.id));
-    return getOne(db, projectId, existing.id);
+    if (!res[0].meta.changes) {
+      // The batch stored issues computed for this write; put back the ones of the stored plan.
+      await storeSchedule(db, projectId);
+      throw new ConflictError("version conflict", await getOne(db, projectId, existing.id));
+    }
+    return { ...(await getOne(db, projectId, existing.id)), warnings: issuesOf(schedule.issues, existing.id) };
   }
 
   const title = String(fields.title ?? "");
@@ -220,8 +241,11 @@ export async function upsertMilestone(
     created_at: ts,
     updated_at: ts,
   };
+  const schedule = await recomputeScheduleStmts(db, projectId, {
+    milestones: [{ id: row.id, due_date: row.due_date, requires: requires ?? [], unlocks: unlocks ?? [] }],
+  });
   const cols = ["id", "project_id", ...MS_FIELDS, "version", "created_at", "updated_at"] as const;
-  await db.batch([
+  await scheduleBatch(db, [
     db
       .prepare(`INSERT INTO milestone (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`)
       .bind(...cols.map((c) => (row as unknown as Record<string, unknown>)[c] ?? null)),
@@ -240,6 +264,7 @@ export async function upsertMilestone(
     }),
     ...linkStmts(row.id, null),
     ...reachStmts(db, projectId, by),
+    ...schedule.stmts,
   ]);
-  return getOne(db, projectId, row.id);
+  return { ...(await getOne(db, projectId, row.id)), warnings: issuesOf(schedule.issues, row.id) };
 }
