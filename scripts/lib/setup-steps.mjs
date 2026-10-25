@@ -388,6 +388,7 @@ export async function runSetup(o) {
         log(`  Claude Code:      claude mcp add --transport http tracker ${d().publicUrl}/mcp --scope user`);
         log(`  Session hook:     npm run hook:install`);
         log(`  Commit instance/: git add instance && git commit -m "Instance settings"`);
+        log(`                    (any time now; it does not depend on the steps above. Commit again after each setup rerun.)`);
       },
     },
   ];

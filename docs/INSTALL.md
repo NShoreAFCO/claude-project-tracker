@@ -293,7 +293,9 @@ node scripts/add-webhook.mjs "<owner>/<repository>"
 
 ## 12. Save your settings in your repository
 
-The setup wrote your settings to `instance/`. Commit them, so they are safe and shared with anyone who maintains the tracker (they contain no secrets):
+The setup wrote your settings to `instance/`. Commit them, so they are safe and shared with anyone who maintains the tracker (they contain no secrets). Without them, a fresh copy cannot redeploy to the same Cloudflare resources.
+
+This step does not depend on steps 8–11; the hook installer only reads `instance/`. It comes last because if a check fails, you usually rerun `npm run setup`, and that rewrites `instance/`. Commit again after every rerun.
 
 ```powershell
 git add instance

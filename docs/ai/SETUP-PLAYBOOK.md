@@ -44,7 +44,7 @@ Access changes take one to two minutes. Wait, then run `npm run setup:check` aga
 3. Claude Code: you may run `claude mcp add --transport http tracker <url>/mcp --scope user` **after asking**; then the user runs `/mcp` → authenticate.
 4. Session hook: user runs `npm run hook:install`, then restarts Claude Code.
 5. Webhooks, per repository: you may run `node scripts/add-webhook.mjs "<owner>/<repo>"` after asking; it passes the secret via stdin and prints no secret.
-6. Commit the instance: `git add instance && git commit -m "Instance settings"`; ask before `git push`.
+6. Commit the instance: `git add instance && git commit -m "Instance settings"`; ask before `git push`. This does not depend on steps 1–5 (the hook installer only reads `instance/`); it comes last only because a failed check usually means a setup rerun, which rewrites `instance/`. Commit again after every rerun. Never commit `instance/` in the upstream template repository.
 
 ## Stop and ask a human when
 - Cloudflare shows errors not listed in INSTALL §15, or payment questions beyond choosing the Free plan.
