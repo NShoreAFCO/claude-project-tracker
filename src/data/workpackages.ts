@@ -1,4 +1,4 @@
-import type { Caller, WorkpackageRow } from "../types";
+import type { Caller, PersonOut, PersonRefOut, ProjectRow, WorkpackageRow } from "../types";
 import {
   ConflictError,
   NotFoundError,
@@ -12,6 +12,7 @@ import {
 } from "./util";
 import { WP_CATEGORIES, checkCategory, checkHuman } from "./categories";
 import { reachStmts } from "./milestones";
+import { personOuts, personRefInput, personRefOut, resolvePersonRef } from "./persons";
 
 export const WP_FIELDS = [
   "parent_id",
@@ -29,6 +30,15 @@ export const WP_FIELDS = [
   "human",
 ] as const;
 type WpField = (typeof WP_FIELDS)[number];
+/** Columns written by create/update and diffed into events (WP fields plus the owner columns). */
+const WRITE_COLS = [...WP_FIELDS, "owner_person_id", "owner_text"] as const;
+
+/** Client shape of a work package: owner as chip or text, effective owner (WP owner, else project owner), stakeholders. */
+export type WpOut = WorkpackageRow & {
+  owner: PersonRefOut;
+  effective_owner: PersonRefOut;
+  priority_stakeholders: PersonOut[];
+};
 
 const STATUSES = ["todo", "doing", "blocked", "waiting", "done", "dropped"];
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
@@ -44,6 +54,92 @@ export async function listWorkpackages(db: D1Database, projectId: string): Promi
 
 async function getWp(db: D1Database, id: string): Promise<WorkpackageRow | null> {
   return db.prepare("SELECT * FROM workpackage WHERE id = ?").bind(id).first<WorkpackageRow>();
+}
+
+async function stakeholderIds(db: D1Database, wpIds: string[]): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  for (let i = 0; i < wpIds.length; i += 90) {
+    const chunk = wpIds.slice(i, i + 90);
+    const { results } = await db
+      .prepare(
+        `SELECT s.workpackage_id, s.person_id FROM wp_stakeholder s JOIN person p ON p.id = s.person_id WHERE s.workpackage_id IN (${chunk.map(() => "?").join(", ")}) ORDER BY p.name COLLATE NOCASE, p.id`,
+      )
+      .bind(...chunk)
+      .all<{ workpackage_id: string; person_id: string }>();
+    for (const r of results) out.set(r.workpackage_id, [...(out.get(r.workpackage_id) ?? []), r.person_id]);
+  }
+  return out;
+}
+
+/** Adds owner, effective_owner and priority_stakeholders to work packages of one project (computed on read). */
+export async function withPersonOuts(
+  db: D1Database,
+  project: Pick<ProjectRow, "owner_person_id" | "owner_text">,
+  wps: WorkpackageRow[],
+): Promise<WpOut[]> {
+  const stake = await stakeholderIds(
+    db,
+    wps.map((w) => w.id),
+  );
+  const people = await personOuts(db, [project.owner_person_id, ...wps.map((w) => w.owner_person_id), ...[...stake.values()].flat()]);
+  const projectOwner = personRefOut(project.owner_person_id, project.owner_text, people);
+  return wps.map((w) => {
+    const owner = personRefOut(w.owner_person_id, w.owner_text, people);
+    return {
+      ...w,
+      owner,
+      effective_owner: owner ?? projectOwner,
+      priority_stakeholders: (stake.get(w.id) ?? []).map((id) => people.get(id)).filter((p): p is PersonOut => !!p),
+    };
+  });
+}
+
+/** Work packages of a project in client shape. */
+export async function listWorkpackagesOut(db: D1Database, projectId: string): Promise<WpOut[]> {
+  const project = await db
+    .prepare("SELECT owner_person_id, owner_text FROM project WHERE id = ?")
+    .bind(projectId)
+    .first<Pick<ProjectRow, "owner_person_id" | "owner_text">>();
+  if (!project) throw new NotFoundError(`project ${projectId} not found`);
+  return withPersonOuts(db, project, await listWorkpackages(db, projectId));
+}
+
+async function getWpOut(db: D1Database, project: Pick<ProjectRow, "owner_person_id" | "owner_text">, id: string): Promise<WpOut> {
+  const w = await getWp(db, id);
+  if (!w) throw new NotFoundError(`workpackage ${id} not found`);
+  return (await withPersonOuts(db, project, [w]))[0];
+}
+
+/**
+ * priority_stakeholders input: an array of person refs (id, email, exact name); null or [] clears.
+ * Every entry must match a person, so a typo never silently becomes a stakeholder.
+ */
+async function stakeholderInput(db: D1Database, v: unknown): Promise<string[] | undefined> {
+  if (v === undefined) return undefined;
+  if (v === null) return [];
+  if (!Array.isArray(v) || v.length > 50 || v.some((x) => typeof x !== "string"))
+    throw new ValidationError("priority_stakeholders must be a list of up to 50 person ids, emails or names");
+  const ids: string[] = [];
+  for (const ref of v as string[]) {
+    const r = await resolvePersonRef(db, ref);
+    if (!r.person_id) throw new ValidationError(`priority_stakeholders: "${ref}" matches no person; add them with upsert_person first`);
+    if (!ids.includes(r.person_id)) ids.push(r.person_id);
+  }
+  return ids.sort();
+}
+
+/**
+ * Statements that replace a WP's stakeholders, applied only while the WP still has `version`
+ * (so a lost version race in the same batch changes nothing).
+ */
+function stakeholderStmts(db: D1Database, wpId: string, version: number, ids: string[]): D1PreparedStatement[] {
+  const guard = "EXISTS (SELECT 1 FROM workpackage WHERE id = ? AND version = ?)";
+  return [
+    db.prepare(`DELETE FROM wp_stakeholder WHERE workpackage_id = ? AND ${guard}`).bind(wpId, wpId, version),
+    ...ids.map((pid) =>
+      db.prepare(`INSERT INTO wp_stakeholder (workpackage_id, person_id) SELECT ?, ? WHERE ${guard}`).bind(wpId, pid, wpId, version),
+    ),
+  ];
 }
 
 function normalise(input: Record<string, unknown>): Partial<Record<WpField, unknown>> {
@@ -104,18 +200,30 @@ async function checkParent(db: D1Database, projectId: string, selfId: string | n
   }
 }
 
-/** Create, or update when input.id names an existing work package. */
+/**
+ * Create, or update when input.id names an existing work package. `owner` is a person ref (id, email,
+ * name) or free text; `priority_stakeholders` replaces the stored list.
+ */
 export async function upsertWorkpackage(
   db: D1Database,
   projectId: string,
   input: Record<string, unknown> & { id?: string },
   by: Caller,
   expectedVersion?: number,
-): Promise<WorkpackageRow> {
-  if (!(await db.prepare("SELECT 1 FROM project WHERE id = ?").bind(projectId).first()))
-    throw new NotFoundError(`project ${projectId} not found`);
-  const fields = normalise(input);
+): Promise<WpOut> {
+  const project = await db
+    .prepare("SELECT owner_person_id, owner_text FROM project WHERE id = ?")
+    .bind(projectId)
+    .first<Pick<ProjectRow, "owner_person_id" | "owner_text">>();
+  if (!project) throw new NotFoundError(`project ${projectId} not found`);
+  const fields: Partial<Record<(typeof WRITE_COLS)[number], unknown>> = normalise(input);
   if (fields.status === "done" && fields.progress === undefined) fields.progress = 100;
+  const owner = await personRefInput(db, input.owner, "owner");
+  if (owner) {
+    fields.owner_person_id = owner.person_id;
+    fields.owner_text = owner.text;
+  }
+  const stakeholders = await stakeholderInput(db, input.priority_stakeholders);
 
   const existing = input.id ? await getWp(db, String(input.id)) : null;
   if (existing) {
@@ -124,13 +232,22 @@ export async function upsertWorkpackage(
     if (typeof expectedVersion === "number" && expectedVersion !== existing.version) throw new ConflictError("version conflict", existing);
     if ("parent_id" in fields) await checkParent(db, projectId, existing.id, fields.parent_id);
     const next = { ...existing, ...fields } as Record<string, unknown>;
-    const diff = diffFields(existing as unknown as Record<string, unknown>, next, WP_FIELDS);
+    const diff = diffFields(existing as unknown as Record<string, unknown>, next, WRITE_COLS);
     const changed = Object.keys(diff);
-    if (!changed.length) return existing;
+    let stakeStmts: D1PreparedStatement[] = [];
+    if (stakeholders) {
+      const before = [...((await stakeholderIds(db, [existing.id])).get(existing.id) ?? [])].sort();
+      if (JSON.stringify(before) !== JSON.stringify(stakeholders)) {
+        diff.priority_stakeholders = [before, stakeholders];
+        stakeStmts = stakeholderStmts(db, existing.id, existing.version, stakeholders);
+      }
+    }
+    if (!Object.keys(diff).length) return (await withPersonOuts(db, project, [existing]))[0];
     const res = await db.batch([
+      ...stakeStmts,
       db
         .prepare(
-          `UPDATE workpackage SET ${changed.map((f) => `${f} = ?`).join(", ")}, version = version + 1, updated_at = ? WHERE id = ? AND version = ?`,
+          `UPDATE workpackage SET ${changed.map((f) => `${f} = ?, `).join("")}version = version + 1, updated_at = ? WHERE id = ? AND version = ?`,
         )
         .bind(...changed.map((f) => next[f] ?? null), now(), existing.id, existing.version),
       eventStmtIfChanged(db, {
@@ -139,13 +256,13 @@ export async function upsertWorkpackage(
         entity: "workpackage",
         entity_id: existing.id,
         action: "update",
-        summary: `${String(next.title)}: ${changed.join(", ")}`,
+        summary: `${String(next.title)}: ${Object.keys(diff).join(", ")}`,
         diff,
       }),
       ...reachStmts(db, projectId, by),
     ]);
-    if (!res[0].meta.changes) throw new ConflictError("version conflict", await getWp(db, existing.id));
-    return (await getWp(db, existing.id))!;
+    if (!res[stakeStmts.length].meta.changes) throw new ConflictError("version conflict", await getWp(db, existing.id));
+    return getWpOut(db, project, existing.id);
   }
 
   const title = String(fields.title ?? "");
@@ -174,12 +291,14 @@ export async function upsertWorkpackage(
     sort: 0,
     category: null,
     human: null,
+    owner_person_id: null,
+    owner_text: null,
     ...(fields as Partial<WorkpackageRow>),
     version: 1,
     created_at: ts,
     updated_at: ts,
   };
-  const cols = ["id", "project_id", ...WP_FIELDS, "version", "created_at", "updated_at"] as const;
+  const cols = ["id", "project_id", ...WRITE_COLS, "version", "created_at", "updated_at"] as const;
   await db.batch([
     db
       .prepare(`INSERT INTO workpackage (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`)
@@ -191,9 +310,13 @@ export async function upsertWorkpackage(
       entity_id: id,
       action: "create",
       summary: title,
-      diff: diffFields(null, row as unknown as Record<string, unknown>, WP_FIELDS),
+      diff: {
+        ...diffFields(null, row as unknown as Record<string, unknown>, WRITE_COLS),
+        ...(stakeholders?.length ? { priority_stakeholders: [null, stakeholders] } : {}),
+      },
     }),
+    ...(stakeholders?.length ? stakeholderStmts(db, id, 1, stakeholders) : []),
     ...reachStmts(db, projectId, by),
   ]);
-  return (await getWp(db, id))!;
+  return getWpOut(db, project, id);
 }

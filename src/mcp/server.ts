@@ -67,7 +67,9 @@ function buildServer(env: Env, props: GrantProps, by: Caller): McpServer {
       // The SDK infers args from the schema; the helper keeps one generic signature for all tools.
       (async (args: unknown) => {
         try {
-          const out = await handler(args as never, tc);
+          // on_behalf_of is accepted for parity with REST but never honoured: MCP writes belong to the OAuth login's person.
+          const { on_behalf_of: _ignored, ...rest } = (args ?? {}) as Record<string, unknown>;
+          const out = await handler(rest as never, tc);
           return { content: [{ type: "text" as const, text: typeof out === "string" ? out : JSON.stringify(out) }] };
         } catch (e) {
           if (!(e as { status?: number })?.status) console.error(`tool ${name} failed`, e);

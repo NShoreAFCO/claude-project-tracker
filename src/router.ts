@@ -28,7 +28,7 @@ export async function handleDefault(request: Request, env: Env, _ctx: ExecutionC
   const identity = await getAccessIdentity(request, env);
   if (!identity) return json({ error: "unauthorized" }, 401);
 
-  if (path.startsWith("/api/hooks/")) return handleHooks(request, env);
+  if (path.startsWith("/api/hooks/")) return handleHooks(request, env, identity);
   if (identity.kind !== "user") return json({ error: "forbidden" }, 403);
   if (path.startsWith("/api/")) return handleApi(request, env, identity);
   return withSecurityHeaders(await env.ASSETS.fetch(request));

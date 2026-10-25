@@ -1,6 +1,6 @@
 import type { Caller, Env, Identity, OwnerKind } from "../types";
 import { createProject, getProjectDetail, listProjects, updateProject } from "../data/projects";
-import { listWorkpackages, upsertWorkpackage } from "../data/workpackages";
+import { listWorkpackagesOut, upsertWorkpackage } from "../data/workpackages";
 import { listMilestones, upsertMilestone } from "../data/milestones";
 import { linkBranch } from "../data/branches";
 import { assignInboxEvent, listEvents, listInbox, logProgress, logTokenCost, setScores } from "../data/logs";
@@ -19,7 +19,7 @@ import { search } from "../data/search";
 import { ConflictError, ValidationError } from "../data/util";
 import { handleUpload } from "./upload";
 import { userCaller } from "../auth/caller";
-import { getPerson } from "../data/persons";
+import { ensureUserPerson, getPerson, listPersons, upsertPerson } from "../data/persons";
 import { handleClaudeCodeHook, type HookBody } from "./hooks";
 import { isAuditConfigured, runAuditExport } from "../audit/export";
 
@@ -45,18 +45,23 @@ export function errorResponse(e: unknown): Response {
   return json({ error: "internal" }, 500);
 }
 
-async function readJson(request: Request): Promise<Record<string, unknown>> {
+async function readJson(request: Request, keepOnBehalfOf = false): Promise<Record<string, unknown>> {
   if (Number(request.headers.get("Content-Length") ?? "0") > MAX_JSON) throw new ValidationError("request body too large");
   const text = await request.text();
   if (text.length > MAX_JSON) throw new ValidationError("request body too large");
   if (!text) return {};
+  let v: unknown;
   try {
-    const v = JSON.parse(text);
+    v = JSON.parse(text);
     if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error();
-    return v;
   } catch {
     throw new ValidationError("body must be a JSON object");
   }
+  // Dashboard writes are always attributed to the logged-in person; on_behalf_of only matters for
+  // service tokens (hook endpoint), so it is dropped here rather than reaching the data layer.
+  if (keepOnBehalfOf) return v as Record<string, unknown>;
+  const { on_behalf_of: _ignored, ...body } = v as Record<string, unknown>;
+  return body;
 }
 
 const optNum = (v: unknown): number | undefined =>
@@ -74,7 +79,11 @@ const route = (method: string, pattern: string, h: Handler) =>
 
 // ---- projects
 route("GET", "/api/projects", async ({ db, url }) =>
-  listProjects(db, { status: url.searchParams.get("status") ?? undefined, tag: url.searchParams.get("tag") ?? undefined }),
+  listProjects(db, {
+    status: url.searchParams.get("status") ?? undefined,
+    tag: url.searchParams.get("tag") ?? undefined,
+    owner: url.searchParams.get("owner") ?? undefined,
+  }),
 );
 route("POST", "/api/projects", async ({ db, req, by }) => createProject(db, await readJson(req), by));
 route("GET", "/api/projects/:id", async ({ db, params }) => getProjectDetail(db, params[0]));
@@ -85,7 +94,7 @@ route("PATCH", "/api/projects/:id", async ({ db, req, by, params }) => {
 route("DELETE", "/api/projects/:id", async ({ db, by, params }) => deleteEntity(db, "project", params[0], by));
 
 // ---- work packages
-route("GET", "/api/workpackages", async ({ db, url }) => listWorkpackages(db, reqStr(url.searchParams.get("project_id"), "project_id")));
+route("GET", "/api/workpackages", async ({ db, url }) => listWorkpackagesOut(db, reqStr(url.searchParams.get("project_id"), "project_id")));
 route("POST", "/api/workpackages", async ({ db, req, by }) => {
   const { project_id, expected_version, ...input } = await readJson(req);
   return upsertWorkpackage(db, reqStr(project_id, "project_id"), input, by, optNum(expected_version));
@@ -106,6 +115,31 @@ route("PATCH", "/api/milestones/:id", async ({ db, req, by, params }) => {
   return upsertMilestone(db, reqStr(project_id, "project_id"), { ...input, id: params[0] }, by, optNum(expected_version));
 });
 route("DELETE", "/api/milestones/:id", async ({ db, by, params }) => deleteEntity(db, "milestone", params[0], by));
+
+// ---- persons (spec §4.1): editors add and edit stakeholders; only admins change access roles or a user's email
+route("GET", "/api/persons", async ({ db, url }) =>
+  listPersons(db, {
+    users_only: url.searchParams.get("users_only") === "true",
+    include_deleted: url.searchParams.get("include_deleted") === "true",
+  }),
+);
+route("POST", "/api/persons", async ({ db, req, by }) => {
+  const { id: _id, expected_version: _v, ...input } = await readJson(req);
+  return upsertPerson(db, input, by);
+});
+/** Own profile: only locale, display_name and phone. Registered before /:id so "me" is not taken as an id. */
+const OWN_PROFILE_FIELDS = ["locale", "display_name", "phone"];
+route("PATCH", "/api/persons/me", async ({ db, req, by }) => {
+  const { expected_version, ...input } = await readJson(req);
+  const other = Object.keys(input).filter((k) => !OWN_PROFILE_FIELDS.includes(k));
+  if (other.length) throw new ValidationError(`only ${OWN_PROFILE_FIELDS.join(", ")} can be changed here (got ${other.join(", ")})`);
+  if (!by.personId) throw new ValidationError("no person for this login");
+  return upsertPerson(db, { ...input, id: by.personId }, by, optNum(expected_version));
+});
+route("PATCH", "/api/persons/:id", async ({ db, req, by, params }) => {
+  const { expected_version, ...input } = await readJson(req);
+  return upsertPerson(db, { ...input, id: params[0] }, by, optNum(expected_version));
+});
 
 // ---- audit (manual trigger of the hourly export; user identities only, like every /api route)
 route("POST", "/api/audit/run", async ({ env }) => {
@@ -262,11 +296,14 @@ export async function handleApi(request: Request, env: Env, identity: Identity &
 }
 
 /** /api/hooks/* — user or allow-listed service token. */
-export async function handleHooks(request: Request, env: Env): Promise<Response> {
+export async function handleHooks(request: Request, env: Env, identity?: Identity): Promise<Response> {
   const path = new URL(request.url).pathname;
   try {
     if (path === "/api/hooks/claude-code" && request.method === "POST") {
-      return json(await handleClaudeCodeHook((await readJson(request)) as HookBody, env));
+      const body = (await readJson(request, true)) as HookBody;
+      // on_behalf_of is for service tokens; a logged-in user posting here acts for themselves only.
+      if (identity?.kind === "user") body.on_behalf_of = (await ensureUserPerson(env.DB, identity.email)).id;
+      return json(await handleClaudeCodeHook(body, env));
     }
     return json({ error: "not_found" }, 404);
   } catch (e) {

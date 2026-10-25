@@ -1,7 +1,20 @@
-import type { BranchRow, Caller, ContextDocRow, EventRow, ProjectRow, ScoreRow, TokenCostRow, WorkpackageRow } from "../types";
+import type {
+  BranchRow,
+  Caller,
+  ContextDocRow,
+  EventOut,
+  PersonRefOut,
+  ProjectRow,
+  ScoreRow,
+  TokenCostRow,
+  WorkpackageRow,
+  WriteWarning,
+} from "../types";
 import { buildWpTree, computeProjectProgress, leafCounts } from "./progress";
 import { QUALIFIES, listMilestones, lockedWpIds } from "./milestones";
 import { PROJECT_CATEGORIES, checkCategory } from "./categories";
+import { personOuts, personRefInput, personRefOut, refInitials } from "./persons";
+import { withPersonOuts } from "./workpackages";
 import {
   ConflictError,
   NotFoundError,
@@ -33,7 +46,21 @@ export const PROJECT_FIELDS = [
   "category",
 ] as const;
 type ProjectField = (typeof PROJECT_FIELDS)[number];
-export type ProjectInput = Partial<Record<ProjectField, unknown>> & { id?: string };
+/** Person-or-text roles of a project; each is stored as <role>_person_id or <role>_text. */
+const PERSON_ROLES = ["owner", "sponsor", "decision_maker"] as const;
+type PersonRole = (typeof PERSON_ROLES)[number];
+const PERSON_COLS = [
+  "owner_person_id",
+  "owner_text",
+  "sponsor_person_id",
+  "sponsor_text",
+  "decision_maker_person_id",
+  "decision_maker_text",
+] as const;
+type PersonCol = (typeof PERSON_COLS)[number];
+/** Columns written by create/update and diffed into events. */
+const WRITE_COLS = [...PROJECT_FIELDS, ...PERSON_COLS] as const;
+export type ProjectInput = Partial<Record<ProjectField | PersonRole, unknown>> & { id?: string };
 
 const STATUSES = ["idea", "active", "on_hold", "done", "abandoned"];
 const ORIGINS = ["claude-web", "claude-code", "manual", "mixed"];
@@ -52,6 +79,7 @@ export type ProjectCard = {
   target_date: string | null;
   tags: string[];
   category: string | null;
+  owner_initials: string | null;
   wp_counts: { open: number; started: number; done: number };
   next_milestone: { id: string; title: string; due_date: string | null } | null;
   last_activity: string | null;
@@ -88,10 +116,51 @@ function normalise(input: ProjectInput): Partial<Record<ProjectField, unknown>> 
   return out;
 }
 
-export type ProjectOut = Omit<ProjectRow, "tags"> & { tags: string[] };
+export type ProjectOut = Omit<ProjectRow, "tags"> & {
+  tags: string[];
+  owner: PersonRefOut;
+  sponsor: PersonRefOut;
+  decision_maker: PersonRefOut;
+};
+/** Write result: the project plus non-blocking warnings. */
+export type ProjectWriteOut = ProjectOut & { warnings: WriteWarning[] };
 
-/** Client-facing project: tags parsed from their JSON column. */
-export const toProjectOut = (row: ProjectRow): ProjectOut => ({ ...row, tags: parseJsonArray(row.tags) });
+/** Client-facing project: tags parsed from their JSON column, person fields as chips or text. */
+export async function toProjectOut(db: D1Database, row: ProjectRow): Promise<ProjectOut> {
+  const people = await personOuts(db, [row.owner_person_id, row.sponsor_person_id, row.decision_maker_person_id]);
+  return {
+    ...row,
+    tags: parseJsonArray(row.tags),
+    owner: personRefOut(row.owner_person_id, row.owner_text, people),
+    sponsor: personRefOut(row.sponsor_person_id, row.sponsor_text, people),
+    decision_maker: personRefOut(row.decision_maker_person_id, row.decision_maker_text, people),
+  };
+}
+
+/** Resolve the person-or-text inputs of a project into their column values (only the given ones). */
+async function personCols(db: D1Database, input: ProjectInput): Promise<Partial<Record<PersonCol, string | null>>> {
+  const out: Partial<Record<PersonCol, string | null>> = {};
+  for (const r of PERSON_ROLES) {
+    const ref = await personRefInput(db, input[r], r);
+    if (!ref) continue;
+    out[`${r}_person_id`] = ref.person_id;
+    out[`${r}_text`] = ref.text;
+  }
+  return out;
+}
+
+/**
+ * Fields a project needs before it may be `active` (spec F1; F12 adds the target date for some types).
+ * Returned names are API field names, so errors and warnings name what to fill in.
+ */
+function missingForActive(row: Pick<ProjectRow, "owner_person_id" | "owner_text">): string[] {
+  const missing: string[] = [];
+  if (!row.owner_person_id && !row.owner_text) missing.push("owner");
+  return missing;
+}
+
+const activeError = (missing: string[]) =>
+  new ValidationError(`status active requires ${missing.join(", ")} (a person id, an email or a name)`);
 
 export async function getProjectRow(db: D1Database, id: string): Promise<ProjectRow> {
   const p = await db.prepare("SELECT * FROM project WHERE id = ?").bind(id).first<ProjectRow>();
@@ -101,7 +170,7 @@ export async function getProjectRow(db: D1Database, id: string): Promise<Project
 
 export async function listProjects(
   db: D1Database,
-  filter: { status?: string; tag?: string; category?: string } = {},
+  filter: { status?: string; tag?: string; category?: string; owner?: string } = {},
 ): Promise<ProjectCard[]> {
   const [projects, wps, branches, docs, events, ms] = await db.batch([
     filter.status
@@ -125,8 +194,13 @@ export async function listProjects(
   const docCount = count(docs.results);
   const lastEvent = new Map((events.results as Array<{ project_id: string; ts: string }>).map((r) => [r.project_id, r.ts]));
   const tag = filter.tag?.toLowerCase();
+  const rows = (projects.results as ProjectRow[]).filter((p) => !filter.owner || p.owner_person_id === filter.owner);
+  const people = await personOuts(
+    db,
+    rows.map((p) => p.owner_person_id),
+  );
 
-  return (projects.results as ProjectRow[])
+  return rows
     .map((p) => {
       const list = wpBy.get(p.id) ?? [];
       const ev = lastEvent.get(p.id) ?? null;
@@ -141,6 +215,7 @@ export async function listProjects(
         target_date: p.target_date,
         tags: parseJsonArray(p.tags),
         category: p.category,
+        owner_initials: refInitials(personRefOut(p.owner_person_id, p.owner_text, people)),
         wp_counts: leafCounts(list),
         next_milestone: nextMs.get(p.id) ?? null,
         last_activity: ev && ev > p.updated_at ? ev : p.updated_at,
@@ -176,7 +251,11 @@ export async function getProjectDetail(db: D1Database, id: string) {
       )
       .bind(id),
     db.prepare("SELECT * FROM token_cost WHERE project_id = ? ORDER BY recorded_at DESC LIMIT 20").bind(id),
-    db.prepare("SELECT * FROM event WHERE project_id = ? ORDER BY id DESC LIMIT 10").bind(id),
+    db
+      .prepare(
+        "SELECT e.*, p.name AS person_name FROM event e LEFT JOIN person p ON p.id = e.person_id WHERE e.project_id = ? ORDER BY e.id DESC LIMIT 10",
+      )
+      .bind(id),
     db
       .prepare(
         "SELECT id, owner_kind, owner_id, title, slug, source, bytes, version, pinned, sort, updated_at, updated_by FROM context_doc WHERE project_id = ? ORDER BY owner_kind, owner_id, pinned DESC, sort, title",
@@ -187,21 +266,31 @@ export async function getProjectDetail(db: D1Database, id: string) {
   const milestones = await listMilestones(db, id);
   const totals = cost.results[0] as { claude_tokens: number; copilot_prompts: number };
   return {
-    project: toProjectOut(project),
+    project: await toProjectOut(db, project),
     progress: computeProjectProgress(project, wpRows),
-    workpackages: buildWpTree(wpRows, { locked: lockedWpIds(milestones) }),
+    workpackages: buildWpTree(await withPersonOuts(db, project, wpRows), { locked: lockedWpIds(milestones) }),
     milestones,
     branches: branches.results as BranchRow[],
     scores: scores.results as ScoreRow[],
     score_history_count: (scoreCount.results[0] as { n: number }).n,
     token_cost: { ...totals, entries: costEntries.results as TokenCostRow[] },
-    events: events.results as EventRow[],
+    events: events.results as EventOut[],
     context_index: ctx.results as Array<Omit<ContextDocRow, "content_md" | "project_id" | "filename" | "created_at" | "created_by">>,
   };
 }
 
-export async function createProject(db: D1Database, input: ProjectInput, by: Caller): Promise<ProjectOut> {
+/**
+ * Create a project. The owner defaults to the calling person when one is known (spec F1, creation
+ * compatibility). Without an explicit status the project starts `active` when the active preconditions
+ * hold, else as `idea` with a warning; an explicit `active` without them fails.
+ */
+export async function createProject(db: D1Database, input: ProjectInput, by: Caller): Promise<ProjectWriteOut> {
   const fields = normalise(input);
+  const people = await personCols(db, input);
+  if (input.owner === undefined && by.personId) {
+    people.owner_person_id = by.personId;
+    people.owner_text = null;
+  }
   const title = String(fields.title ?? "").trim();
   if (!title) throw new ValidationError("title is required");
   if (input.id !== undefined && !ID_RE.test(String(input.id))) throw new ValidationError("id must match ^[a-z0-9][a-z0-9-]{0,62}$");
@@ -228,12 +317,30 @@ export async function createProject(db: D1Database, input: ProjectInput, by: Cal
     progress_manual: null,
     tags: null,
     category: null,
+    owner_person_id: null,
+    owner_text: null,
+    sponsor_person_id: null,
+    sponsor_text: null,
+    decision_maker_person_id: null,
+    decision_maker_text: null,
     ...(fields as Partial<ProjectRow>),
+    ...people,
     version: 1,
     created_at: ts,
     updated_at: ts,
   };
-  const cols = ["id", ...PROJECT_FIELDS, "version", "created_at", "updated_at"] as const;
+  const warnings: WriteWarning[] = [];
+  const missing = missingForActive(row);
+  if (missing.length && fields.status === "active") throw activeError(missing);
+  if (missing.length && fields.status === undefined) {
+    row.status = "idea";
+    warnings.push({
+      code: "ACTIVE_PRECONDITIONS_MISSING",
+      message: `created as idea: status active requires ${missing.join(", ")}`,
+      fields: missing,
+    });
+  }
+  const cols = ["id", ...WRITE_COLS, "version", "created_at", "updated_at"] as const;
   await db.batch([
     db
       .prepare(`INSERT INTO project (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`)
@@ -245,10 +352,10 @@ export async function createProject(db: D1Database, input: ProjectInput, by: Cal
       entity_id: id,
       action: "create",
       summary: title,
-      diff: diffFields(null, row as unknown as Record<string, unknown>, PROJECT_FIELDS),
+      diff: diffFields(null, row as unknown as Record<string, unknown>, WRITE_COLS),
     }),
   ]);
-  return toProjectOut(await getProjectRow(db, id));
+  return { ...(await toProjectOut(db, await getProjectRow(db, id))), warnings };
 }
 
 export async function updateProject(
@@ -257,15 +364,21 @@ export async function updateProject(
   patch: ProjectInput,
   by: Caller,
   expectedVersion?: number,
-): Promise<ProjectOut> {
+): Promise<ProjectWriteOut> {
   const current = await getProjectRow(db, id);
   if (typeof expectedVersion === "number" && expectedVersion !== current.version)
-    throw new ConflictError("version conflict", toProjectOut(current));
+    throw new ConflictError("version conflict", await toProjectOut(db, current));
   const fields = normalise(patch);
-  const next = { ...current, ...fields } as Record<string, unknown>;
-  const diff = diffFields(current as unknown as Record<string, unknown>, next, PROJECT_FIELDS);
+  const people = await personCols(db, patch);
+  const next = { ...current, ...fields, ...people } as Record<string, unknown>;
+  // Checked where status becomes active, or when an active project's owner changes; other edits of a
+  // legacy ownerless active project stay possible.
+  const missing = missingForActive(next as unknown as ProjectRow);
+  if (missing.length && next.status === "active" && (current.status !== "active" || "owner_person_id" in people))
+    throw activeError(missing);
+  const diff = diffFields(current as unknown as Record<string, unknown>, next, WRITE_COLS);
   const changed = Object.keys(diff);
-  if (!changed.length) return toProjectOut(current);
+  if (!changed.length) return { ...(await toProjectOut(db, current)), warnings: [] };
 
   const res = await db.batch([
     db
@@ -283,6 +396,6 @@ export async function updateProject(
       diff,
     }),
   ]);
-  if (!res[0].meta.changes) throw new ConflictError("version conflict", toProjectOut(await getProjectRow(db, id)));
-  return toProjectOut(await getProjectRow(db, id));
+  if (!res[0].meta.changes) throw new ConflictError("version conflict", await toProjectOut(db, await getProjectRow(db, id)));
+  return { ...(await toProjectOut(db, await getProjectRow(db, id))), warnings: [] };
 }

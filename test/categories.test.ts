@@ -19,6 +19,8 @@ const wp = (id: string, o: Partial<WorkpackageRow> = {}): WorkpackageRow => ({
   sort: 0,
   category: null,
   human: null,
+  owner_person_id: null,
+  owner_text: null,
   version: 1,
   created_at: "",
   updated_at: "",

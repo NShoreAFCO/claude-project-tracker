@@ -1,4 +1,4 @@
-import type { Caller, PersonRow, Role } from "../types";
+import type { Caller, PersonOut, PersonRefOut, PersonRow, Role } from "../types";
 import { POLICY } from "../policy";
 import { isAgent } from "../auth/caller";
 import {
@@ -131,6 +131,46 @@ export async function resolvePersonRef(db: D1Database, ref: string | null | unde
   return { person_id: null, text: v };
 }
 
+/**
+ * A person-or-text API field (owner, sponsor, decision maker): undefined keeps the stored value, null or ""
+ * clears it, a string resolves via resolvePersonRef. Returns the two columns to store.
+ */
+export async function personRefInput(
+  db: D1Database,
+  v: unknown,
+  field: string,
+): Promise<{ person_id: string | null; text: string | null } | undefined> {
+  if (v === undefined) return undefined;
+  if (v !== null && typeof v !== "string") throw new ValidationError(`${field} must be a person id, an email or a name`);
+  if (typeof v === "string" && v.trim().length > 200) throw new ValidationError(`${field} is longer than 200 characters`);
+  return resolvePersonRef(db, v);
+}
+
+/** Chip data for the given person ids (deleted persons included: they still own history). */
+export async function personOuts(db: D1Database, ids: Iterable<string | null | undefined>): Promise<Map<string, PersonOut>> {
+  const want = [...new Set([...ids].filter((x): x is string => !!x))];
+  const out = new Map<string, PersonOut>();
+  for (let i = 0; i < want.length; i += 90) {
+    const chunk = want.slice(i, i + 90);
+    const { results } = await db
+      .prepare(`SELECT id, name, display_name FROM person WHERE id IN (${chunk.map(() => "?").join(", ")})`)
+      .bind(...chunk)
+      .all<Pick<PersonRow, "id" | "name" | "display_name">>();
+    for (const p of results) out.set(p.id, { person_id: p.id, name: p.name, initials: initials(p) });
+  }
+  return out;
+}
+
+/** Client shape of a person-or-text field. A dangling person id (purged person) reads as null. */
+export function personRefOut(personId: string | null, text: string | null, people: Map<string, PersonOut>): PersonRefOut {
+  if (personId) return people.get(personId) ?? null;
+  return text ? { text } : null;
+}
+
+/** Initials for a person-or-text field (cards); free text gets initials like a name. */
+export const refInitials = (r: PersonRefOut): string | null =>
+  r === null ? null : "text" in r ? initials({ name: r.text, display_name: null }) : r.initials;
+
 const optStr = (v: unknown, field: string, max: number): string | null => {
   if (v === null || v === undefined) return null;
   if (typeof v !== "string") throw new ValidationError(`${field} must be text`);
@@ -165,9 +205,12 @@ function normalise(input: Record<string, unknown>): Partial<Record<PersonField, 
         if (v !== null && !ROLES.includes(v as Role)) throw new ValidationError(`access_role must be one of ${ROLES.join("|")} or null`);
         out.access_role = v;
         break;
-      case "locale":
-        out.locale = optStr(v, "locale", 10);
+      case "locale": {
+        const s = optStr(v, "locale", 10);
+        if (s && !POLICY.locales.includes(s)) throw new ValidationError(`locale must be one of ${POLICY.locales.join("|")} or null`);
+        out.locale = s;
         break;
+      }
       default:
         out[f] = optStr(v, f, f === "comment" || f === "contact_note" ? 2000 : 200);
     }
@@ -183,7 +226,7 @@ async function checkEmailFree(db: D1Database, email: unknown, selfId: string | n
 
 /**
  * Create a person, or update the one named by input.id. undefined keeps a field, null clears it.
- * Agents (MCP, service tokens) never change access roles or a user's email; only admins change a user's email.
+ * Agents (MCP, service tokens) never change access roles or a user's email; only admins change either.
  * Further role checks per §4.2 arrive with R5.
  */
 export async function upsertPerson(
@@ -196,6 +239,8 @@ export async function upsertPerson(
   const existing = input.id ? await getPerson(db, String(input.id)) : null;
   const roleChange = "access_role" in fields && (fields.access_role ?? null) !== (existing?.access_role ?? null);
   if (roleChange && isAgent(by)) throw new ForbiddenError("agents cannot change access roles");
+  // Editors add and edit stakeholders; granting or changing access is for admins (§4.1).
+  if (roleChange && by.role !== "admin") throw new ForbiddenError("only admins can change access roles");
   // A user's email is their login: whoever controls it inherits the row's role. Only admins (never agents) change it (§4.1).
   const userEmailChange = !!existing && existing.access_role !== null && "email" in fields && (fields.email ?? null) !== existing.email;
   if (userEmailChange && isAgent(by)) throw new ForbiddenError("agents cannot change the email of a user");

@@ -1,4 +1,4 @@
-import type { Caller, EventRow, ScoreRow, TokenCostRow, WorkpackageRow } from "../types";
+import type { Caller, EventOut, EventRow, ScoreRow, TokenCostRow, WorkpackageRow } from "../types";
 import { reachStmts } from "./milestones";
 import { NotFoundError, ValidationError, eventStmt, newId, now } from "./util";
 
@@ -154,33 +154,38 @@ export async function logProgress(
   };
 }
 
+/** Events with the human behind each write joined in (person_name), newest first. */
 export async function listEvents(
   db: D1Database,
   opts: { project_id?: string; limit?: number; before_id?: number } = {},
-): Promise<EventRow[]> {
+): Promise<EventOut[]> {
   const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 50), 1), 200);
   const where: string[] = [];
   const args: unknown[] = [];
   if (opts.project_id) {
-    where.push("project_id = ?");
+    where.push("e.project_id = ?");
     args.push(opts.project_id);
   }
   if (typeof opts.before_id === "number") {
-    where.push("id < ?");
+    where.push("e.id < ?");
     args.push(opts.before_id);
   }
   const { results } = await db
-    .prepare(`SELECT * FROM event ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY id DESC LIMIT ?`)
+    .prepare(
+      `SELECT e.*, p.name AS person_name FROM event e LEFT JOIN person p ON p.id = e.person_id ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY e.id DESC LIMIT ?`,
+    )
     .bind(...args, limit)
-    .all<EventRow>();
+    .all<EventOut>();
   return results;
 }
 
-export async function listInbox(db: D1Database, limit = 100): Promise<EventRow[]> {
+export async function listInbox(db: D1Database, limit = 100): Promise<EventOut[]> {
   const { results } = await db
-    .prepare("SELECT * FROM event WHERE project_id IS NULL AND action = 'unmatched' ORDER BY id DESC LIMIT ?")
+    .prepare(
+      "SELECT e.*, p.name AS person_name FROM event e LEFT JOIN person p ON p.id = e.person_id WHERE e.project_id IS NULL AND e.action = 'unmatched' ORDER BY e.id DESC LIMIT ?",
+    )
     .bind(Math.min(Math.max(Math.trunc(limit), 1), 500))
-    .all<EventRow>();
+    .all<EventOut>();
   return results;
 }
 
