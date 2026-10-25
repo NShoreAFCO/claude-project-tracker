@@ -130,6 +130,7 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
 ```
 
 - `project.category` and `workpackage.category` (added in §14) hold keys configured in `instance.config.json`, not fixed lists. Keys stored earlier that are no longer configured render as "no category".
+- R1 (migration `0003`, §15–§17) adds the `person`, `wp_stakeholder` and `project_link` tables and owner, closure, wait/drop and soft-delete columns to the tables above.
 - **Derived progress.** Weighted mean of top-level work packages, excluding `dropped`. A parent's progress is the mean of its children.
 - **Writes.** Each mutation and its `event` row (with a field-level diff) go in one D1 `batch`.
 - **Concurrency.** `expected_version` is optional. On mismatch, return a 409 or an MCP error carrying the current record.
@@ -185,6 +186,8 @@ CREATE INDEX ctx_owner ON context_doc(owner_kind, owner_id);
 
 ## 5. MCP tools
 
+R1 adds owner, closure and trash fields and tools (§15–§17); the 23-tool total is counted there.
+
 zod schemas, short imperative descriptions, compact JSON output.
 
 | Tool | Purpose |
@@ -194,6 +197,8 @@ zod schemas, short imperative descriptions, compact JSON output.
 | `create_project(...)` | §4 fields; id auto-slugged |
 | `update_project(id, patch, expected_version?)` | Partial update |
 | `upsert_workpackage(project_id, id?, ...)` | Supports `parent_id`, `blocked_by` |
+| `move_workpackages(project_id, to_project_id, ids)` | Move open WPs with their sub-WPs to a follow-up project (§16) |
+| `list_persons(users_only?)`, `upsert_person(id?, name, …)` | People and stakeholders (§15) |
 | `delete_entity(kind, id, confirm)` | `confirm: true` required; moves to the trash (§17) |
 | `restore_entity(kind, id)` | Take an item out of the trash (§17) |
 | `log_progress(project_id, summary, workpackage_id?, progress?, session_id?)` | Main "log what we did" tool |
@@ -224,6 +229,7 @@ Each doc is also exposed as an MCP resource `tracker://context/{doc_id}`.
 
 - CRUD mirroring the MCP tools under:
   - `/api/projects`, `/api/workpackages`, `/api/branches`, `/api/scores`, `/api/token-cost`
+  - `/api/persons`, `/api/trash`, `/api/delete-preview` (§15, §17), `POST /api/projects/:id/move-workpackages` (§16)
   - `/api/context`: list, get, create, update, append, delete, revisions, restore, plus bundle as markdown download (`GET /api/context/bundle?project_id=&workpackage_id=&format=md`)
 - `GET /api/events`.
 - **Upload.** `POST /api/context/upload` takes `multipart/form-data` with multiple files.
@@ -269,6 +275,7 @@ Optional. It runs only when both `AUDIT_REPO` and `AUDIT_GITHUB_TOKEN` are set. 
 - **Gantt.** Hand-rolled SVG. Covers work packages with dates; work packages without dates go in a side list. Dates are never invented.
 - **Forms** for every entity, plus an inline progress slider. Send `expected_version`; show a conflict dialog on 409.
 - **Inbox** of unassigned hook and webhook events, with an "assign to project" action.
+- **R1 additions.** People view (`#/people`: list, add, edit; admins set the access role) and Trash (`#/trash`: restore, admin purge). Cards show owner initials, red Blocked and amber Waiting chips with age, and a "Closure due" hint. Done is disabled with a tooltip while open work packages block it; closing a project opens a dialog for closure note, lessons learned and moving open work packages to a new or existing project. Rows have a ⋯ menu with Delete, which asks for confirmation naming the number of children. Context documents show a status badge and a release action.
 - **Layout.** Responsive down to 375 px.
 
 ### 9.1 Theme

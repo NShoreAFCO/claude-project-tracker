@@ -236,7 +236,9 @@ Open the address the setup printed, e.g. `https://project-tracker.<subdomain>.wo
 
 **If no code arrives:** check spam. Codes are only sent to allowed addresses. The page looks the same for other addresses, but no code is sent (on purpose). Check the spelling in `instance/instance.config.json` → `deploy.allowedEmails`, then see "Add or remove people".
 
-You can delete the demo project from its popup (✎ → Delete) whenever you like.
+You can delete the demo project from its row menu (⋯ → Delete) whenever you like. Deleted items go to the Trash view, where they can be restored.
+
+Your own entry appears in the **People** view after your first sign-in, with the admin role if you named yourself as admin in the setup. Admins give other people a role there (viewer, editor, decider, admin); someone who signs in for the first time gets the default role (`editor`). Stakeholders without a login can be added there too.
 
 ## 9. Connect Claude
 
@@ -312,7 +314,7 @@ git push
 2. Run `npm run setup` again and press Enter through the questions; the new list is shown as the default. It updates the Access policy and redeploys.
 3. Commit the change (step 12).
 
-People you remove can no longer sign in, and their Claude connections stop working as soon as the new list is deployed. Their entry in the tracker's people list stays, so history still shows who did what.
+People you remove can no longer sign in, and their Claude connections stop working as soon as the new list is deployed. Their entry in the tracker's people list stays, so history still shows who did what. To lock out a person at once, an admin can also delete them in the People view; they are refused with "person deactivated" until an admin restores them from the Trash.
 
 ## 14. Updates
 
