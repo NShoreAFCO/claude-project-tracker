@@ -9,6 +9,7 @@ import { listContext, readContext, getContextBundle } from "../data/context-read
 import { writeContext, appendContext, deleteContext } from "../data/context-write";
 import { search } from "../data/search";
 import { upsertMilestone } from "../data/milestones";
+import { moveWorkpackages } from "../data/rules";
 import { HUMAN_DEFAULT, PROJECT_CATEGORIES, WP_CATEGORIES } from "../data/categories";
 import { ConflictError, ValidationError } from "../data/util";
 import { listPersons, upsertPerson } from "../data/persons";
@@ -123,6 +124,8 @@ export function registerTools(reg: Reg): void {
         progress: project.progress,
         category: project.category,
         wp_counts: project.wp_counts,
+        stalled_blocked: project.stalled_blocked,
+        closure_due: project.closure_due,
         next_milestone: project.next_milestone,
         target_date: project.target_date,
         last_activity: project.last_activity,
@@ -168,6 +171,8 @@ export function registerTools(reg: Reg): void {
         owner: personRef("Set the project owner (accountable person; defaults to you)."),
         sponsor: personRef("Set the sponsor."),
         decision_maker: personRef("Set the decision maker (decides at gates)."),
+        closure_note_md: optionalText("Set the closure note (required for status done or abandoned)."),
+        lessons_learned_md: optionalText('Set lessons learned (required for status done; may be "none").'),
         on_behalf_of: onBehalfOf,
       }),
     },
@@ -194,6 +199,8 @@ export function registerTools(reg: Reg): void {
           owner: args.owner,
           sponsor: args.sponsor,
           decision_maker: args.decision_maker,
+          closure_note_md: args.closure_note_md,
+          lessons_learned_md: args.lessons_learned_md,
         },
         tc.by,
       ),
@@ -203,7 +210,8 @@ export function registerTools(reg: Reg): void {
     "update_project",
     {
       title: "Update project",
-      description: "Update project fields. Setting status active requires an owner (set owner in the same patch if missing).",
+      description:
+        'Update project fields. Setting status active requires an owner (set owner in the same patch if missing). Closing: status abandoned requires closure_note_md; status done requires closure_note_md and lessons_learned_md (may be "none") and no open work packages (todo|doing|blocked|waiting) — otherwise the call fails with a conflict listing them; finish or drop them, or move them to a follow-up project with move_workpackages.',
       inputSchema: z.object({
         id: z.string().describe("Identify the project."),
         patch: z
@@ -226,6 +234,8 @@ export function registerTools(reg: Reg): void {
             owner: personRef("Set the project owner."),
             sponsor: personRef("Set the sponsor."),
             decision_maker: personRef("Set the decision maker."),
+            closure_note_md: optionalText("Set the closure note (required for status done or abandoned)."),
+            lessons_learned_md: optionalText('Set lessons learned (required for status done; may be "none").'),
           })
           .describe("Provide the fields to update."),
         expected_version: z.number().int().optional().describe("Require the expected project version."),
@@ -239,7 +249,7 @@ export function registerTools(reg: Reg): void {
     "upsert_workpackage",
     {
       title: "Upsert work package",
-      description: `Create or update a work package. category: ${WP_CATEGORIES.join("|")} (null = inherit from the parent). WPs with human=true${HUMAN_DEFAULT.length ? ` (default for ${HUMAN_DEFAULT.join(", ")})` : ""} are done off the computer: log progress the user reports, and set them to done only when the user says so. Set owner when someone other than the project owner is responsible (effective_owner falls back to the project owner); priority_stakeholders lists persons to keep informed.`,
+      description: `Create or update a work package. category: ${WP_CATEGORIES.join("|")} (null = inherit from the parent). WPs with human=true${HUMAN_DEFAULT.length ? ` (default for ${HUMAN_DEFAULT.join(", ")})` : ""} are done off the computer: log progress the user reports, and set them to done only when the user says so. Set owner when someone other than the project owner is responsible (effective_owner falls back to the project owner); priority_stakeholders lists persons to keep informed. Status: use blocked only for a real blocker (blocked_by wp:<id>, ms:<id> or ext:<text>; blocked_since defaults to today) and waiting for a deliberate deferral (optional waiting_reason). dropped requires drop_reason. A todo WP whose progress rises above 0 becomes doing unless you set status in the same call.`,
       inputSchema: z.object({
         project_id: z.string().describe("Identify the owning project."),
         id: z.string().optional().describe("Identify an existing work package (omit to create)."),
@@ -247,7 +257,10 @@ export function registerTools(reg: Reg): void {
         title: optionalText("Set the work package title."),
         description_md: optionalText("Set the Markdown description."),
         status: workpackageStatusSchema.optional().describe("Set the work package status."),
-        blocked_by: optionalText("Set the blocking reason or entity."),
+        blocked_by: optionalText("Set the blocker: wp:<work package id>, ms:<milestone id>, ext:<external reason>, or free text."),
+        blocked_since: optionalDate("Set when the WP became blocked as YYYY-MM-DD (defaults to today on status blocked)."),
+        waiting_reason: optionalText("Set why the WP is deferred (status waiting)."),
+        drop_reason: optionalText("Set why the WP is dropped (required for status dropped)."),
         progress: z.number().min(0).max(100).optional().describe("Set progress from 0 to 100."),
         weight: z.number().positive().optional().describe("Set a positive progress weight."),
         start_date: optionalDate("Set the start date as YYYY-MM-DD."),
@@ -274,6 +287,22 @@ export function registerTools(reg: Reg): void {
 
       return upsertWorkpackage(tc.db, project_id, omitUndefined(input), tc.by, expected_version);
     },
+  );
+
+  reg(
+    "move_workpackages",
+    {
+      title: "Move work packages",
+      description:
+        "Move open work packages (todo|doing|blocked|waiting), with all their sub-WPs, to a follow-up project, e.g. before closing a project as done. WP ids stay the same; their context docs and linked branches follow; milestone links to the old project and dependencies across the two projects are removed. The projects are linked (follows / followed_by). The target must exist and not be done or abandoned.",
+      inputSchema: z.object({
+        project_id: z.string().describe("Identify the source project."),
+        to_project_id: z.string().describe("Identify the follow-up project (create it first with create_project if needed)."),
+        ids: z.array(z.string()).min(1).max(200).describe("Work package ids to move (top-level or sub-WPs of the source project)."),
+        on_behalf_of: onBehalfOf,
+      }),
+    },
+    async (args, tc) => moveWorkpackages(tc.db, args.project_id, args.to_project_id, args.ids, tc.by),
   );
 
   reg(
@@ -328,7 +357,8 @@ export function registerTools(reg: Reg): void {
     "log_progress",
     {
       title: "Log progress",
-      description: "Log what was done in this session. Main logging tool.",
+      description:
+        "Log what was done in this session. Main logging tool. With workpackage_id, a todo work package moves to doing; progress 100 marks it done.",
       inputSchema: z.object({
         project_id: z.string().describe("Identify the project."),
         summary: z.string().min(1).describe("Summarize the completed work."),

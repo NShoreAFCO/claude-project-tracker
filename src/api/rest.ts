@@ -16,6 +16,7 @@ import {
   writeContext,
 } from "../data/context-write";
 import { search } from "../data/search";
+import { moveWorkpackages } from "../data/rules";
 import { ConflictError, ValidationError } from "../data/util";
 import { handleUpload } from "./upload";
 import { userCaller } from "../auth/caller";
@@ -92,6 +93,11 @@ route("PATCH", "/api/projects/:id", async ({ db, req, by, params }) => {
   return updateProject(db, params[0], patch, by, optNum(expected_version));
 });
 route("DELETE", "/api/projects/:id", async ({ db, by, params }) => deleteEntity(db, "project", params[0], by));
+/** F3: move open WPs (with sub-WPs) to a follow-up project; body {to_project_id, ids}. */
+route("POST", "/api/projects/:id/move-workpackages", async ({ db, req, by, params }) => {
+  const { to_project_id, ids } = await readJson(req);
+  return moveWorkpackages(db, params[0], reqStr(to_project_id, "to_project_id"), ids as string[], by);
+});
 
 // ---- work packages
 route("GET", "/api/workpackages", async ({ db, url }) => listWorkpackagesOut(db, reqStr(url.searchParams.get("project_id"), "project_id")));
@@ -286,7 +292,9 @@ export async function handleApi(request: Request, env: Env, identity: Identity &
       if (m && method === request.method) {
         const params = m.slice(1).map(decodeURIComponent);
         const out = await h({ req: request, url, env, db, by, params });
-        return json(out, request.method === "POST" && path !== "/api/context/upload" && !path.endsWith("/assign") ? 201 : 200);
+        const created =
+          request.method === "POST" && path !== "/api/context/upload" && !path.endsWith("/assign") && !path.endsWith("/move-workpackages");
+        return json(out, created ? 201 : 200);
       }
     }
     return routes.some(([, re]) => re.test(path)) ? json({ error: "method_not_allowed" }, 405) : json({ error: "not_found" }, 404);

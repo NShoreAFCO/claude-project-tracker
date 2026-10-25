@@ -10,11 +10,21 @@ import type {
   WorkpackageRow,
   WriteWarning,
 } from "../types";
-import { buildWpTree, computeProjectProgress, leafCounts } from "./progress";
+import { buildWpTree, computeProjectProgress, leafCounts, type WpCounts } from "./progress";
 import { QUALIFIES, listMilestones, lockedWpIds } from "./milestones";
 import { PROJECT_CATEGORIES, checkCategory } from "./categories";
 import { personOuts, personRefInput, personRefOut, refInitials } from "./persons";
 import { withPersonOuts } from "./workpackages";
+import {
+  OPEN_WP_SQL,
+  closureError,
+  closureMissing,
+  isClosedProjectStatus,
+  openWorkpackages,
+  openWorkpackagesError,
+  projectFlags,
+  projectLinks,
+} from "./rules";
 import {
   ConflictError,
   NotFoundError,
@@ -44,6 +54,8 @@ export const PROJECT_FIELDS = [
   "progress_manual",
   "tags",
   "category",
+  "closure_note_md",
+  "lessons_learned_md",
 ] as const;
 type ProjectField = (typeof PROJECT_FIELDS)[number];
 /** Person-or-text roles of a project; each is stored as <role>_person_id or <role>_text. */
@@ -80,7 +92,10 @@ export type ProjectCard = {
   tags: string[];
   category: string | null;
   owner_initials: string | null;
-  wp_counts: { open: number; started: number; done: number };
+  /** open = todo, in_progress = doing, waiting_blocked = waiting + blocked; started = in_progress (alias until the UI moves). */
+  wp_counts: WpCounts;
+  stalled_blocked: boolean;
+  closure_due: boolean;
   next_milestone: { id: string; title: string; due_date: string | null } | null;
   last_activity: string | null;
   open_branches: number;
@@ -121,19 +136,35 @@ export type ProjectOut = Omit<ProjectRow, "tags"> & {
   owner: PersonRefOut;
   sponsor: PersonRefOut;
   decision_maker: PersonRefOut;
+  /** Any top-level WP is blocked (status unchanged). */
+  stalled_blocked: boolean;
+  /** 100 % derived progress, all WPs done (or dropped), project not yet closed. */
+  closure_due: boolean;
+  /** Projects this one continues / its follow-up projects (project_link kind "follows"). */
+  follows: string[];
+  followed_by: string[];
 };
 /** Write result: the project plus non-blocking warnings. */
 export type ProjectWriteOut = ProjectOut & { warnings: WriteWarning[] };
 
-/** Client-facing project: tags parsed from their JSON column, person fields as chips or text. */
-export async function toProjectOut(db: D1Database, row: ProjectRow): Promise<ProjectOut> {
+/** Derived progress regardless of the project's progress mode (closure_due looks at the WPs). */
+const derivedProgress = (wps: WorkpackageRow[]): number => computeProjectProgress({ progress_mode: "derived", progress_manual: null }, wps);
+
+/**
+ * Client-facing project: tags parsed from their JSON column, person fields as chips or text, derived
+ * flags and follow-up links. `wps` are the project's work packages when the caller already has them.
+ */
+export async function toProjectOut(db: D1Database, row: ProjectRow, wps?: WorkpackageRow[]): Promise<ProjectOut> {
   const people = await personOuts(db, [row.owner_person_id, row.sponsor_person_id, row.decision_maker_person_id]);
+  const list = wps ?? (await db.prepare("SELECT * FROM workpackage WHERE project_id = ?").bind(row.id).all<WorkpackageRow>()).results;
   return {
     ...row,
     tags: parseJsonArray(row.tags),
     owner: personRefOut(row.owner_person_id, row.owner_text, people),
     sponsor: personRefOut(row.sponsor_person_id, row.sponsor_text, people),
     decision_maker: personRefOut(row.decision_maker_person_id, row.decision_maker_text, people),
+    ...projectFlags(row.status, list, derivedProgress),
+    ...(await projectLinks(db, row.id)),
   };
 }
 
@@ -161,6 +192,12 @@ function missingForActive(row: Pick<ProjectRow, "owner_person_id" | "owner_text"
 
 const activeError = (missing: string[]) =>
   new ValidationError(`status active requires ${missing.join(", ")} (a person id, an email or a name)`);
+
+/** Test seam: runs between the open-WP pre-read and the conditional UPDATE when a project is closed as done. */
+let beforeCloseWrite: (() => Promise<void>) | null = null;
+export function setBeforeCloseWriteForTesting(f: (() => Promise<void>) | null): void {
+  beforeCloseWrite = f;
+}
 
 export async function getProjectRow(db: D1Database, id: string): Promise<ProjectRow> {
   const p = await db.prepare("SELECT * FROM project WHERE id = ?").bind(id).first<ProjectRow>();
@@ -217,6 +254,7 @@ export async function listProjects(
         category: p.category,
         owner_initials: refInitials(personRefOut(p.owner_person_id, p.owner_text, people)),
         wp_counts: leafCounts(list),
+        ...projectFlags(p.status, list, derivedProgress),
         next_milestone: nextMs.get(p.id) ?? null,
         last_activity: ev && ev > p.updated_at ? ev : p.updated_at,
         open_branches: openBranches.get(p.id) ?? 0,
@@ -266,7 +304,7 @@ export async function getProjectDetail(db: D1Database, id: string) {
   const milestones = await listMilestones(db, id);
   const totals = cost.results[0] as { claude_tokens: number; copilot_prompts: number };
   return {
-    project: await toProjectOut(db, project),
+    project: await toProjectOut(db, project, wpRows),
     progress: computeProjectProgress(project, wpRows),
     workpackages: buildWpTree(await withPersonOuts(db, project, wpRows), { locked: lockedWpIds(milestones) }),
     milestones,
@@ -323,12 +361,16 @@ export async function createProject(db: D1Database, input: ProjectInput, by: Cal
     sponsor_text: null,
     decision_maker_person_id: null,
     decision_maker_text: null,
+    closure_note_md: null,
+    lessons_learned_md: null,
     ...(fields as Partial<ProjectRow>),
     ...people,
     version: 1,
     created_at: ts,
     updated_at: ts,
   };
+  const closure = closureMissing(row.status, row);
+  if (closure.length) throw closureError(row.status, closure);
   const warnings: WriteWarning[] = [];
   const missing = missingForActive(row);
   if (missing.length && fields.status === "active") throw activeError(missing);
@@ -376,16 +418,31 @@ export async function updateProject(
   const missing = missingForActive(next as unknown as ProjectRow);
   if (missing.length && next.status === "active" && (current.status !== "active" || "owner_person_id" in people))
     throw activeError(missing);
+  // F3 closure: checked on the merged values when the project becomes done/abandoned, or when a closed
+  // project's closure fields are edited.
+  const status = String(next.status);
+  if (isClosedProjectStatus(status) && (current.status !== status || "closure_note_md" in fields || "lessons_learned_md" in fields)) {
+    const closure = closureMissing(status, next as unknown as ProjectRow);
+    if (closure.length) throw closureError(status, closure);
+  }
+  // done needs every WP finished, dropped or moved; the UPDATE re-checks so a WP added meanwhile is caught.
+  const toDone = status === "done" && current.status !== "done";
+  if (toDone) {
+    const open = await openWorkpackages(db, id);
+    if (open.length) throw openWorkpackagesError(open);
+  }
   const diff = diffFields(current as unknown as Record<string, unknown>, next, WRITE_COLS);
   const changed = Object.keys(diff);
   if (!changed.length) return { ...(await toProjectOut(db, current)), warnings: [] };
 
+  if (toDone && beforeCloseWrite) await beforeCloseWrite();
+  const noOpenWps = toDone ? ` AND NOT EXISTS (SELECT 1 FROM workpackage WHERE project_id = ? AND ${OPEN_WP_SQL})` : "";
   const res = await db.batch([
     db
       .prepare(
-        `UPDATE project SET ${changed.map((f) => `${f} = ?`).join(", ")}, version = version + 1, updated_at = ? WHERE id = ? AND version = ?`,
+        `UPDATE project SET ${changed.map((f) => `${f} = ?`).join(", ")}, version = version + 1, updated_at = ? WHERE id = ? AND version = ?${noOpenWps}`,
       )
-      .bind(...changed.map((f) => next[f] ?? null), now(), id, current.version),
+      .bind(...changed.map((f) => next[f] ?? null), now(), id, current.version, ...(toDone ? [id] : [])),
     eventStmtIfChanged(db, {
       by,
       project_id: id,
@@ -396,6 +453,14 @@ export async function updateProject(
       diff,
     }),
   ]);
-  if (!res[0].meta.changes) throw new ConflictError("version conflict", await toProjectOut(db, await getProjectRow(db, id)));
+  if (!res[0].meta.changes) {
+    // Lost a race: a rule failure if the version is unchanged (an open WP appeared), else a version conflict.
+    const fresh = await getProjectRow(db, id);
+    if (toDone && fresh.version === current.version) {
+      const open = await openWorkpackages(db, id);
+      if (open.length) throw openWorkpackagesError(open);
+    }
+    throw new ConflictError("version conflict", await toProjectOut(db, fresh));
+  }
   return { ...(await toProjectOut(db, await getProjectRow(db, id))), warnings: [] };
 }

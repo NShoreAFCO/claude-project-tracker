@@ -13,6 +13,7 @@ import {
 import { WP_CATEGORIES, checkCategory, checkHuman } from "./categories";
 import { reachStmts } from "./milestones";
 import { personOuts, personRefInput, personRefOut, resolvePersonRef } from "./persons";
+import { applyWpRules, checkBlockedRef, parseBlockedBy, type BlockedRef } from "./rules";
 
 export const WP_FIELDS = [
   "parent_id",
@@ -28,16 +29,23 @@ export const WP_FIELDS = [
   "sort",
   "category",
   "human",
+  "drop_reason",
+  "blocked_since",
+  "waiting_reason",
 ] as const;
 type WpField = (typeof WP_FIELDS)[number];
 /** Columns written by create/update and diffed into events (WP fields plus the owner columns). */
 const WRITE_COLS = [...WP_FIELDS, "owner_person_id", "owner_text"] as const;
 
-/** Client shape of a work package: owner as chip or text, effective owner (WP owner, else project owner), stakeholders. */
+/**
+ * Client shape of a work package: owner as chip or text, effective owner (WP owner, else project owner),
+ * stakeholders, and `blocked_by` classified as a wp:/ms:/ext: reference or free text.
+ */
 export type WpOut = WorkpackageRow & {
   owner: PersonRefOut;
   effective_owner: PersonRefOut;
   priority_stakeholders: PersonOut[];
+  blocked_ref: BlockedRef | null;
 };
 
 const STATUSES = ["todo", "doing", "blocked", "waiting", "done", "dropped"];
@@ -90,6 +98,7 @@ export async function withPersonOuts(
       owner,
       effective_owner: owner ?? projectOwner,
       priority_stakeholders: (stake.get(w.id) ?? []).map((id) => people.get(id)).filter((p): p is PersonOut => !!p),
+      blocked_ref: parseBlockedBy(w.blocked_by),
     };
   });
 }
@@ -176,6 +185,7 @@ function normalise(input: Record<string, unknown>): Partial<Record<WpField, unkn
         break;
       case "start_date":
       case "end_date":
+      case "blocked_since":
         if (v === "") v = null;
         if (v !== null && !DATE_RE.test(String(v))) throw new ValidationError(`${f} must be YYYY-MM-DD`);
         break;
@@ -224,12 +234,14 @@ export async function upsertWorkpackage(
     fields.owner_text = owner.text;
   }
   const stakeholders = await stakeholderInput(db, input.priority_stakeholders);
+  if (fields.blocked_by !== undefined) await checkBlockedRef(db, fields.blocked_by);
 
   const existing = input.id ? await getWp(db, String(input.id)) : null;
   if (existing) {
     if (existing.project_id !== projectId)
       throw new ValidationError(`workpackage ${existing.id} belongs to project ${existing.project_id}`);
     if (typeof expectedVersion === "number" && expectedVersion !== existing.version) throw new ConflictError("version conflict", existing);
+    applyWpRules(existing, fields);
     if ("parent_id" in fields) await checkParent(db, projectId, existing.id, fields.parent_id);
     const next = { ...existing, ...fields } as Record<string, unknown>;
     const diff = diffFields(existing as unknown as Record<string, unknown>, next, WRITE_COLS);
@@ -269,6 +281,7 @@ export async function upsertWorkpackage(
   if (!title) throw new ValidationError("title is required");
   if (input.id !== undefined && !ID_RE.test(String(input.id))) throw new ValidationError("id must match ^[a-z0-9][a-z0-9-]{0,62}$");
   await checkParent(db, projectId, null, fields.parent_id);
+  applyWpRules(null, fields);
 
   const base = input.id ? String(input.id) : `${projectId}-${slugify(title)}`.slice(0, 63).replace(/-+$/, "");
   let id = base;
@@ -293,6 +306,9 @@ export async function upsertWorkpackage(
     human: null,
     owner_person_id: null,
     owner_text: null,
+    drop_reason: null,
+    blocked_since: null,
+    waiting_reason: null,
     ...(fields as Partial<WorkpackageRow>),
     version: 1,
     created_at: ts,
