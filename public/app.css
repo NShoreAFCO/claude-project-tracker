@@ -165,7 +165,8 @@ input[type="range"] {
   min-height: 0;
   accent-color: var(--color-primary);
 }
-input[type="checkbox"] {
+input[type="checkbox"],
+input[type="radio"] {
   width: auto;
   min-height: 0;
   accent-color: var(--color-primary);
@@ -1149,15 +1150,28 @@ details.inherited > summary {
 .menu-list {
   position: absolute;
   right: 0;
-  bottom: 100%;
+  top: 100%;
   z-index: 5;
   list-style: none;
-  margin: 0 0 0.2rem;
+  margin: 0.2rem 0 0;
   padding: 0.25rem;
   min-width: 11rem;
   background: var(--color-surface);
   border: 1px solid var(--color-text);
   border-radius: var(--radius);
+}
+/* in the dialog footer the menu opens upward */
+.modal-foot .menu-list {
+  top: auto;
+  bottom: 100%;
+  margin: 0 0 0.2rem;
+}
+.checklist .check {
+  flex-wrap: wrap;
+}
+.checklist .check input[type="text"],
+.checklist .check select {
+  flex: 1 1 12rem;
 }
 .menu-item {
   display: block;
@@ -1186,4 +1200,8 @@ details.inherited > summary {
   border-color: var(--status-dropped);
   border-style: dashed;
   color: var(--color-text-muted);
+}
+
+td.kind::first-letter {
+  text-transform: uppercase;
 }

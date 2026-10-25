@@ -32,7 +32,7 @@ export async function renderTrash(main) {
   const rows = items.map((it) =>
     h(
       "tr",
-      h("td", t(`entityKind.${it.kind}`)),
+      h("td.kind", t(`entityKind.${it.kind}`)),
       h("td", h("strong", it.title), it.project_id && it.kind !== "project" ? h("div.meta", it.project_id) : null),
       h("td", fmtDateTime(it.deleted_at), h("div.meta", it.deleted_by)),
       h("td.num", it.children ? t("trashChildren", { n: it.children }) : t("none")),

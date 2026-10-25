@@ -71,7 +71,7 @@ function card(p, persons) {
     p.blocked?.length
       ? h(
           "div",
-          p.blocked.map((b) => h("span.badge.blocked", `${t("blockedBy")}: ${b}`)),
+          p.blocked.map((b) => h("span.badge.blocked", `${t("blockedBy")}: ${b.replace(/^ext:/, "")}`)),
         )
       : null,
   );
