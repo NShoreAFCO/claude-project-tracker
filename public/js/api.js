@@ -8,6 +8,10 @@ export class ApiError extends Error {
   get isConflict() {
     return this.status === 409;
   }
+  /** Machine-readable reason of a refused transition (409 body `current.code`), e.g. PROJECT_CLOSED. */
+  get code() {
+    return this.body?.current?.code ?? null;
+  }
   get isAuth() {
     return this.status === 401 || this.status === 403;
   }
@@ -44,6 +48,20 @@ export const api = {
   updateProject: (id, patch, expected_version) =>
     request("PATCH", `/api/projects/${encodeURIComponent(id)}`, { ...patch, expected_version }),
   deleteProject: (id) => request("DELETE", `/api/projects/${encodeURIComponent(id)}`),
+
+  moveWorkpackages: (id, to_project_id, ids) =>
+    request("POST", `/api/projects/${encodeURIComponent(id)}/move-workpackages`, { to_project_id, ids }),
+
+  persons: () => request("GET", "/api/persons"),
+  createPerson: (body) => request("POST", "/api/persons", body),
+  updatePerson: (id, body, expected_version) => request("PATCH", `/api/persons/${encodeURIComponent(id)}`, { ...body, expected_version }),
+  updateMe: (body, expected_version) => request("PATCH", "/api/persons/me", { ...body, expected_version }),
+  deletePerson: (id) => request("DELETE", `/api/persons/${encodeURIComponent(id)}`),
+
+  trash: () => request("GET", "/api/trash"),
+  restoreTrash: (kind, id) => request("POST", `/api/trash/${encodeURIComponent(kind)}/${encodeURIComponent(id)}/restore`),
+  purgeTrash: (kind, id) => request("DELETE", `/api/trash/${encodeURIComponent(kind)}/${encodeURIComponent(id)}`),
+  deletePreview: (kind, id) => request("GET", `/api/delete-preview${q({ kind, id })}`),
 
   workpackages: (project_id) => request("GET", `/api/workpackages${q({ project_id })}`),
   createWp: (body) => request("POST", "/api/workpackages", body),

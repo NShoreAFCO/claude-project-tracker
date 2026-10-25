@@ -7,6 +7,8 @@ import { renderGrid } from "./grid.js";
 import { renderGantt } from "./gantt.js";
 import { renderInbox } from "./inbox.js";
 import { openProject } from "./project.js";
+import { renderPeople } from "./people.js";
+import { renderTrash } from "./trash.js";
 
 // Shell texts come from the instance config and the UI locale (index.html carries no brand text).
 document.documentElement.lang = LOCALE;
@@ -20,10 +22,13 @@ nav.setAttribute("aria-label", t("navMain"));
 const searchForm = document.getElementById("search");
 
 /** Shared state: the project list (cards) is reused by forms, inbox and gantt. */
-export const state = { projects: [], filter: { status: "", tag: "", category: "" }, inboxCount: 0, view: "grid" };
+export const state = { projects: [], persons: [], filter: { status: "", tag: "", category: "", owner: "" }, inboxCount: 0, view: "grid" };
 
 export async function loadProjects() {
-  state.projects = await api.projects();
+  // persons are only needed for owner names on cards; a failure must not block the grid
+  const [projects, persons] = await Promise.all([api.projects(), api.persons().catch(() => state.persons)]);
+  state.projects = projects;
+  state.persons = persons;
   return state.projects;
 }
 
@@ -53,6 +58,8 @@ function renderNav() {
     nav,
     link("grid", "#/", t("navProjects")),
     link("gantt", "#/gantt", t("navGantt")),
+    link("people", "#/people", t("navPeople")),
+    link("trash", "#/trash", t("navTrash")),
     link(
       "inbox",
       "#/inbox",
@@ -109,10 +116,12 @@ function parseHash() {
 
 async function renderView() {
   const { parts, params } = parseHash();
-  const view = parts[0] === "gantt" ? "gantt" : parts[0] === "inbox" ? "inbox" : parts[0] === "search" ? "search" : "grid";
+  const view = ["gantt", "inbox", "search", "people", "trash"].includes(parts[0]) ? parts[0] : "grid";
   state.view = view;
   renderNav();
-  if (view === "gantt") await renderGantt(main, state);
+  if (view === "people") await renderPeople(main, state);
+  else if (view === "trash") await renderTrash(main, state);
+  else if (view === "gantt") await renderGantt(main, state);
   else if (view === "inbox") await renderInbox(main, state);
   else if (view === "search") await renderSearchResults(params.get("q") || "");
   else renderGrid(main, state);

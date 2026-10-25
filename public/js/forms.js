@@ -1,8 +1,9 @@
 // Forms for every entity (SPEC §9). Each successful write dispatches "tracker:changed" so open views reload.
 import { t } from "./i18n.js";
 import { api } from "./api.js";
-import { h, formDialog, saveWithConflict, toast, confirmDialog, toastError } from "./dom.js";
+import { h, formDialog, saveWithConflict, toast, confirmDialog, toastError, deleteText } from "./dom.js";
 import { PROJECT_CATEGORIES, WP_CATEGORIES, catLabel } from "./categories.js";
+import { closureDialog } from "./closure.js";
 
 export const changed = (project_id) => window.dispatchEvent(new CustomEvent("tracker:changed", { detail: { project_id } }));
 
@@ -32,16 +33,81 @@ export function wpOptions(tree, excludeId, depth = 0, out = []) {
 }
 const conflictSummary = (cur) => h("p", `${cur.title ?? ""} · v${cur.version}`);
 
-/** Create (existing = null) or edit a project. */
-export function projectForm(existing) {
+const CLOSED = ["done", "abandoned"];
+const OPEN_WP_STATUS = ["todo", "doing", "blocked", "waiting"];
+/** Flat list of all WPs in a tree. */
+export function flatWps(tree, out = []) {
+  for (const w of tree || []) {
+    out.push(w);
+    flatWps(w.children, out);
+  }
+  return out;
+}
+/** WPs that keep a project from being closed as done (todo, doing, blocked, waiting). */
+export const openWps = (tree) => flatWps(tree).filter((w) => OPEN_WP_STATUS.includes(w.status));
+
+/** The logged-in person (for defaults and role checks); null when unknown. */
+let mePromise;
+export const getMe = () =>
+  (mePromise ||= api
+    .whoami()
+    .then((w) => w.person || null)
+    .catch(() => null));
+/** [[id, "Name (Company)"]] of all live persons, for pickers. */
+export async function personOptions() {
+  return (await api.persons()).map((p) => [p.id, p.company ? `${p.name} (${p.company})` : p.name]);
+}
+
+/** Create (existing = null) or edit a project. `workpackages` (tree) lets the status dropdown refuse Done while WPs are open. */
+export async function projectForm(existing, { workpackages = [] } = {}) {
   const p = existing || {};
+  let persons = [];
+  let me = null;
+  try {
+    [persons, me] = await Promise.all([personOptions(), getMe()]);
+  } catch (e) {
+    toastError(e);
+  }
+  const open = existing ? openWps(workpackages) : [];
+  const doneBlocked = open.length > 0 && existing.status !== "done";
+  const doneTip = doneBlocked ? t("doneBlockedByOpen", { list: open.map((w) => w.title).join(", ") }) : "";
+  const statusOptions = (existing ? PROJECT_STATUS : PROJECT_STATUS.filter((s) => !CLOSED.includes(s))).map((s) => [
+    s,
+    t(`status.${s}`),
+    s === "done" && doneBlocked ? { disabled: true, title: doneTip } : undefined,
+  ]);
   return formDialog({
     title: existing ? t("formProjectEdit") : t("formProjectNew"),
     narrow: false,
     fields: [
       { name: "title", label: t("fTitle"), required: true, value: p.title },
       ...(existing ? [] : [{ name: "id", label: t("fId"), value: "" }]),
-      { name: "status", label: t("fStatus"), type: "select", options: opts("status", PROJECT_STATUS), value: p.status || "active" },
+      {
+        name: "status",
+        label: t("fStatus"),
+        type: "select",
+        options: statusOptions,
+        value: p.status || "active",
+        title: doneTip || undefined,
+        hint: doneBlocked ? doneTip : undefined,
+      },
+      {
+        name: "owner",
+        label: t("fOwner"),
+        type: "person",
+        options: persons,
+        value: existing ? p.owner : me ? { person_id: me.id } : null,
+        noneLabel: t("noOwner"),
+      },
+      { name: "sponsor", label: t("fSponsor"), type: "person", options: persons, value: p.sponsor, noneLabel: t("noOwner") },
+      {
+        name: "decision_maker",
+        label: t("fDecisionMaker"),
+        type: "person",
+        options: persons,
+        value: p.decision_maker,
+        noneLabel: t("noOwner"),
+      },
       { name: "origin", label: t("fOrigin"), type: "select", options: opts("origin", ORIGINS), value: p.origin || "manual" },
       {
         name: "category",
@@ -75,10 +141,18 @@ export function projectForm(existing) {
       const body = { ...v, tags: tagsIn(v.tags) };
       if (!existing) {
         if (!body.id) delete body.id;
+        // an omitted owner defaults to the calling person on the server; null would clear it
+        for (const k of ["owner", "sponsor", "decision_maker"]) if (body[k] === null) delete body[k];
         const created = await api.createProject(body);
         toast(t("saved"));
         changed(created.id);
         return created;
+      }
+      // closing needs the closure record (and possibly moving open WPs): the closure dialog does the save
+      if (CLOSED.includes(body.status) && existing.status !== body.status) {
+        const { status, ...patch } = body;
+        const done = await closureDialog({ project: existing, workpackages, outcome: status, patch });
+        return done || undefined;
       }
       const res = await saveWithConflict((ver) => api.updateProject(existing.id, body, ver), existing.version, conflictSummary);
       if (res?.cancelled) return undefined;
@@ -89,9 +163,15 @@ export function projectForm(existing) {
   });
 }
 
-/** Create or edit a work package. tree = WP tree of the project (for parent / depends_on choices). */
-export function wpForm(projectId, existing, tree, parentId = null) {
+/** Create or edit a work package. tree = WP tree of the project (for parent / depends_on choices), milestones for blocked_by references. */
+export async function wpForm(projectId, existing, tree, parentId = null, milestones = []) {
   const w = existing || {};
+  let persons = [];
+  try {
+    persons = await personOptions();
+  } catch (e) {
+    toastError(e);
+  }
   const parents = [["", t("fNoParent")], ...wpOptions(tree, existing?.id)];
   const deps = (w.depends_on && (Array.isArray(w.depends_on) ? w.depends_on : safeJson(w.depends_on))) || [];
   return formDialog({
@@ -120,7 +200,44 @@ export function wpForm(projectId, existing, tree, parentId = null) {
         ],
         value: w.human === 1 ? "1" : w.human === 0 ? "0" : "",
       },
-      { name: "blocked_by", label: t("fBlockedBy"), value: w.blocked_by },
+      {
+        name: "owner",
+        label: t("fOwner"),
+        type: "person",
+        options: persons,
+        value: w.owner,
+        noneLabel: t("inheritOwner"),
+      },
+      {
+        name: "priority_stakeholders",
+        label: t("fStakeholders"),
+        type: "checklist",
+        options: persons,
+        value: (w.priority_stakeholders || []).map((x) => x.person_id),
+      },
+      {
+        name: "blocked_by",
+        label: t("fBlockedBy"),
+        type: "blockedby",
+        value: w.blocked_by,
+        wps: wpOptions(tree, existing?.id),
+        milestones: (milestones || []).map((m) => [m.id, m.title]),
+      },
+      {
+        name: "waiting_reason",
+        label: t("fWaitingReason"),
+        value: w.waiting_reason,
+        full: true,
+        showWhen: { field: "status", values: ["waiting"] },
+      },
+      {
+        name: "drop_reason",
+        label: t("fDropReason"),
+        required: true,
+        value: w.drop_reason,
+        full: true,
+        showWhen: { field: "status", values: ["dropped"] },
+      },
       { name: "progress", label: t("fProgress"), type: "range", min: 0, max: 100, step: 5, value: w.progress ?? 0 },
       { name: "weight", label: t("fWeight"), type: "number", min: 0, step: 0.5, value: w.weight ?? 1 },
       { name: "start_date", label: t("fStart"), type: "date", value: w.start_date },
@@ -294,16 +411,33 @@ export function logProgressForm(projectId, tree) {
   });
 }
 
-/** Confirm, then delete. kind: project | workpackage | branch. */
+const DELETE_CALL = {
+  project: (id) => api.deleteProject(id),
+  workpackage: (id) => api.deleteWp(id),
+  milestone: (id) => api.deleteMilestone(id),
+  branch: (id) => api.deleteBranch(id),
+  context_doc: (id) => api.contextDelete(id),
+  person: (id) => api.deletePerson(id),
+};
+
+/**
+ * Ask what the delete would take along, confirm naming the children, then delete.
+ * kind: project | workpackage | milestone | branch | context_doc | person. Everything but a branch moves to the trash.
+ */
 export async function deleteEntity(kind, id, name, projectId) {
-  const text = kind === "project" ? t("confirmDeleteProject", { name }) : t("confirmDelete", { name });
+  let children = null;
+  if (kind !== "branch") {
+    try {
+      children = (await api.deletePreview(kind, id)).children;
+    } catch {
+      children = null; // the delete itself reports a missing item
+    }
+  }
+  const text = kind === "branch" ? t("confirmDelete", { name }) : deleteText(kind, name, children);
   if (!(await confirmDialog(text, { okLabel: t("delete"), danger: true }))) return false;
   try {
-    if (kind === "project") await api.deleteProject(id);
-    else if (kind === "workpackage") await api.deleteWp(id);
-    else if (kind === "milestone") await api.deleteMilestone(id);
-    else await api.deleteBranch(id);
-    toast(t("deleted"));
+    await DELETE_CALL[kind](id);
+    toast(kind === "branch" ? t("deleted") : t("movedToTrash"));
     changed(projectId);
     return true;
   } catch (e) {

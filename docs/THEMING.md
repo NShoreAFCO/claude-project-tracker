@@ -45,6 +45,8 @@ Coloured stripes and outlines on status chips. Marks, never text: each ≥ 3:1 a
 
 `--status-active`, `--status-doing`, `--status-idea` (also waiting, to do, open), `--status-hold` (also blocked, stale, overdue milestones), `--status-done` (also merged), `--status-dropped` (also abandoned, closed, "no category").
 
+Card chips for the status rules: `--status-blocked` (the red "Blocked" chip of a project with a blocked top-level work package) and `--status-waiting` (the amber "Waiting" chip). The chip text stays `--color-text-strong`; the tokens only colour the bar and outline, so they are marks like the others (≥ 3:1 on `--color-surface`). Existing instance themes must add both tokens (`npm run check` reports them as missing).
+
 ### Type and shape
 
 | Token | Example | Notes |
@@ -93,6 +95,8 @@ Example Corp's style guide says: navy `#14213d`, signal orange `#e4572e` as acce
   --status-hold: #6b4f8a;
   --status-done: #14213d;
   --status-dropped: #6f7a84;
+  --status-blocked: #a4262c;
+  --status-waiting: #b45f06;
   --font: "Source Sans 3", system-ui, sans-serif;
   --font-heading: var(--font);
   --font-size-base: 16px;

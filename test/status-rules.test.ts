@@ -479,5 +479,8 @@ describe("derived flags and counts", () => {
     await upsertWorkpackage(db, p.id, { title: "y", status: "dropped", drop_reason: "no" }, A);
     const card = (await listProjects(db)).find((c) => c.id === p.id)!;
     expect(card.wp_counts).toEqual({ open: 1, in_progress: 1, waiting_blocked: 2, done: 1, started: 1 });
+    // card hints for the Blocked / Waiting chips
+    expect(card.waiting_count).toBe(1);
+    expect(card.blocked_since).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 });

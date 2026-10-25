@@ -165,7 +165,8 @@ input[type="range"] {
   min-height: 0;
   accent-color: var(--color-primary);
 }
-input[type="checkbox"] {
+input[type="checkbox"],
+input[type="radio"] {
   width: auto;
   min-height: 0;
   accent-color: var(--color-primary);
@@ -1064,4 +1065,198 @@ details.inherited > summary {
 }
 .gantt-legend .ms-diamond {
   margin: 0 0.3rem;
+}
+
+/* ---- R1: owner initials, card flag chips, counts, row menu, document status */
+.field[hidden],
+.menu-list[hidden] {
+  display: none;
+}
+.initials {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.7rem;
+  height: 1.7rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+/* inherited owner: grey, dashed */
+.initials.inherited {
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  border: 1px dashed var(--color-text-muted);
+}
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.4rem 0;
+}
+.chip.flag-blocked {
+  --c: var(--status-blocked, var(--color-danger));
+  font-weight: 600;
+}
+.chip.flag-waiting {
+  --c: var(--status-waiting, var(--status-hold));
+}
+.chip.flag-closure {
+  --c: var(--status-done);
+}
+.chip .age {
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+.wp-counts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.6rem;
+}
+.wp-count b {
+  font-variant-numeric: tabular-nums;
+}
+.blockedby {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.blockedby > * {
+  flex: 1 1 12rem;
+}
+.hint {
+  margin: 0.25rem 0 0;
+}
+.people {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.2rem;
+  align-items: center;
+  margin-top: 0.4rem;
+}
+.menu {
+  position: relative;
+  display: inline-block;
+}
+.menu-list {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 5;
+  list-style: none;
+  margin: 0.2rem 0 0;
+  padding: 0.25rem;
+  min-width: 11rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-text);
+  border-radius: var(--radius);
+}
+/* in the dialog footer the menu opens upward */
+.modal-foot .menu-list {
+  top: auto;
+  bottom: 100%;
+  margin: 0 0 0.2rem;
+}
+.checklist .check {
+  flex-wrap: wrap;
+}
+.checklist .check input[type="text"],
+.checklist .check select {
+  flex: 1 1 12rem;
+}
+.menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  padding: 0.4rem 0.6rem;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--color-text-strong);
+  cursor: pointer;
+}
+.menu-item:hover,
+.menu-item:focus-visible {
+  background: var(--color-tint);
+}
+.menu-item.danger {
+  color: var(--color-danger);
+}
+.doc-status.doc-released {
+  border-color: var(--status-done);
+  border-left-width: 4px;
+}
+.doc-status.doc-obsolete {
+  border-color: var(--status-dropped);
+  border-style: dashed;
+  color: var(--color-text-muted);
+}
+
+/* ---- stacked cards for people and trash on phones */
+.p-sub {
+  display: none;
+}
+@media (max-width: 600px) {
+  table.stack thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  table.stack,
+  table.stack tbody {
+    display: block;
+  }
+  table.stack tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 0.5rem;
+    align-items: start;
+    padding: 0.7rem 0.6rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    margin-bottom: 0.6rem;
+  }
+  table.stack td {
+    display: block;
+    grid-column: 1 / -1;
+    border: 0;
+    padding: 0.1rem 0;
+    overflow-wrap: anywhere;
+  }
+  table.stack td.p-name {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  table.stack td.row-actions {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  table.stack td.p-company,
+  table.stack td.p-function,
+  table.stack td.blank {
+    display: none;
+  }
+  table.stack .p-sub {
+    display: block;
+  }
+  table.stack td[data-label]::before {
+    content: attr(data-label) ": ";
+    color: var(--color-text-muted);
+    font-size: 0.85rem;
+  }
+  table.stack td.num {
+    text-align: left;
+  }
 }

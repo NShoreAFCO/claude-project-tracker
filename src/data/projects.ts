@@ -104,10 +104,16 @@ export type ProjectCard = {
   tags: string[];
   category: string | null;
   owner_initials: string | null;
+  /** Person id of the owner (for the Owner filter); null for a free-text or missing owner. */
+  owner_id: string | null;
   /** open = todo, in_progress = doing, waiting_blocked = waiting + blocked; started = in_progress (alias until the UI moves). */
   wp_counts: WpCounts;
   stalled_blocked: boolean;
   closure_due: boolean;
+  /** Oldest `blocked_since` among blocked WPs (YYYY-MM-DD), for the card's age hint; null when none is blocked. */
+  blocked_since: string | null;
+  /** Number of waiting WPs (deferrals), for the card's Waiting chip. */
+  waiting_count: number;
   next_milestone: { id: string; title: string; due_date: string | null } | null;
   last_activity: string | null;
   open_branches: number;
@@ -270,8 +276,15 @@ export async function listProjects(
         tags: parseJsonArray(p.tags),
         category: p.category,
         owner_initials: refInitials(personRefOut(p.owner_person_id, p.owner_text, people)),
+        owner_id: p.owner_person_id && people.has(p.owner_person_id) ? p.owner_person_id : null,
         wp_counts: leafCounts(list),
         ...projectFlags(p.status, list, derivedProgress),
+        blocked_since:
+          list
+            .filter((w) => !w.deleted_at && w.status === "blocked" && w.blocked_since)
+            .map((w) => w.blocked_since as string)
+            .sort()[0] ?? null,
+        waiting_count: list.filter((w) => !w.deleted_at && w.status === "waiting").length,
         next_milestone: nextMs.get(p.id) ?? null,
         last_activity: ev && ev > p.updated_at ? ev : p.updated_at,
         open_branches: openBranches.get(p.id) ?? 0,
