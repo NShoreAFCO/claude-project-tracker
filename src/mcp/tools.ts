@@ -238,6 +238,11 @@ export function registerTools(reg: Reg): void {
             decision_maker: personRef("Set the decision maker."),
             closure_note_md: optionalText("Set the closure note (required for status done or abandoned)."),
             lessons_learned_md: optionalText('Set lessons learned (required for status done; may be "none").'),
+            schedule_strict: z
+              .boolean()
+              .nullable()
+              .optional()
+              .describe("Refuse writes that add schedule issues (true), only warn (false), or follow the instance default (null)."),
           })
           .describe("Provide the fields to update."),
         expected_version: z.number().int().optional().describe("Require the expected project version."),
@@ -251,7 +256,7 @@ export function registerTools(reg: Reg): void {
     "upsert_workpackage",
     {
       title: "Upsert work package",
-      description: `Create or update a work package. category: ${WP_CATEGORIES.join("|")} (null = inherit from the parent). WPs with human=true${HUMAN_DEFAULT.length ? ` (default for ${HUMAN_DEFAULT.join(", ")})` : ""} are done off the computer: log progress the user reports, and set them to done only when the user says so. Set owner when someone other than the project owner is responsible (effective_owner falls back to the project owner); priority_stakeholders lists persons to keep informed. Status: use blocked only for a real blocker (blocked_by wp:<id>, ms:<id> or ext:<text>; blocked_since defaults to today) and waiting for a deliberate deferral (optional waiting_reason). dropped requires drop_reason. A todo WP whose progress rises above 0 becomes doing unless you set status in the same call.`,
+      description: `Create or update a work package. category: ${WP_CATEGORIES.join("|")} (null = inherit from the parent). WPs with human=true${HUMAN_DEFAULT.length ? ` (default for ${HUMAN_DEFAULT.join(", ")})` : ""} are done off the computer: log progress the user reports, and set them to done only when the user says so. Set owner when someone other than the project owner is responsible (effective_owner falls back to the project owner); priority_stakeholders lists persons to keep informed. Status: use blocked only for a real blocker (blocked_by wp:<id>, ms:<id> or ext:<text>; blocked_since defaults to today) and waiting for a deliberate deferral (optional waiting_reason). dropped requires drop_reason. A todo WP whose progress rises above 0 becomes doing unless you set status in the same call. The result lists schedule issues in warnings (start before a predecessor ends or before an unlocking milestone is due, child outside its parent); fix them or tell the user. In a schedule_strict project a write that adds issues fails with a conflict listing them.`,
       inputSchema: z.object({
         project_id: z.string().describe("Identify the owning project."),
         id: z.string().optional().describe("Identify an existing work package (omit to create)."),
@@ -267,7 +272,10 @@ export function registerTools(reg: Reg): void {
         weight: z.number().positive().optional().describe("Set a positive progress weight."),
         start_date: optionalDate("Set the start date as YYYY-MM-DD."),
         end_date: optionalDate("Set the end date as YYYY-MM-DD."),
-        depends_on: z.array(z.string()).optional().describe("Set dependent work package identifiers."),
+        depends_on: z
+          .array(z.string())
+          .optional()
+          .describe("Set the ids of work packages of this project that must end before this one starts (unknown ids are refused)."),
         sort: z.number().int().optional().describe("Set the sort order."),
         category: wpCategorySchema.nullable().optional().describe("Set the work category (null = inherit)."),
         human: z.boolean().nullable().optional().describe("Mark as human (off-computer) work; null = default from category."),
@@ -312,7 +320,7 @@ export function registerTools(reg: Reg): void {
     {
       title: "Upsert milestone",
       description:
-        "Create or update a milestone (zero duration). It is reached automatically when all 'requires' WPs are done and reopens if one is reopened; 'unlocks' WPs stay locked until it is first reached. requires/unlocks replace the stored lists.",
+        "Create or update a milestone (zero duration). It is reached automatically when all 'requires' WPs are done and reopens if one is reopened; 'unlocks' WPs stay locked until it is first reached. requires/unlocks replace the stored lists. The result lists schedule issues in warnings (due before a required WP ends, unlocked WPs starting before the due date); a schedule_strict project refuses writes that add issues.",
       inputSchema: z.object({
         project_id: z.string().describe("Identify the owning project."),
         id: z.string().optional().describe("Identify an existing milestone (omit to create)."),

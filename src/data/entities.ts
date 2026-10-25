@@ -14,6 +14,7 @@ import { isAgent } from "../auth/caller";
 import { reachStmts } from "./milestones";
 import { REDACTED_FIELDS } from "./persons";
 import { TransitionError } from "./rules";
+import { storeSchedule } from "./schedule";
 import { ForbiddenError, NotFoundError, ValidationError, eventStmt, eventStmtIfChanged, eventStmtWhere, now, type Diff } from "./util";
 
 export type EntityKind = "project" | "workpackage" | "branch" | "milestone" | "context_doc" | "person";
@@ -265,6 +266,8 @@ export async function deleteEntity(
   if (kind === "workpackage") stmts.push(...reachStmts(db, projectId!, by));
   const res = await db.batch(stmts);
   if (!res[0].meta.changes) throw new NotFoundError(`${kind} ${id} not found`);
+  // Schedule issues involving the removed WPs or milestone disappear (spec F4).
+  if (kind === "workpackage" || kind === "milestone") await storeSchedule(db, projectId!);
   return { deleted: id, children: total(children) };
 }
 
@@ -358,6 +361,8 @@ export async function restoreEntity(
     throw e;
   }
   if (!res[0].meta.changes) throw new NotFoundError(`${kind} ${id} is not in the trash`);
+  // Restored entities bring their schedule issues back (spec F4).
+  if (kind === "project" || kind === "workpackage" || kind === "milestone") await storeSchedule(db, projectId!);
   return { restored: id, children: total(children) };
 }
 

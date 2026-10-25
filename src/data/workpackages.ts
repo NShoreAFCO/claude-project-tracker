@@ -8,9 +8,10 @@ import {
   eventStmt,
   eventStmtIfChanged,
   now,
+  parseJsonArray,
   slugify,
-  toJsonArray,
 } from "./util";
+import { dependsOnInput, issuesOf, recomputeScheduleStmts, storeSchedule, type ScheduleIssue } from "./schedule";
 import { WP_CATEGORIES, checkCategory, checkHuman } from "./categories";
 import { reachStmts } from "./milestones";
 import { personOuts, personRefInput, personRefOut, resolvePersonRef } from "./persons";
@@ -56,6 +57,9 @@ export type WpOut = WorkpackageRow & {
   priority_stakeholders: PersonOut[];
   blocked_ref: BlockedRef | null;
 };
+
+/** Write result: the work package plus the schedule issues that concern it (spec F4). */
+export type WpWriteOut = WpOut & { warnings: ScheduleIssue[] };
 
 const STATUSES = ["todo", "doing", "blocked", "waiting", "done", "dropped"];
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
@@ -190,7 +194,7 @@ function normalise(input: Record<string, unknown>): Partial<Record<WpField, unkn
         v = Math.trunc(v);
         break;
       case "depends_on":
-        v = toJsonArray(v);
+        v = JSON.stringify(dependsOnInput(v));
         break;
       case "category":
         v = checkCategory(v, WP_CATEGORIES);
@@ -211,6 +215,15 @@ function normalise(input: Record<string, unknown>): Partial<Record<WpField, unkn
   }
   return out;
 }
+
+/** The schedule view of a WP row. */
+const scheduleWp = (w: Pick<WorkpackageRow, "id" | "parent_id" | "start_date" | "end_date" | "depends_on">) => ({
+  id: w.id,
+  parent_id: w.parent_id ?? null,
+  start_date: w.start_date ?? null,
+  end_date: w.end_date ?? null,
+  depends_on: parseJsonArray(w.depends_on ?? null),
+});
 
 /** parent must be a WP of the same project and not the node itself or one of its descendants. */
 async function checkParent(db: D1Database, projectId: string, selfId: string | null, parentId: unknown): Promise<void> {
@@ -235,7 +248,7 @@ export async function upsertWorkpackage(
   input: Record<string, unknown> & { id?: string },
   by: Caller,
   expectedVersion?: number,
-): Promise<WpOut> {
+): Promise<WpWriteOut> {
   const project = await db
     .prepare(`SELECT owner_person_id, owner_text, status FROM project WHERE id = ? AND ${LIVE()}`)
     .bind(projectId)
@@ -274,7 +287,14 @@ export async function upsertWorkpackage(
         stakeStmts = stakeholderStmts(db, existing.id, existing.version, stakeholders);
       }
     }
-    if (!Object.keys(diff).length) return (await withPersonOuts(db, project, [existing]))[0];
+    if (!Object.keys(diff).length) {
+      const { issues } = await recomputeScheduleStmts(db, projectId);
+      return { ...(await withPersonOuts(db, project, [existing]))[0], warnings: issuesOf(issues, existing.id) };
+    }
+    const schedule = await recomputeScheduleStmts(db, projectId, {
+      wp: scheduleWp(next as unknown as WorkpackageRow),
+      checkDependsOn: "depends_on" in diff,
+    });
     const res = await db.batch([
       ...stakeStmts,
       db
@@ -292,9 +312,14 @@ export async function upsertWorkpackage(
         diff,
       }),
       ...reachStmts(db, projectId, by),
+      ...schedule.stmts,
     ]);
-    if (!res[stakeStmts.length].meta.changes) throw new ConflictError("version conflict", await getWp(db, existing.id));
-    return getWpOut(db, project, existing.id);
+    if (!res[stakeStmts.length].meta.changes) {
+      // The batch stored issues computed for this write; put back the ones of the stored plan.
+      await storeSchedule(db, projectId);
+      throw new ConflictError("version conflict", await getWp(db, existing.id));
+    }
+    return { ...(await getWpOut(db, project, existing.id)), warnings: issuesOf(schedule.issues, existing.id) };
   }
 
   if (closed) throw projectClosedError(projectId, project.status);
@@ -335,6 +360,7 @@ export async function upsertWorkpackage(
     created_at: ts,
     updated_at: ts,
   };
+  const schedule = await recomputeScheduleStmts(db, projectId, { wp: scheduleWp(row), checkDependsOn: fields.depends_on !== undefined });
   const cols = ["id", "project_id", ...WRITE_COLS, "version", "created_at", "updated_at"] as const;
   await db.batch([
     db
@@ -354,6 +380,7 @@ export async function upsertWorkpackage(
     }),
     ...(stakeholders?.length ? stakeholderStmts(db, id, 1, stakeholders) : []),
     ...reachStmts(db, projectId, by),
+    ...schedule.stmts,
   ]);
-  return getWpOut(db, project, id);
+  return { ...(await getWpOut(db, project, id)), warnings: issuesOf(schedule.issues, id) };
 }

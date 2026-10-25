@@ -57,6 +57,7 @@ export const PROJECT_FIELDS = [
   "category",
   "closure_note_md",
   "lessons_learned_md",
+  "schedule_strict",
 ] as const;
 type ProjectField = (typeof PROJECT_FIELDS)[number];
 /** Person-or-text roles of a project; each is stored as <role>_person_id or <role>_text. */
@@ -115,7 +116,11 @@ function normalise(input: ProjectInput): Partial<Record<ProjectField, unknown>> 
     if (!(f in input) || input[f] === undefined) continue;
     let v = input[f];
     if (f === "tags") v = toJsonArray(v);
-    else if (f === "category") v = checkCategory(v, PROJECT_CATEGORIES);
+    else if (f === "schedule_strict") {
+      // true/false, or null to follow the policy default (spec F4)
+      if (v !== null && typeof v !== "boolean") throw new ValidationError("schedule_strict must be true, false or null");
+      v = v === null ? null : v ? 1 : 0;
+    } else if (f === "category") v = checkCategory(v, PROJECT_CATEGORIES);
     else if (f === "progress_manual") {
       if (v !== null && (typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > 100))
         throw new ValidationError("progress_manual must be 0..100");

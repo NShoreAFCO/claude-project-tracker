@@ -4,6 +4,7 @@
  */
 import type { Caller, ProjectRow, WorkpackageRow } from "../types";
 import { reachStmts } from "./milestones";
+import { storeSchedule, type ScheduleIssue } from "./schedule";
 import { ConflictError, LIVE, NotFoundError, ValidationError, eventStmtWhere, now, parseJsonArray, type Diff } from "./util";
 
 /** Machine-readable details of a refused transition (the 409 body's `current`). */
@@ -13,6 +14,8 @@ export type TransitionDetails = {
   missing?: string[];
   /** RETENTION: when the item may be purged. */
   purgeable_at?: string;
+  /** SCHEDULE_STRICT: the schedule issues the refused write would add. */
+  issues?: ScheduleIssue[];
 };
 
 /** A status transition that the rules refuse (HTTP 409); `current` says why. */
@@ -348,5 +351,8 @@ export async function moveWorkpackages(
   const res = await db.batch(stmts);
   const changed = res.slice(firstMove, firstMove + n).reduce((s, r) => s + (r.meta.changes ?? 0), 0);
   if (changed !== n) throw new ConflictError("work packages or the target project changed meanwhile; nothing was moved", null);
+  // Removed dependencies and milestone links change the schedule of both projects (spec F4).
+  await storeSchedule(db, from.id);
+  await storeSchedule(db, to.id);
   return { moved: movedList };
 }
