@@ -6,7 +6,7 @@
 
 - People: `person` records for users and stakeholders; every write records the human behind it (`person_id`, `on_behalf_of` for the Claude Code hook). Owner, sponsor and decision maker on projects; owner and priority stakeholders on work packages. Dashboard: People view and owner initials on cards.
 - `policy` block in `instance.config.json` (admins, default role, locales, stale days, retention days, gates, report, score scales). Setup asks for the admin email(s).
-- Status rules: closing a project needs a closure note (and lessons learned for `done`) and no open work packages; `dropped` needs a reason; `blocked_by` references (`wp:`, `ms:`, `ext:`) with `blocked_since`; `waiting_reason`; auto-start of `todo` work packages on first progress; `stalled_blocked` and `closure_due` flags. Dashboard: closure dialog, Blocked and Waiting chips.
+- Status rules: `done` and `abandoned` need a closure note, `done` also needs lessons learned, and only `done` requires that no work package is open; `dropped` needs a reason; `blocked_by` references (`wp:`, `ms:`, `ext:`) with `blocked_since`; `waiting_reason`; auto-start of `todo` work packages on first progress; `stalled_blocked` and `closure_due` flags. Dashboard: closure dialog, Blocked and Waiting chips.
 - `move_workpackages` (MCP and REST): moves open work packages to a follow-up project.
 - Soft delete with a Trash view: restore, and admin purge after `policy.retention_days`. `GET /api/delete-preview` for confirmation texts.
 - Context document status (`draft`, `released`, `obsolete`); bundles leave out obsolete documents unless asked.
