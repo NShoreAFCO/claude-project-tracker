@@ -95,7 +95,9 @@ export async function handleClaudeCodeHook(body: HookBody, env: Env): Promise<Re
   if (file && typeof file.content === "string") {
     const name = str(file.name, 200) ?? "session.md";
     const unchanged = await db
-      .prepare("SELECT id FROM context_doc WHERE owner_kind = 'project' AND owner_id = ? AND slug = 'session-md' AND content_md = ?")
+      .prepare(
+        "SELECT id FROM context_doc WHERE owner_kind = 'project' AND owner_id = ? AND slug = 'session-md' AND content_md = ? AND deleted_at IS NULL",
+      )
       .bind(project.id, file.content)
       .first<{ id: string }>();
     if (unchanged) {

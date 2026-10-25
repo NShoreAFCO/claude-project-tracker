@@ -100,7 +100,15 @@ export const mcpApiHandler = {
     // A grant outlives an allow-list change: removing the email ends MCP access too (the person row stays).
     if (!isAllowedEmail(env, props.email)) return Response.json({ error: "forbidden" }, { status: 403 });
     // Person resolution happens once per request, before the per-request server is built.
-    const by = await mcpCaller(env.DB, props);
+    // A login whose person is in the trash is deactivated (403) until an admin restores it.
+    let by: Caller;
+    try {
+      by = await mcpCaller(env.DB, props);
+    } catch (e) {
+      if ((e as { status?: number })?.status === 403)
+        return Response.json({ error: "forbidden", message: (e as Error).message }, { status: 403 });
+      throw e;
+    }
     return createMcpHandler(() => buildServer(env, props, by), {
       route: "/mcp",
       allowedHostnames: [host, "localhost", "127.0.0.1"],

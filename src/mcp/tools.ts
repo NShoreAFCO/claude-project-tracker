@@ -4,9 +4,9 @@ import { listProjects, getProjectDetail, createProject, updateProject } from "..
 import { upsertWorkpackage } from "../data/workpackages";
 import { linkBranch } from "../data/branches";
 import { setScores, logTokenCost, logProgress } from "../data/logs";
-import { deleteEntity } from "../data/entities";
+import { deleteEntity, restoreEntity } from "../data/entities";
 import { listContext, readContext, getContextBundle } from "../data/context-read";
-import { writeContext, appendContext, deleteContext } from "../data/context-write";
+import { writeContext, appendContext, deleteContext, setContextMeta } from "../data/context-write";
 import { search } from "../data/search";
 import { upsertMilestone } from "../data/milestones";
 import { moveWorkpackages } from "../data/rules";
@@ -27,7 +27,9 @@ const branchKindSchema = z.enum(["branch", "fork", "worktree"]);
 
 const branchStatusSchema = z.enum(["open", "merged", "closed", "abandoned", "stale"]);
 
-const entityKindSchema = z.enum(["project", "workpackage", "branch", "milestone"]);
+const entityKindSchema = z.enum(["project", "workpackage", "branch", "milestone", "context_doc", "person"]);
+const trashKindSchema = z.enum(["project", "workpackage", "milestone", "context_doc", "person"]);
+const docStatusSchema = z.enum(["draft", "released", "obsolete"]);
 const projectCategorySchema = z.enum(PROJECT_CATEGORIES);
 const wpCategorySchema = z.enum(WP_CATEGORIES);
 
@@ -335,7 +337,8 @@ export function registerTools(reg: Reg): void {
     "delete_entity",
     {
       title: "Delete entity",
-      description: "Delete a project entity.",
+      description:
+        "Delete a project, work package (with its sub-WPs), milestone, context document or stakeholder: it moves to the trash together with what it contains; restore with restore_entity; purge is admin-only in the dashboard. Branches are deleted permanently. Agents cannot delete users (persons with a login). Ask the user first.",
       inputSchema: z.object({
         kind: entityKindSchema.describe("Select the entity kind."),
         id: z.string().describe("Identify the entity."),
@@ -351,6 +354,21 @@ export function registerTools(reg: Reg): void {
 
       return deleteEntity(tc.db, args.kind, args.id, tc.by);
     },
+  );
+
+  reg(
+    "restore_entity",
+    {
+      title: "Restore entity",
+      description:
+        "Take a deleted item out of the trash, together with everything deleted with it. Fails while its parent (project, parent WP, owner) is still in the trash: restore that first.",
+      inputSchema: z.object({
+        kind: trashKindSchema.describe("Select the entity kind."),
+        id: z.string().describe("Identify the entity."),
+        on_behalf_of: onBehalfOf,
+      }),
+    },
+    async (args, tc) => restoreEntity(tc.db, args.kind, args.id, tc.by),
   );
 
   reg(
@@ -525,6 +543,7 @@ export function registerTools(reg: Reg): void {
         workpackage_id: optionalText("Identify the active work package."),
         branch_id: optionalText("Identify the active branch."),
         max_bytes: z.number().int().min(1000).max(1000000).default(60000).describe("Limit the bundle size in bytes."),
+        include_obsolete: z.boolean().default(false).describe("Also include documents marked obsolete (drafts are always included)."),
       }),
       readOnly: true,
     },
@@ -536,6 +555,7 @@ export function registerTools(reg: Reg): void {
           workpackage_id: args.workpackage_id,
           branch_id: args.branch_id,
           max_bytes: args.max_bytes,
+          include_obsolete: args.include_obsolete,
         }),
       );
 
@@ -624,7 +644,7 @@ export function registerTools(reg: Reg): void {
     "delete_context",
     {
       title: "Delete context",
-      description: "Delete a context document.",
+      description: "Delete a context document: it moves to the trash (restore with restore_entity, kind context_doc).",
       inputSchema: z.object({
         doc_id: z.string().describe("Identify the context document."),
         confirm: z.literal(true).describe("Must be true."),
@@ -638,6 +658,32 @@ export function registerTools(reg: Reg): void {
       }
 
       return deleteContext(tc.db, args.doc_id, tc.by);
+    },
+  );
+
+  reg(
+    "set_context_meta",
+    {
+      title: "Set context metadata",
+      description:
+        "Change a context document's title, pin, sort order or status without touching its content. Status: draft (work in progress), released (agreed; records who released it and when), obsolete (kept, but left out of bundles). Pinned plan documents should be released.",
+      inputSchema: z.object({
+        doc_id: z.string().describe("Identify the context document."),
+        title: optionalText("Set the document title."),
+        pinned: z.boolean().optional().describe("Set whether the document is pinned."),
+        sort: z.number().int().optional().describe("Set the sort order."),
+        status: docStatusSchema.optional().describe("Set the document status."),
+        on_behalf_of: onBehalfOf,
+      }),
+    },
+    async (args, tc) => {
+      const { content_md: _content, ...result } = await setContextMeta(
+        tc.db,
+        args.doc_id,
+        { title: args.title ?? undefined, pinned: args.pinned, sort: args.sort, status: args.status },
+        tc.by,
+      );
+      return result;
     },
   );
 

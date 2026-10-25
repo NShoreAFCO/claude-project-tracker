@@ -1,13 +1,14 @@
 import type { Caller, EventOut, EventRow, ScoreRow, TokenCostRow, WorkpackageRow } from "../types";
 import { reachStmts } from "./milestones";
-import { NotFoundError, ValidationError, eventStmt, newId, now, type Diff } from "./util";
+import { LIVE, NotFoundError, ValidationError, eventStmt, newId, now, type Diff } from "./util";
 
 async function requireProject(db: D1Database, id: string): Promise<void> {
-  if (!(await db.prepare("SELECT 1 FROM project WHERE id = ?").bind(id).first())) throw new NotFoundError(`project ${id} not found`);
+  if (!(await db.prepare(`SELECT 1 FROM project WHERE id = ? AND ${LIVE()}`).bind(id).first()))
+    throw new NotFoundError(`project ${id} not found`);
 }
 
 async function requireWpOf(db: D1Database, projectId: string, wpId: string): Promise<WorkpackageRow> {
-  const wp = await db.prepare("SELECT * FROM workpackage WHERE id = ?").bind(wpId).first<WorkpackageRow>();
+  const wp = await db.prepare(`SELECT * FROM workpackage WHERE id = ? AND ${LIVE()}`).bind(wpId).first<WorkpackageRow>();
   if (!wp || wp.project_id !== projectId) throw new ValidationError(`workpackage ${wpId} is not part of project ${projectId}`);
   return wp;
 }

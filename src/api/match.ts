@@ -1,4 +1,5 @@
 import type { ProjectRow } from "../types";
+import { LIVE } from "../data/util";
 
 /** github.com URL variants → "https://github.com/owner/name" (lower case, no .git / trailing slash). */
 export function normaliseRepoUrl(url: string | null | undefined): string | null {
@@ -33,7 +34,7 @@ export function normalisePath(p: string | null | undefined): string | null {
 export async function findProjectByRepo(db: D1Database, url: string): Promise<ProjectRow | null> {
   const want = normaliseRepoUrl(url);
   if (!want) return null;
-  const { results } = await db.prepare("SELECT * FROM project WHERE repo_url IS NOT NULL").all<ProjectRow>();
+  const { results } = await db.prepare(`SELECT * FROM project WHERE repo_url IS NOT NULL AND ${LIVE()}`).all<ProjectRow>();
   return results.find((p) => normaliseRepoUrl(p.repo_url) === want) ?? null;
 }
 
@@ -41,7 +42,7 @@ export async function findProjectByRepo(db: D1Database, url: string): Promise<Pr
 export async function findProjectByPath(db: D1Database, cwd: string): Promise<{ project: ProjectRow; nested: boolean } | null> {
   const want = normalisePath(cwd);
   if (!want) return null;
-  const { results } = await db.prepare("SELECT * FROM project WHERE local_path IS NOT NULL").all<ProjectRow>();
+  const { results } = await db.prepare(`SELECT * FROM project WHERE local_path IS NOT NULL AND ${LIVE()}`).all<ProjectRow>();
   let best: { project: ProjectRow; nested: boolean; len: number } | null = null;
   for (const p of results) {
     const lp = normalisePath(p.local_path);

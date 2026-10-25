@@ -35,6 +35,7 @@ export type BranchKind = "branch" | "fork" | "worktree";
 export type BranchStatus = "open" | "merged" | "closed" | "abandoned" | "stale";
 export type OwnerKind = "project" | "workpackage" | "branch";
 export type ContextSource = "upload" | "paste" | "claude" | "sync";
+export type ContextDocStatus = "draft" | "released" | "obsolete";
 
 /** JSON-array columns (tags, depends_on) are stored as TEXT and kept as strings in rows. */
 export interface ProjectRow {
@@ -64,6 +65,9 @@ export interface ProjectRow {
   /** Closure record (spec F3): `done` and `abandoned` need the note, `done` also lessons learned. */
   closure_note_md: string | null;
   lessons_learned_md: string | null;
+  /** Soft delete (spec F10): set while the row is in the trash. */
+  deleted_at?: string | null;
+  deleted_by?: string | null;
   version: number;
   created_at: string;
   updated_at: string;
@@ -94,6 +98,9 @@ export interface WorkpackageRow {
   blocked_since: string | null;
   /** Optional reason for a deferral (`waiting`); cleared when it leaves `waiting`. */
   waiting_reason: string | null;
+  /** Soft delete (spec F10): set while the row is in the trash. */
+  deleted_at?: string | null;
+  deleted_by?: string | null;
   version: number;
   created_at: string;
   updated_at: string;
@@ -108,6 +115,9 @@ export interface MilestoneRow {
   due_date: string | null;
   reached_at: string | null;
   sort: number;
+  /** Soft delete (spec F10): set while the row is in the trash. */
+  deleted_at?: string | null;
+  deleted_by?: string | null;
   version: number;
   created_at: string;
   updated_at: string;
@@ -182,6 +192,13 @@ export interface ContextDocRow {
   updated_at: string;
   created_by: string;
   updated_by: string;
+  /** Document control (spec F10): draft|released|obsolete; obsolete docs stay out of bundles by default. */
+  status: ContextDocStatus;
+  released_by: string | null;
+  released_at: string | null;
+  /** Soft delete (spec F10): set while the row is in the trash. */
+  deleted_at?: string | null;
+  deleted_by?: string | null;
 }
 
 export interface ContextRevisionRow {

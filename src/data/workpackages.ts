@@ -1,6 +1,7 @@
 import type { Caller, PersonOut, PersonRefOut, ProjectRow, WorkpackageRow } from "../types";
 import {
   ConflictError,
+  LIVE,
   NotFoundError,
   ValidationError,
   diffFields,
@@ -62,13 +63,19 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export async function listWorkpackages(db: D1Database, projectId: string): Promise<WorkpackageRow[]> {
   const { results } = await db
-    .prepare("SELECT * FROM workpackage WHERE project_id = ? ORDER BY sort, title")
+    .prepare(`SELECT * FROM workpackage WHERE project_id = ? AND ${LIVE()} ORDER BY sort, title`)
     .bind(projectId)
     .all<WorkpackageRow>();
   return results;
 }
 
+/** A live work package (null when missing or in the trash). */
 async function getWp(db: D1Database, id: string): Promise<WorkpackageRow | null> {
+  return db.prepare(`SELECT * FROM workpackage WHERE id = ? AND ${LIVE()}`).bind(id).first<WorkpackageRow>();
+}
+
+/** Any row with this id, trash included (ids stay taken while an item is in the trash). */
+async function getWpAny(db: D1Database, id: string): Promise<WorkpackageRow | null> {
   return db.prepare("SELECT * FROM workpackage WHERE id = ?").bind(id).first<WorkpackageRow>();
 }
 
@@ -78,7 +85,7 @@ async function stakeholderIds(db: D1Database, wpIds: string[]): Promise<Map<stri
     const chunk = wpIds.slice(i, i + 90);
     const { results } = await db
       .prepare(
-        `SELECT s.workpackage_id, s.person_id FROM wp_stakeholder s JOIN person p ON p.id = s.person_id WHERE s.workpackage_id IN (${chunk.map(() => "?").join(", ")}) ORDER BY p.name COLLATE NOCASE, p.id`,
+        `SELECT s.workpackage_id, s.person_id FROM wp_stakeholder s JOIN person p ON p.id = s.person_id AND ${LIVE("p")} WHERE s.workpackage_id IN (${chunk.map(() => "?").join(", ")}) ORDER BY p.name COLLATE NOCASE, p.id`,
       )
       .bind(...chunk)
       .all<{ workpackage_id: string; person_id: string }>();
@@ -114,7 +121,7 @@ export async function withPersonOuts(
 /** Work packages of a project in client shape. */
 export async function listWorkpackagesOut(db: D1Database, projectId: string): Promise<WpOut[]> {
   const project = await db
-    .prepare("SELECT owner_person_id, owner_text FROM project WHERE id = ?")
+    .prepare(`SELECT owner_person_id, owner_text FROM project WHERE id = ? AND ${LIVE()}`)
     .bind(projectId)
     .first<Pick<ProjectRow, "owner_person_id" | "owner_text">>();
   if (!project) throw new NotFoundError(`project ${projectId} not found`);
@@ -230,7 +237,7 @@ export async function upsertWorkpackage(
   expectedVersion?: number,
 ): Promise<WpOut> {
   const project = await db
-    .prepare("SELECT owner_person_id, owner_text, status FROM project WHERE id = ?")
+    .prepare(`SELECT owner_person_id, owner_text, status FROM project WHERE id = ? AND ${LIVE()}`)
     .bind(projectId)
     .first<Pick<ProjectRow, "owner_person_id" | "owner_text" | "status">>();
   if (!project) throw new NotFoundError(`project ${projectId} not found`);
@@ -245,7 +252,8 @@ export async function upsertWorkpackage(
   const stakeholders = await stakeholderInput(db, input.priority_stakeholders);
   if (fields.blocked_by !== undefined) await checkBlockedRef(db, fields.blocked_by);
 
-  const existing = input.id ? await getWp(db, String(input.id)) : null;
+  const existing = input.id ? await getWpAny(db, String(input.id)) : null;
+  if (existing?.deleted_at) throw new NotFoundError(`workpackage ${existing.id} is in the trash; restore it first`);
   if (existing) {
     if (existing.project_id !== projectId)
       throw new ValidationError(`workpackage ${existing.id} belongs to project ${existing.project_id}`);
@@ -298,7 +306,7 @@ export async function upsertWorkpackage(
 
   const base = input.id ? String(input.id) : `${projectId}-${slugify(title)}`.slice(0, 63).replace(/-+$/, "");
   let id = base;
-  for (let n = 2; await getWp(db, id); n++) id = `${base}-${n}`;
+  for (let n = 2; await getWpAny(db, id); n++) id = `${base}-${n}`;
 
   const ts = now();
   const row: WorkpackageRow = {

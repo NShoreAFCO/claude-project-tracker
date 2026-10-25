@@ -45,7 +45,7 @@ describe("MCP server", () => {
     expect(r.result.instructions).toContain("get_context_bundle");
   });
 
-  it("lists all 21 tools", async () => {
+  it("lists all 23 tools", async () => {
     const r = await rpc("tools/list");
     const names = r.result.tools.map((t: { name: string }) => t.name).sort();
     expect(names).toEqual(
@@ -64,7 +64,9 @@ describe("MCP server", () => {
         "log_token_cost",
         "move_workpackages",
         "read_context",
+        "restore_entity",
         "search",
+        "set_context_meta",
         "set_scores",
         "update_project",
         "upsert_milestone",
