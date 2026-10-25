@@ -45,12 +45,13 @@ describe("MCP server", () => {
     expect(r.result.instructions).toContain("get_context_bundle");
   });
 
-  it("lists all 23 tools", async () => {
+  it("lists all 24 tools", async () => {
     const r = await rpc("tools/list");
     const names = r.result.tools.map((t: { name: string }) => t.name).sort();
     expect(names).toEqual(
       [
         "append_context",
+        "create_baseline",
         "create_project",
         "delete_context",
         "delete_entity",

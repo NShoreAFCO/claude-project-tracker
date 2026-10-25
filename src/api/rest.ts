@@ -2,6 +2,7 @@ import type { Caller, Env, Identity, OwnerKind } from "../types";
 import { createProject, getProjectDetail, listProjects, updateProject } from "../data/projects";
 import { listWorkpackagesOut, upsertWorkpackage } from "../data/workpackages";
 import { listMilestones, upsertMilestone } from "../data/milestones";
+import { createBaseline } from "../data/baselines";
 import { linkBranch } from "../data/branches";
 import { assignInboxEvent, listEvents, listInbox, logProgress, logTokenCost, setScores } from "../data/logs";
 import { deleteEntity, deletePreview, listTrash, purgeEntity, restoreEntity, type EntityKind } from "../data/entities";
@@ -97,6 +98,12 @@ route("DELETE", "/api/projects/:id", async ({ db, by, params }) => deleteEntity(
 route("POST", "/api/projects/:id/move-workpackages", async ({ db, req, by, params }) => {
   const { to_project_id, ids } = await readJson(req);
   return moveWorkpackages(db, params[0], reqStr(to_project_id, "to_project_id"), ids as string[], by);
+});
+
+/** F4: snapshot the project's WP and milestone dates; body {label}. */
+route("POST", "/api/projects/:id/baselines", async ({ db, req, by, params }) => {
+  const { label } = await readJson(req);
+  return createBaseline(db, params[0], reqStr(label, "label"), by);
 });
 
 // ---- work packages

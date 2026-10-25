@@ -342,7 +342,11 @@ describe("follow-up projects", () => {
     const kidDone = await upsertWorkpackage(db, from.id, { title: "kid done", parent_id: top.id, status: "done" }, A);
     const kidOpen = await upsertWorkpackage(db, from.id, { title: "kid open", parent_id: top.id }, A);
     const subOnly = await upsertWorkpackage(db, from.id, { title: "sub only", parent_id: stay.id, status: "waiting" }, A);
-    await upsertWorkpackage(db, from.id, { id: stay.id, depends_on: [top.id] }, A);
+    // A mutual dependency (stored before writes refused cycles) exercises removal in both directions.
+    await db
+      .prepare("UPDATE workpackage SET depends_on = ? WHERE id = ?")
+      .bind(JSON.stringify([top.id]), stay.id)
+      .run();
     const done = await upsertWorkpackage(db, from.id, { title: "finished", status: "done" }, A);
     const ms = await upsertMilestone(db, from.id, { title: "M", requires: [top.id, stay.id], unlocks: [kidOpen.id] }, A);
     const doc = await writeContext(db, { owner_kind: "workpackage", owner_id: kidOpen.id, title: "Notes", content_md: "x" }, A);
