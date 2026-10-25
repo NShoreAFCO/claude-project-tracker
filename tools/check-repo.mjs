@@ -2,9 +2,10 @@
 // (app.css holds tokens only; the instance theme defines all of them with enough contrast).
 // Usage: npm run check  (exit code 1 on any failure)
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { loadInstance } from "../scripts/lib/instance.mjs";
+import { migrationProblems, denylistHits, commitLogHits } from "./lib/repo-checks.mjs";
 
 const failures = [];
 const ok = [];
@@ -33,6 +34,10 @@ for (const f of textFiles) {
   for (const [re, what] of SECRET_PATTERNS) if (re.test(s)) check("no secrets in tracked files", false, `${what} in ${f}`);
 }
 check("no secrets in tracked files", true, `${textFiles.length} files scanned`);
+
+// ---- migrations are numbered contiguously from 0001, no gaps or duplicates
+const migProblems = migrationProblems(readdirSync("migrations"));
+check("migrations numbered contiguously from 0001", migProblems.length === 0, migProblems.join("; "));
 
 // ---- theme contract (docs/THEMING.md): app.css uses tokens only; the instance theme defines them all
 const CONTRACT = [
@@ -100,24 +105,15 @@ check("no italic text", !/font-style:\s*italic/.test(css));
 // ---- identity: the neutral package carries no organisation, person or account names (checks.denylist)
 if (inst.checks?.denylist !== false) {
   const DENY = /(?!)/i; // identity terms are kept out of the repository
-  const hits = [];
-  // this file holds the pattern itself
-  for (const f of textFiles.filter((f) => f !== "tools/check-repo.mjs")) {
-    let s;
-    try {
-      s = read(f);
-    } catch {
-      continue;
-    }
-    s.split("\n").forEach((line, i) => DENY.test(line) && hits.push(`${f}:${i + 1}`));
-  }
+  // this file holds the pattern itself; .github/** is core and scanned like every other tracked file
+  const hits = denylistHits(textFiles, read, DENY, ["tools/check-repo.mjs"]);
   check("denylist: no identity in tracked files", hits.length === 0, hits.slice(0, 20).join(", "));
   let log = "";
   try {
     log = execFileSync("git", ["log", "--format=%s%n%b"], { encoding: "utf8" });
   } catch {}
-  // GitHub writes "Merge pull request #N from <owner>/<branch>" itself; the owner is the hosting account, not content
-  const logHits = log.split("\n").filter((l) => DENY.test(l.replace(/^Merge pull request #\d+ from [^/\s]+\//, "")));
+  // GitHub writes "Merge pull request #N from <owner>/<branch>" and "Merge branch 'main' into <branch>" itself
+  const logHits = commitLogHits(log, DENY);
   check("denylist: no identity in commit messages", logHits.length === 0, logHits.slice(0, 5).join(" | "));
   const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
   const ALLOWED_EMAIL = /@(example\.com|example\.org|users\.noreply\.github\.com)$/i;

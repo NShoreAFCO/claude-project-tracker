@@ -1,0 +1,58 @@
+// Pure helpers for tools/check-repo.mjs, kept separate so they can be tested without a fixture repository.
+
+/**
+ * Migration file names must be NNNN_name.sql, numbered contiguously from 0001, no gaps, no duplicates.
+ * @param {string[]} names file names inside migrations/
+ * @returns {string[]} problems (empty when fine)
+ */
+export function migrationProblems(names) {
+  const problems = [];
+  const nums = [];
+  for (const n of names.filter((n) => n.endsWith(".sql"))) {
+    const m = /^(\d{4})_[a-z0-9_]+\.sql$/.exec(n);
+    if (!m) problems.push(`${n}: name must look like 0001_name.sql`);
+    else nums.push(Number(m[1]));
+  }
+  nums.sort((a, b) => a - b);
+  const seen = new Set();
+  for (const n of nums) {
+    if (seen.has(n)) problems.push(`duplicate number ${String(n).padStart(4, "0")}`);
+    seen.add(n);
+  }
+  const max = nums.length ? nums[nums.length - 1] : 0;
+  for (let i = 1; i <= max; i++) if (!seen.has(i)) problems.push(`gap: ${String(i).padStart(4, "0")} is missing`);
+  return problems;
+}
+
+/**
+ * Lines of text files matching the denylist, as "path:line". Unreadable files are skipped.
+ * @param {string[]} files tracked paths to scan
+ * @param {(path: string) => string} read returns the file text (throws when unreadable)
+ * @param {RegExp} deny
+ * @param {string[]} [skip] paths that hold the pattern itself
+ */
+export function denylistHits(files, read, deny, skip = []) {
+  const hits = [];
+  for (const f of files.filter((f) => !skip.includes(f))) {
+    let s;
+    try {
+      s = read(f);
+    } catch {
+      continue;
+    }
+    s.split("\n").forEach((line, i) => deny.test(line) && hits.push(`${f}:${i + 1}`));
+  }
+  return hits;
+}
+
+/**
+ * Commit-message lines (from `git log --format=%s%n%b`) that match the denylist.
+ * Skips subjects GitHub writes itself: "Merge pull request #N from <owner>/<branch>" (the owner is the
+ * hosting account) and "Merge branch 'main' into <branch>" (the branch-update button).
+ */
+export function commitLogHits(log, deny) {
+  return log
+    .split("\n")
+    .filter((l) => !/^Merge branch '[^']+' into \S+$/.test(l))
+    .filter((l) => deny.test(l.replace(/^Merge pull request #\d+ from [^/\s]+\//, "")));
+}

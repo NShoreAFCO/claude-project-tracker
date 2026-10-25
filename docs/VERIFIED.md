@@ -17,6 +17,8 @@ Sources: the listed docs plus the installed `.d.ts` files. Where docs and types 
 | `typescript` | 5.9.3 | 7.x (Go port) deliberately not used |
 | `@cloudflare/workers-types` | 5.20261019.1 | |
 
+CI runs on Node 24 (local development verified on v24.19.0, 2026-10-25).
+
 npm 11 blocks install scripts. `allowScripts` in `package.json` approves `esbuild` and `workerd`.
 
 ## MCP transport — `agents/mcp/server`
