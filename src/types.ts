@@ -67,6 +67,8 @@ export interface ProjectRow {
   lessons_learned_md: string | null;
   /** Schedule validation (spec F4): 1 strict, 0 lenient, NULL = policy schedule_strict_default. */
   schedule_strict?: number | null;
+  /** Bumped by every schedule-affecting write (guarded, same batch) to detect concurrent writes. */
+  schedule_rev?: number;
   /** A gate `stop` decision put the project on hold (spec F5). */
   closure_decision_pending?: number;
   /** Soft delete (spec F10): set while the row is in the trash. */
@@ -102,7 +104,7 @@ export interface WorkpackageRow {
   blocked_since: string | null;
   /** Optional reason for a deferral (`waiting`); cleared when it leaves `waiting`. */
   waiting_reason: string | null;
-  /** Stored schedule issues (JSON array of ScheduleIssue; NULL = none), spec F4. */
+  /** Stored schedule issues (JSON array of ScheduleIssue; "[]" = none, NULL = not computed yet), spec F4. */
   schedule_issues?: string | null;
   /** Gate lock override by a person (spec F5). */
   gate_override_by?: string | null;
@@ -125,7 +127,7 @@ export interface MilestoneRow {
   due_date: string | null;
   reached_at: string | null;
   sort: number;
-  /** Stored schedule issues (JSON array of ScheduleIssue; NULL = none), spec F4. */
+  /** Stored schedule issues (JSON array of ScheduleIssue; "[]" = none, NULL = not computed yet), spec F4. */
   schedule_issues?: string | null;
   /** Gate milestone (spec F5): unlocking needs a go decision. */
   gate?: number;

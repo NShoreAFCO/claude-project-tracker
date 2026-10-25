@@ -4,7 +4,7 @@
  */
 import type { Caller, ProjectRow, WorkpackageRow } from "../types";
 import { reachStmts } from "./milestones";
-import { storeSchedule, type ScheduleIssue } from "./schedule";
+import { recomputeScheduleStmts, scheduleBatch, storeSchedule, storedDependsOn, type ScheduleIssue } from "./schedule";
 import { ConflictError, LIVE, NotFoundError, ValidationError, eventStmtWhere, now, parseJsonArray, type Diff } from "./util";
 
 /** Machine-readable details of a refused transition (the 409 body's `current`). */
@@ -348,11 +348,39 @@ export async function moveWorkpackages(
     ...reachStmts(db, from.id, by),
     ...reachStmts(db, to.id, by),
   );
-  const res = await db.batch(stmts);
+  // Removed dependencies and milestone links change the schedule of both projects (spec F4): stored in
+  // the same batch, never refused by strict mode.
+  const live = (id: string) => !byId.get(id)!.deleted_at;
+  const snap = (id: string, parent: string | null) => {
+    const w = byId.get(id)!;
+    return {
+      id,
+      parent_id: parent,
+      start_date: w.start_date,
+      end_date: w.end_date,
+      depends_on: storedDependsOn(newDeps.get(id) ?? w.depends_on),
+    };
+  };
+  const fromSchedule = await recomputeScheduleStmts(db, from.id, {
+    removeWps: movedList,
+    wps: [...newDeps.keys()].filter((id) => !moved.has(id) && live(id)).map((id) => snap(id, byId.get(id)!.parent_id)),
+    strict: false,
+  });
+  const toSchedule = await recomputeScheduleStmts(db, to.id, {
+    wps: movedList.filter(live).map((id) => {
+      const p = byId.get(id)!.parent_id;
+      return snap(id, p && moved.has(p) ? p : null);
+    }),
+    strict: false,
+  });
+  stmts.push(...fromSchedule.stmts, ...toSchedule.stmts);
+  const res = await scheduleBatch(db, stmts);
   const changed = res.slice(firstMove, firstMove + n).reduce((s, r) => s + (r.meta.changes ?? 0), 0);
-  if (changed !== n) throw new ConflictError("work packages or the target project changed meanwhile; nothing was moved", null);
-  // Removed dependencies and milestone links change the schedule of both projects (spec F4).
-  await storeSchedule(db, from.id);
-  await storeSchedule(db, to.id);
+  if (changed !== n) {
+    // The guarded writes did nothing; put back the stored issues of both unchanged plans.
+    await storeSchedule(db, from.id);
+    await storeSchedule(db, to.id);
+    throw new ConflictError("work packages or the target project changed meanwhile; nothing was moved", null);
+  }
   return { moved: movedList };
 }

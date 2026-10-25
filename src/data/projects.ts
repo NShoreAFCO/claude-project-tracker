@@ -15,6 +15,7 @@ import { QUALIFIES, listMilestones, lockedWpIds } from "./milestones";
 import { PROJECT_CATEGORIES, checkCategory } from "./categories";
 import { personOuts, personRefInput, personRefOut, refInitials } from "./persons";
 import { withPersonOuts } from "./workpackages";
+import { ensureSchedule } from "./schedule";
 import {
   OPEN_WP_SQL,
   closureError,
@@ -281,6 +282,8 @@ export async function listProjects(
 
 export async function getProjectDetail(db: D1Database, id: string) {
   const project = await getProjectRow(db, id);
+  // Rows written before schedule validation (or by an older Worker) are computed once on first read.
+  await ensureSchedule(db, id);
   const [wps, branches, scores, scoreCount, cost, costEntries, events, ctx] = await db.batch([
     db.prepare(`SELECT * FROM workpackage WHERE project_id = ? AND ${LIVE()} ORDER BY sort, title`).bind(id),
     db.prepare("SELECT * FROM branch WHERE project_id = ? ORDER BY last_activity DESC").bind(id),

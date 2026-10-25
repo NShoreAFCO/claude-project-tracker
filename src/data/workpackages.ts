@@ -1,17 +1,14 @@
 import type { Caller, PersonOut, PersonRefOut, ProjectRow, WorkpackageRow } from "../types";
+import { ConflictError, LIVE, NotFoundError, ValidationError, diffFields, eventStmt, eventStmtIfChanged, now, slugify } from "./util";
 import {
-  ConflictError,
-  LIVE,
-  NotFoundError,
-  ValidationError,
-  diffFields,
-  eventStmt,
-  eventStmtIfChanged,
-  now,
-  parseJsonArray,
-  slugify,
-} from "./util";
-import { dependsOnInput, issuesOf, recomputeScheduleStmts, storeSchedule, type ScheduleIssue } from "./schedule";
+  dependsOnInput,
+  issuesOf,
+  recomputeScheduleStmts,
+  scheduleBatch,
+  storeSchedule,
+  storedDependsOn,
+  type ScheduleIssue,
+} from "./schedule";
 import { WP_CATEGORIES, checkCategory, checkHuman } from "./categories";
 import { reachStmts } from "./milestones";
 import { personOuts, personRefInput, personRefOut, resolvePersonRef } from "./persons";
@@ -222,7 +219,7 @@ const scheduleWp = (w: Pick<WorkpackageRow, "id" | "parent_id" | "start_date" | 
   parent_id: w.parent_id ?? null,
   start_date: w.start_date ?? null,
   end_date: w.end_date ?? null,
-  depends_on: parseJsonArray(w.depends_on ?? null),
+  depends_on: storedDependsOn(w.depends_on),
 });
 
 /** parent must be a WP of the same project and not the node itself or one of its descendants. */
@@ -292,10 +289,10 @@ export async function upsertWorkpackage(
       return { ...(await withPersonOuts(db, project, [existing]))[0], warnings: issuesOf(issues, existing.id) };
     }
     const schedule = await recomputeScheduleStmts(db, projectId, {
-      wp: scheduleWp(next as unknown as WorkpackageRow),
-      checkDependsOn: "depends_on" in diff,
+      wps: [scheduleWp(next as unknown as WorkpackageRow)],
+      checkDependsOn: "depends_on" in diff ? existing.id : undefined,
     });
-    const res = await db.batch([
+    const res = await scheduleBatch(db, [
       ...stakeStmts,
       db
         .prepare(
@@ -360,9 +357,12 @@ export async function upsertWorkpackage(
     created_at: ts,
     updated_at: ts,
   };
-  const schedule = await recomputeScheduleStmts(db, projectId, { wp: scheduleWp(row), checkDependsOn: fields.depends_on !== undefined });
+  const schedule = await recomputeScheduleStmts(db, projectId, {
+    wps: [scheduleWp(row)],
+    checkDependsOn: fields.depends_on !== undefined ? id : undefined,
+  });
   const cols = ["id", "project_id", ...WRITE_COLS, "version", "created_at", "updated_at"] as const;
-  await db.batch([
+  await scheduleBatch(db, [
     db
       .prepare(`INSERT INTO workpackage (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`)
       .bind(...cols.map((c) => (row as unknown as Record<string, unknown>)[c] ?? null)),

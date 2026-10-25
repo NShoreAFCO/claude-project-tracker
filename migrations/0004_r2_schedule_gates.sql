@@ -3,10 +3,13 @@
 -- working on this schema. Holds every R2 column; behaviour arrives with the R2 tasks.
 
 -- Schedule validation (spec F4): stored issues per entity (JSON array of ScheduleIssue, NULL = none
--- computed yet) and the project's strict flag (NULL = policy schedule_strict_default).
+-- computed yet, "[]" = computed, none) and the project's strict flag (NULL = policy
+-- schedule_strict_default). schedule_rev is bumped by every schedule-affecting write inside its batch
+-- (guarded), so concurrent writes cannot store stale issues or bypass strict mode.
 ALTER TABLE workpackage ADD COLUMN schedule_issues TEXT;
 ALTER TABLE milestone ADD COLUMN schedule_issues TEXT;
 ALTER TABLE project ADD COLUMN schedule_strict INTEGER;
+ALTER TABLE project ADD COLUMN schedule_rev INTEGER NOT NULL DEFAULT 0;
 
 -- Baselines (spec F4): a labelled snapshot of WP and milestone dates.
 CREATE TABLE baseline (

@@ -1,13 +1,13 @@
 // F4 (release R2): schedule validation engine and stored issues.
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { call, installTestKeys, testCaller, userJwt } from "./helpers";
 import { gatedPlan } from "./fixtures/gated-plan";
-import { createProject, updateProject } from "../src/data/projects";
+import { createProject, getProjectDetail, updateProject } from "../src/data/projects";
 import { upsertWorkpackage } from "../src/data/workpackages";
 import { upsertMilestone } from "../src/data/milestones";
 import { deleteEntity, restoreEntity } from "../src/data/entities";
-import { scheduleIssues, type ScheduleIssue, type ScheduleSnapshot } from "../src/data/schedule";
+import { scheduleIssues, setAfterScheduleReadForTesting, type ScheduleIssue, type ScheduleSnapshot } from "../src/data/schedule";
 import { TransitionError } from "../src/data/rules";
 import { ValidationError } from "../src/data/util";
 import { mcpApiHandler } from "../src/mcp/server";
@@ -35,6 +35,7 @@ const ms = (id: string, due: string | null, o: Partial<ScheduleSnapshot["milesto
   ...o,
 });
 beforeAll(installTestKeys);
+afterEach(() => setAfterScheduleReadForTesting(null));
 
 async function mcp(name: string, args: Record<string, unknown>) {
   const ctx = createExecutionContext() as ExecutionContext & { props?: unknown };
@@ -110,13 +111,9 @@ describe("scheduleIssues (pure)", () => {
     expect(brief(issues)).toEqual([["MILESTONE_BEFORE_REQUIRED_END", "milestone", "m", "w"]]);
     expect(scheduleIssues({ wps: [wp("w", null, "2027-04-20")], milestones: [ms("m", "2027-04-20", { requires: ["w"] })] })).toEqual([]);
   });
-  it("a WP without start_date produces no start-based issue; unknown ids are ignored", () => {
+  it("a WP without start_date produces no start-based issue; unknown milestone links are ignored", () => {
     const issues = scheduleIssues({
-      wps: [
-        wp("a", "2027-01-01", "2027-01-10"),
-        wp("b", null, "2027-01-20", { depends_on: ["a", "ghost"] }),
-        wp("p", "2027-01-05", "2027-01-31"),
-      ],
+      wps: [wp("a", "2027-01-01", "2027-01-10"), wp("b", null, "2027-01-20", { depends_on: ["a"] }), wp("p", "2027-01-05", "2027-01-31")],
       milestones: [ms("g", "2027-02-01", { unlocks: ["b", "ghost"], requires: ["ghost"] })],
     });
     expect(issues).toEqual([]);
@@ -166,7 +163,8 @@ describe("schedule validation on writes", () => {
     const b = await upsertWorkpackage(db, p.id, { title: "b", start_date: "2027-01-05", depends_on: [a.id] }, A);
     expect(await stored("workpackage", b.id)).toHaveLength(1);
     await deleteEntity(db, "workpackage", a.id, A);
-    expect(await stored("workpackage", b.id)).toEqual([]);
+    // the predecessor is no longer a live WP: the dependency is reported as unknown
+    expect(brief(await stored("workpackage", b.id))).toEqual([["DEP_UNKNOWN", "workpackage", b.id, a.id]]);
     await restoreEntity(db, "workpackage", a.id, A);
     expect(await stored("workpackage", b.id)).toHaveLength(1);
   });
@@ -219,5 +217,89 @@ describe("schedule validation on writes", () => {
     const e = await mcp("upsert_workpackage", { project_id: p.id, title: "c", start_date: "2027-01-03", depends_on: [a.id] });
     expect(e.isError).toBe(true);
     expect(JSON.parse(e.content[0].text).current.code).toBe("SCHEDULE_STRICT");
+  });
+});
+
+describe("schedule fix round 1", () => {
+  const raw = async (t: "workpackage" | "milestone", id: string) =>
+    (await db.prepare(`SELECT schedule_issues FROM ${t} WHERE id = ?`).bind(id).first<{ schedule_issues: string | null }>())!
+      .schedule_issues;
+
+  it("pure: unknown depends_on entries are DEP_UNKNOWN", () => {
+    const issues = scheduleIssues({ wps: [wp("b", "2027-01-01", null, { depends_on: ["after kickoff"] })], milestones: [] });
+    expect(brief(issues)).toEqual([["DEP_UNKNOWN", "workpackage", "b", "after kickoff"]]);
+  });
+  it("legacy free-text depends_on is reported as DEP_UNKNOWN", async () => {
+    const p = await owned("Legacy text");
+    const b = await upsertWorkpackage(db, p.id, { title: "b", start_date: "2027-01-05" }, A);
+    await db.prepare("UPDATE workpackage SET depends_on = ? WHERE id = ?").bind("after kickoff", b.id).run();
+    const edited = await upsertWorkpackage(db, p.id, { id: b.id, title: "b renamed" }, A);
+    expect(brief(edited.warnings)).toEqual([["DEP_UNKNOWN", "workpackage", b.id, "after kickoff"]]);
+    expect(brief(await stored("workpackage", b.id))).toEqual(brief(edited.warnings));
+  });
+  it("dangling depends_on id is reported, unrelated edit still succeeds", async () => {
+    const p = await owned("Dangling");
+    const b = await upsertWorkpackage(db, p.id, { title: "b" }, A);
+    await db
+      .prepare("UPDATE workpackage SET depends_on = ? WHERE id = ?")
+      .bind(JSON.stringify(["gone-wp"]), b.id)
+      .run();
+    const edited = await upsertWorkpackage(db, p.id, { id: b.id, start_date: "2027-02-01" }, A);
+    expect(edited.start_date).toBe("2027-02-01");
+    expect(brief(edited.warnings)).toEqual([["DEP_UNKNOWN", "workpackage", b.id, "gone-wp"]]);
+    // writing depends_on itself with an unknown id is still refused
+    const err = await upsertWorkpackage(db, p.id, { id: b.id, depends_on: ["gone-wp", "other"] }, A).catch((e) => e);
+    expect(err).toBeInstanceOf(ValidationError);
+  });
+  it("computed empty issues are stored as [] (NULL = not computed)", async () => {
+    const p = await owned("Empty");
+    const a = await upsertWorkpackage(db, p.id, { title: "a" }, A);
+    expect(await raw("workpackage", a.id)).toBe("[]");
+  });
+  it("pre-existing project with NULL schedule_issues is computed on first read", async () => {
+    const p = await owned("Legacy rows");
+    const a = await upsertWorkpackage(db, p.id, { title: "a", start_date: "2027-01-01", end_date: "2027-01-10" }, A);
+    const b = await upsertWorkpackage(db, p.id, { title: "b", start_date: "2027-01-05", depends_on: [a.id] }, A);
+    const m = await upsertMilestone(db, p.id, { title: "M", due_date: "2027-02-01", requires: [b.id] }, A);
+    await db.prepare("UPDATE workpackage SET schedule_issues = NULL WHERE project_id = ?").bind(p.id).run();
+    await db.prepare("UPDATE milestone SET schedule_issues = NULL WHERE project_id = ?").bind(p.id).run();
+    const d = await getProjectDetail(db, p.id);
+    expect(await raw("workpackage", a.id)).toBe("[]");
+    expect(await raw("milestone", m.id)).toBe("[]");
+    expect(brief(JSON.parse((await raw("workpackage", b.id))!))).toEqual([["DEP_START_BEFORE_PRED_END", "workpackage", b.id, a.id]]);
+    const B = d.workpackages.find((w) => w.id === b.id)!;
+    expect(B.schedule_issues).not.toBeNull();
+  });
+  it("a lost schedule race returns 409 SCHEDULE_CONFLICT and writes nothing", async () => {
+    const p = await owned("Race");
+    const a = await upsertWorkpackage(db, p.id, { title: "a", start_date: "2027-01-01", end_date: "2027-01-10" }, A);
+    const b = await upsertWorkpackage(db, p.id, { title: "b", start_date: "2027-01-15", depends_on: [a.id] }, A);
+    setAfterScheduleReadForTesting(async () => {
+      setAfterScheduleReadForTesting(null);
+      // a concurrent writer moves the predecessor after the outer write read the plan
+      await upsertWorkpackage(db, p.id, { id: a.id, end_date: "2027-01-20" }, A);
+    });
+    const err = await upsertWorkpackage(db, p.id, { id: b.id, start_date: "2027-01-16" }, A).catch((e) => e);
+    expect(err).toBeInstanceOf(TransitionError);
+    expect(err.status).toBe(409);
+    expect(err.current.code).toBe("SCHEDULE_CONFLICT");
+    const row = await db.prepare("SELECT start_date, version FROM workpackage WHERE id = ?").bind(b.id).first();
+    expect(row).toEqual({ start_date: "2027-01-15", version: b.version });
+    // stored issues are those of the concurrent writer, which won
+    expect(brief(await stored("workpackage", b.id))).toEqual([["DEP_START_BEFORE_PRED_END", "workpackage", b.id, a.id]]);
+  });
+  it("concurrent writes cannot bypass strict mode", async () => {
+    const p = await owned("Strict race", { schedule_strict: true });
+    const a = await upsertWorkpackage(db, p.id, { title: "a", start_date: "2027-01-01", end_date: "2027-01-10" }, A);
+    const b = await upsertWorkpackage(db, p.id, { title: "b", start_date: "2027-01-15" }, A);
+    setAfterScheduleReadForTesting(async () => {
+      setAfterScheduleReadForTesting(null);
+      // each write alone is fine; together b would start before a ends
+      await upsertWorkpackage(db, p.id, { id: a.id, end_date: "2027-01-20" }, A);
+    });
+    const err = await upsertWorkpackage(db, p.id, { id: b.id, depends_on: [a.id] }, A).catch((e) => e);
+    expect(err.current?.code).toBe("SCHEDULE_CONFLICT");
+    const row = await db.prepare("SELECT depends_on FROM workpackage WHERE id = ?").bind(b.id).first<{ depends_on: string | null }>();
+    expect(row!.depends_on).toBeNull();
   });
 });

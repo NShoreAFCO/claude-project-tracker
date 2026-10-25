@@ -1,6 +1,6 @@
 import type { Caller, MilestoneRow } from "../types";
 import { ConflictError, LIVE, NotFoundError, ValidationError, diffFields, eventStmt, eventStmtIfChanged, newId, now } from "./util";
-import { issuesOf, recomputeScheduleStmts, storeSchedule, type ScheduleIssue } from "./schedule";
+import { issuesOf, recomputeScheduleStmts, scheduleBatch, storeSchedule, type ScheduleIssue } from "./schedule";
 
 export type MilestoneOut = MilestoneRow & { requires: string[]; unlocks: string[]; done: boolean };
 /** Write result: the milestone plus the schedule issues that concern it (spec F4). */
@@ -189,14 +189,16 @@ export async function upsertMilestone(
       return { ...current, warnings: issuesOf(issues, current.id) };
     }
     const schedule = await recomputeScheduleStmts(db, projectId, {
-      milestone: {
-        id: existing.id,
-        due_date: (next.due_date as string | null) ?? null,
-        requires: requires ?? current.requires,
-        unlocks: unlocks ?? current.unlocks,
-      },
+      milestones: [
+        {
+          id: existing.id,
+          due_date: (next.due_date as string | null) ?? null,
+          requires: requires ?? current.requires,
+          unlocks: unlocks ?? current.unlocks,
+        },
+      ],
     });
-    const res = await db.batch([
+    const res = await scheduleBatch(db, [
       db
         .prepare(
           `UPDATE milestone SET ${changed.map((f) => `${f} = ?, `).join("")}version = version + 1, updated_at = ? WHERE id = ? AND version = ?`,
@@ -240,10 +242,10 @@ export async function upsertMilestone(
     updated_at: ts,
   };
   const schedule = await recomputeScheduleStmts(db, projectId, {
-    milestone: { id: row.id, due_date: row.due_date, requires: requires ?? [], unlocks: unlocks ?? [] },
+    milestones: [{ id: row.id, due_date: row.due_date, requires: requires ?? [], unlocks: unlocks ?? [] }],
   });
   const cols = ["id", "project_id", ...MS_FIELDS, "version", "created_at", "updated_at"] as const;
-  await db.batch([
+  await scheduleBatch(db, [
     db
       .prepare(`INSERT INTO milestone (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`)
       .bind(...cols.map((c) => (row as unknown as Record<string, unknown>)[c] ?? null)),
