@@ -1,4 +1,4 @@
-import type { EventRow, ScoreRow, TokenCostRow, WorkpackageRow } from "../types";
+import type { Caller, EventRow, ScoreRow, TokenCostRow, WorkpackageRow } from "../types";
 import { reachStmts } from "./milestones";
 import { NotFoundError, ValidationError, eventStmt, newId, now } from "./util";
 
@@ -24,7 +24,7 @@ export async function setScores(
   db: D1Database,
   projectId: string,
   scores: Array<{ criterion: string; value: number; note?: string | null }>,
-  actor: string,
+  by: Caller,
 ): Promise<ScoreRow[]> {
   await requireProject(db, projectId);
   if (!Array.isArray(scores) || !scores.length || scores.length > 20) throw new ValidationError("scores must hold 1..20 entries");
@@ -34,7 +34,15 @@ export async function setScores(
     if (!criterion || criterion.length > 40) throw new ValidationError("criterion must be 1..40 characters");
     if (typeof s.value !== "number" || !Number.isFinite(s.value) || s.value < 0 || s.value > 10)
       throw new ValidationError(`score ${criterion} must be 0..10`);
-    return { id: newId(), project_id: projectId, criterion, value: s.value, note: optText(s.note, 2000, "note"), recorded_at: ts, actor };
+    return {
+      id: newId(),
+      project_id: projectId,
+      criterion,
+      value: s.value,
+      note: optText(s.note, 2000, "note"),
+      recorded_at: ts,
+      actor: by.actor,
+    };
   });
   await db.batch([
     ...rows.map((r) =>
@@ -43,7 +51,7 @@ export async function setScores(
         .bind(r.id, r.project_id, r.criterion, r.value, r.note, r.recorded_at, r.actor),
     ),
     eventStmt(db, {
-      actor,
+      by,
       project_id: projectId,
       entity: "score",
       entity_id: null,
@@ -60,7 +68,7 @@ export async function logTokenCost(
   db: D1Database,
   projectId: string,
   input: { claude_tokens?: number | null; copilot_prompts?: number | null; note?: string | null; workpackage_id?: string | null },
-  actor: string,
+  by: Caller,
 ): Promise<TokenCostRow> {
   await requireProject(db, projectId);
   const claude = input.claude_tokens ?? null;
@@ -77,7 +85,7 @@ export async function logTokenCost(
     claude_tokens: claude,
     copilot_prompts: copilot,
     note: optText(input.note, 2000, "note"),
-    actor,
+    actor: by.actor,
   };
   const summary = [claude !== null ? `${claude} tokens` : "", copilot !== null ? `${copilot} prompts` : ""].filter(Boolean).join(", ");
   await db.batch([
@@ -86,7 +94,7 @@ export async function logTokenCost(
         "INSERT INTO token_cost (id, project_id, workpackage_id, recorded_at, claude_tokens, copilot_prompts, note, actor) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .bind(row.id, row.project_id, row.workpackage_id, row.recorded_at, row.claude_tokens, row.copilot_prompts, row.note, row.actor),
-    eventStmt(db, { actor, project_id: projectId, entity: "token_cost", entity_id: row.id, action: "log", summary }),
+    eventStmt(db, { by, project_id: projectId, entity: "token_cost", entity_id: row.id, action: "log", summary }),
   ]);
   return row;
 }
@@ -95,7 +103,7 @@ export async function logTokenCost(
 export async function logProgress(
   db: D1Database,
   input: { project_id: string; summary: string; workpackage_id?: string | null; progress?: number | null; session_id?: string | null },
-  actor: string,
+  by: Caller,
 ): Promise<{ event_id: number; workpackage?: WorkpackageRow }> {
   await requireProject(db, input.project_id);
   const summary = String(input.summary ?? "").trim();
@@ -127,7 +135,7 @@ export async function logProgress(
   }
   stmts.push(
     eventStmt(db, {
-      actor,
+      by,
       project_id: input.project_id,
       entity: wp ? "workpackage" : "project",
       entity_id: wp ? wp.id : input.project_id,
@@ -136,7 +144,7 @@ export async function logProgress(
       diff: wp && progress !== null ? { progress: [wp.progress, progress] } : null,
     }),
   );
-  const reach = wp && progress !== null ? reachStmts(db, input.project_id, actor) : [];
+  const reach = wp && progress !== null ? reachStmts(db, input.project_id, by) : [];
   const res = await db.batch([...stmts, ...reach]);
   const eventId = Number(res[stmts.length - 1].meta.last_row_id);
   if (!wp) return { event_id: eventId };
@@ -176,7 +184,7 @@ export async function listInbox(db: D1Database, limit = 100): Promise<EventRow[]
   return results;
 }
 
-export async function assignInboxEvent(db: D1Database, eventId: number, projectId: string, actor: string): Promise<void> {
+export async function assignInboxEvent(db: D1Database, eventId: number, projectId: string, by: Caller): Promise<void> {
   const ev = await db.prepare("SELECT * FROM event WHERE id = ?").bind(eventId).first<EventRow>();
   if (!ev) throw new NotFoundError(`event ${eventId} not found`);
   if (ev.project_id !== null || ev.action !== "unmatched") throw new ValidationError("only unassigned inbox events can be assigned");
@@ -184,7 +192,7 @@ export async function assignInboxEvent(db: D1Database, eventId: number, projectI
   await db.batch([
     db.prepare("UPDATE event SET project_id = ?, action = 'assigned' WHERE id = ? AND project_id IS NULL").bind(projectId, eventId),
     eventStmt(db, {
-      actor,
+      by,
       project_id: projectId,
       entity: "event",
       entity_id: String(eventId),

@@ -174,6 +174,38 @@ test("basics step normalises emails and switches off chosen types", async () => 
   assert.deepEqual(off.sort(), ["other", "sales-customer"]);
 });
 
+test("basics step asks for admin emails, defaulting to the first allowed email", async () => {
+  const root = tempRoot();
+  const io = scriptedIo(BASE_ANSWERS);
+  const ask = io.ask;
+  let adminQuestion = null;
+  let adminDefault = null;
+  // the user presses Enter on the admin question: the offered default is taken
+  io.ask = async (q, def) => (/admin/i.test(q) ? ((adminQuestion = q), (adminDefault = def), def) : ask(q, def));
+  const o = opts(root, { io });
+  const r = await runSetup(o.run);
+  assert.equal(r.ok, true, o.lines.join("\n"));
+  assert.match(adminQuestion, /admin email/i);
+  assert.equal(adminDefault, "a@example.com");
+  const cfg = JSON.parse(readFileSync(join(root, "instance", "instance.config.json"), "utf8"));
+  assert.deepEqual(cfg.policy.admins, ["a@example.com"]);
+  // the rest of the policy block keeps its defaults
+  assert.equal(cfg.policy.default_role, "editor");
+});
+
+test("basics step normalises admin emails and refuses one that is not allowed", async () => {
+  const root = tempRoot();
+  const o = opts(root, { io: scriptedIo([[/admin/i, " B@Example.com "], ...BASE_ANSWERS]) });
+  await runSetup(o.run);
+  const cfg = JSON.parse(readFileSync(join(root, "instance", "instance.config.json"), "utf8"));
+  assert.deepEqual(cfg.policy.admins, ["b@example.com"]);
+
+  const bad = opts(tempRoot(), { io: scriptedIo([[/admin/i, "stranger@example.com"], ...BASE_ANSWERS]) });
+  const r = await runSetup(bad.run);
+  assert.equal(r.ok, false);
+  assert.match(bad.lines.join("\n"), /stranger@example\.com.*allowed/i);
+});
+
 test("prefix names every resource", async () => {
   const root = tempRoot();
   const o = opts(root, { prefix: "cpt-test" });
@@ -237,4 +269,20 @@ test("setup:check reports missing parts by name only", async () => {
   for (const v of Object.values(s)) if (typeof v === "string" && v.length >= 12 && !v.startsWith("https://")) assert.ok(!text.includes(v));
   const empty = await runSetupCheck({ root: tempRoot(), fetch: accessFetch });
   assert.equal(empty[0].ok, false);
+});
+
+test("setup:check validates the policy block and the admins", async () => {
+  const { writeFileSync } = await import("node:fs");
+  const { runSetupCheck } = await import("../setup-check.mjs");
+  const root = tempRoot();
+  await runSetup(opts(root).run);
+  const file = join(root, "instance", "instance.config.json");
+  const cfg = JSON.parse(readFileSync(file, "utf8"));
+  cfg.policy.default_role = "owner";
+  cfg.policy.admins = ["stranger@example.com"];
+  writeFileSync(file, JSON.stringify(cfg));
+  const failed = (await runSetupCheck({ root, fetch: accessFetch })).filter((r) => !r.ok);
+  const policy = failed.find((r) => r.name === "config policy block is valid");
+  assert.ok(policy && /policy\.default_role/.test(policy.detail), JSON.stringify(failed));
+  assert.ok(failed.some((r) => r.name === "config policy.admins names allowed emails"));
 });

@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { instanceDir, validateConfig, normaliseEmails, renderWrangler, publicConfig } from "../lib/instance.mjs";
+import { instanceDir, validateConfig, normaliseEmails, renderWrangler, publicConfig, resolvePolicy } from "../lib/instance.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const example = JSON.parse(readFileSync(join(root, "instance.example", "instance.config.json"), "utf8"));
@@ -122,4 +122,91 @@ test("example catalogue covers the common project and work types", () => {
   for (const k of ["coding", "research", "design", "testing", "pm", "docs", "rollout"]) assert.ok(w.includes(k), k);
   for (const list of [example.categories.project, example.categories.workpackage])
     for (const x of list) assert.ok(x.label.en && x.label.de, `${x.key} needs en and de labels`);
+});
+
+test("policy defaults applied when block missing", () => {
+  const c = clone(example);
+  delete c.policy;
+  assert.deepEqual(validateConfig(c), []);
+  const p = resolvePolicy(c);
+  assert.deepEqual(p.admins, []);
+  assert.equal(p.default_role, "editor");
+  assert.deepEqual(p.locales, ["en", "de"]);
+  assert.equal(p.stale_days, 14);
+  assert.equal(p.schedule_strict_default, false);
+  assert.deepEqual(p.target_date_required_categories, ["research", "product-development", "product-launch", "quality-regulatory"]);
+  assert.deepEqual(p.gates, { require_decision: true });
+  assert.equal(p.retention_days, 30);
+  assert.equal(p.hide_empty_categories, "collapse");
+  assert.deepEqual(p.report, { paper: "a4", pdf: true });
+  for (const k of ["value", "quality", "risk", "effort", "token_efficiency"])
+    for (const level of ["0", "5", "10"]) assert.ok(p.score_scales[k][level].en && p.score_scales[k][level].de, `${k}.${level}`);
+  // German instance: its own locale comes first
+  c.app.locale = "de";
+  assert.deepEqual(resolvePolicy(c).locales, ["de", "en"]);
+});
+
+test("policy values override defaults; emails are normalised; unknown default keys are dropped", () => {
+  const c = clone(example);
+  c.policy = { admins: [" Boss@Example.com "], stale_days: 7, gates: {}, report: { paper: "letter" } };
+  const p = resolvePolicy(c);
+  assert.deepEqual(p.admins, ["boss@example.com"]);
+  assert.equal(p.stale_days, 7);
+  assert.deepEqual(p.gates, { require_decision: true });
+  assert.deepEqual(p.report, { paper: "letter", pdf: true });
+  const d = clone(example);
+  delete d.policy;
+  d.categories.project = d.categories.project.filter((x) => x.key !== "research");
+  assert.ok(!resolvePolicy(d).target_date_required_categories.includes("research"));
+});
+
+test("example config carries the policy block with the defaults", () => {
+  assert.ok(example.policy, "instance.example has a policy block");
+  const c = clone(example);
+  delete c.policy;
+  const defaults = resolvePolicy(c);
+  assert.deepEqual({ ...resolvePolicy(example), admins: [] }, defaults);
+});
+
+test("invalid default_role rejected with readable message", () => {
+  const c = clone(example);
+  c.policy = { ...c.policy, default_role: "owner" };
+  const problems = validateConfig(c);
+  assert.ok(
+    problems.some((p) => p.includes("policy.default_role") && p.includes("viewer, editor, decider, admin")),
+    problems.join("\n"),
+  );
+});
+
+test("validateConfig checks the other policy fields", () => {
+  const c = clone(example);
+  c.policy = {
+    admins: ["not-an-email"],
+    locales: ["fr"],
+    stale_days: 0,
+    schedule_strict_default: "no",
+    target_date_required_categories: ["unknown-type"],
+    gates: { require_decision: "yes" },
+    retention_days: -1,
+    hide_empty_categories: "fold",
+    report: { paper: "a3", pdf: 1 },
+    score_scales: { value: { 5: "middle" } },
+  };
+  c.categories.project[0].stale_days = "soon";
+  const problems = validateConfig(c).join("\n");
+  for (const f of [
+    "policy.admins",
+    "policy.locales",
+    "policy.stale_days",
+    "policy.schedule_strict_default",
+    "policy.target_date_required_categories",
+    "policy.gates.require_decision",
+    "policy.retention_days",
+    "policy.hide_empty_categories",
+    "policy.report.paper",
+    "policy.report.pdf",
+    "policy.score_scales.value.5",
+    "categories.project[0].stale_days",
+  ])
+    assert.ok(problems.includes(f), `${f} missing in:\n${problems}`);
 });

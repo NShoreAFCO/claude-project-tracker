@@ -196,6 +196,7 @@ The setup asks a few questions. Press Enter to accept the value in `[brackets]`.
 | Name shown in the dashboard header | e.g. `Acme Project Tracker` |
 | Dashboard language | `en` (English) or `de` (German) |
 | Email addresses allowed | everyone who may use the tracker, comma-separated, e.g. `jane@example.com, joe@example.com`. You can change this later. |
+| Admin email(s) | who administers the tracker (manages people's roles, later also the trash). Enter keeps the offered address (the first allowed one). Each admin must also be an allowed address. Everyone else starts as an editor. |
 | Short name for the tracker | becomes part of the web address, e.g. `project-tracker` → `https://project-tracker.<subdomain>.workers.dev` |
 | Switch off any project types / work types | Enter keeps all. Type keys such as `sales-customer, other` to hide types you don't use (README: "Choosing your project and work-package types"). |
 | Cloudflare API token | paste the token from step 6. Only `*` appear. Press Enter. |
@@ -311,7 +312,7 @@ git push
 2. Run `npm run setup` again and press Enter through the questions; the new list is shown as the default. It updates the Access policy and redeploys.
 3. Commit the change (step 12).
 
-People you remove can no longer sign in. Claude connections that were already signed in keep working until their login expires. To cut them off at once, see "Revoke all Claude connections" below.
+People you remove can no longer sign in, and their Claude connections stop working as soon as the new list is deployed. Their entry in the tracker's people list stays, so history still shows who did what.
 
 ## 14. Updates
 

@@ -250,6 +250,103 @@
       }
     ]
   },
+  "policy": {
+    "admins": [],
+    "default_role": "editor",
+    "locales": [
+      "en",
+      "de"
+    ],
+    "stale_days": 14,
+    "schedule_strict_default": false,
+    "target_date_required_categories": [
+      "research",
+      "product-development",
+      "product-launch",
+      "quality-regulatory"
+    ],
+    "gates": {
+      "require_decision": true
+    },
+    "retention_days": 30,
+    "hide_empty_categories": "collapse",
+    "report": {
+      "paper": "a4",
+      "pdf": true
+    },
+    "score_scales": {
+      "value": {
+        "0": {
+          "en": "No noticeable benefit",
+          "de": "Kein erkennbarer Nutzen"
+        },
+        "5": {
+          "en": "Clear benefit for one team or use",
+          "de": "Deutlicher Nutzen für ein Team oder einen Einsatz"
+        },
+        "10": {
+          "en": "Large benefit across the organisation",
+          "de": "Großer Nutzen für die ganze Organisation"
+        }
+      },
+      "quality": {
+        "0": {
+          "en": "Not usable yet",
+          "de": "Noch nicht brauchbar"
+        },
+        "5": {
+          "en": "Usable with known gaps",
+          "de": "Brauchbar mit bekannten Lücken"
+        },
+        "10": {
+          "en": "Complete, reviewed and reliable",
+          "de": "Vollständig, geprüft und verlässlich"
+        }
+      },
+      "risk": {
+        "0": {
+          "en": "No relevant risk",
+          "de": "Kein relevantes Risiko"
+        },
+        "5": {
+          "en": "Noticeable risk, under control",
+          "de": "Spürbares Risiko, beherrscht"
+        },
+        "10": {
+          "en": "High risk that could stop the project",
+          "de": "Hohes Risiko, das das Projekt stoppen kann"
+        }
+      },
+      "effort": {
+        "0": {
+          "en": "Minimal effort",
+          "de": "Minimaler Aufwand"
+        },
+        "5": {
+          "en": "Several days to weeks of work",
+          "de": "Einige Tage bis Wochen Arbeit"
+        },
+        "10": {
+          "en": "Very large effort over months",
+          "de": "Sehr großer Aufwand über Monate"
+        }
+      },
+      "token_efficiency": {
+        "0": {
+          "en": "Token use far above the result",
+          "de": "Tokenverbrauch weit über dem Ergebnis"
+        },
+        "5": {
+          "en": "Token use in line with the result",
+          "de": "Tokenverbrauch angemessen zum Ergebnis"
+        },
+        "10": {
+          "en": "Very lean token use for the result",
+          "de": "Sehr sparsamer Tokenverbrauch für das Ergebnis"
+        }
+      }
+    }
+  },
   "deploy": {
     "workerName": "project-tracker",
     "publicUrl": "",

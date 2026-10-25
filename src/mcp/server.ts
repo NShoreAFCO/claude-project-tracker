@@ -1,9 +1,13 @@
 import { createMcpHandler } from "agents/mcp/server";
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/server";
 import type { z } from "zod";
-import type { Env } from "../types";
+import type { Caller, Env } from "../types";
 import { readContext } from "../data/context-read";
 import { registerTools } from "./tools";
+import { mcpActor, mcpCaller } from "../auth/caller";
+import { isAllowedEmail } from "../auth/access";
+
+export { mcpActor };
 
 export const SERVER_INSTRUCTIONS = [
   "Project tracker for Claude-assisted projects (projects, work packages, branches, scores, token cost, context documents).",
@@ -18,6 +22,8 @@ export interface ToolCtx {
   /** Actor for attribution: mcp:<client name>. */
   actor: string;
   email: string;
+  /** Caller for data writes (actor plus the OAuth login's person). */
+  by: Caller;
 }
 
 export type ToolHandler<S extends z.ZodObject> = (args: z.infer<S>, tc: ToolCtx) => Promise<unknown>;
@@ -34,25 +40,20 @@ interface GrantProps {
   clientName?: string;
 }
 
-export function mcpActor(clientName: string | undefined): string {
-  const name = (clientName ?? "")
-    .replace(/[^\w .@-]/g, "")
-    .trim()
-    .slice(0, 60);
-  return `mcp:${name || "client"}`;
-}
-
 export function errorText(e: unknown): string {
   const err = e as { status?: number; message?: string; current?: unknown };
   if (err?.status === 409) return JSON.stringify({ error: "conflict", message: err.message, current: err.current });
   if (err?.status)
-    return JSON.stringify({ error: err.status === 404 ? "not_found" : err.status === 413 ? "too_large" : "invalid", message: err.message });
+    return JSON.stringify({
+      error: err.status === 404 ? "not_found" : err.status === 413 ? "too_large" : err.status === 403 ? "forbidden" : "invalid",
+      message: err.message,
+    });
   return JSON.stringify({ error: "internal", message: "Unexpected error" });
 }
 
-function buildServer(env: Env, props: GrantProps): McpServer {
+function buildServer(env: Env, props: GrantProps, by: Caller): McpServer {
   const server = new McpServer({ name: "project-tracker", version: "0.1.0" }, { instructions: SERVER_INSTRUCTIONS });
-  const tc: ToolCtx = { env, db: env.DB, actor: mcpActor(props.clientName), email: props.email ?? "" };
+  const tc: ToolCtx = { env, db: env.DB, actor: by.actor, email: props.email ?? "", by };
 
   const reg: Reg = (name, config, handler) => {
     server.registerTool(
@@ -91,10 +92,14 @@ function buildServer(env: Env, props: GrantProps): McpServer {
 
 /** apiHandler for OAuthProvider: only reached with a valid bearer token; ctx.props = grant props. */
 export const mcpApiHandler = {
-  fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const props = ((ctx as unknown as { props?: GrantProps }).props ?? {}) as GrantProps;
     const host = new URL(env.PUBLIC_URL).hostname;
-    return createMcpHandler(() => buildServer(env, props), {
+    // A grant outlives an allow-list change: removing the email ends MCP access too (the person row stays).
+    if (!isAllowedEmail(env, props.email)) return Response.json({ error: "forbidden" }, { status: 403 });
+    // Person resolution happens once per request, before the per-request server is built.
+    const by = await mcpCaller(env.DB, props);
+    return createMcpHandler(() => buildServer(env, props, by), {
       route: "/mcp",
       allowedHostnames: [host, "localhost", "127.0.0.1"],
     })(request, env, ctx);

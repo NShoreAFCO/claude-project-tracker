@@ -135,6 +135,8 @@ export interface EventRow {
   id: number;
   ts: string;
   actor: string;
+  /** The human behind the write (login person, or on_behalf_of for service tokens); null for none. */
+  person_id: string | null;
   project_id: string | null;
   entity: string;
   entity_id: string | null;
@@ -174,6 +176,38 @@ export interface ContextRevisionRow {
 
 /** Who performed a write: mcp:<client>, user:<email>, hook:claude-code, webhook:github. */
 export type Actor = string;
+
+/** Access role of a person (spec §4.2); stored from R1, enforced from R5. */
+export type Role = "viewer" | "editor" | "decider" | "admin";
+/** Where a write came from: dashboard user, MCP client, service token (hook, webhook), or the system itself. */
+export type Channel = "dashboard" | "mcp" | "service" | "system";
+/** Who performs a write: the technical actor string plus the human behind it, when known. */
+export interface Caller {
+  actor: string;
+  personId: string | null;
+  role: Role | null;
+  channel: Channel;
+}
+
+export interface PersonRow {
+  id: string;
+  name: string;
+  display_name: string | null;
+  company: string | null;
+  email: string | null;
+  phone: string | null;
+  contact_note: string | null;
+  internal: number;
+  function: string | null;
+  comment: string | null;
+  access_role: Role | null;
+  locale: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+  deleted_by: string | null;
+}
 
 /** Identity resolved by the auth layer for a request. */
 export type Identity = { kind: "user"; email: string } | { kind: "service"; clientId: string };

@@ -4,6 +4,7 @@ import { linkBranch } from "../data/branches";
 import { writeContext } from "../data/context-write";
 import { logProgress } from "../data/logs";
 import { eventStmt, utf8Bytes } from "../data/util";
+import { serviceCaller } from "../auth/caller";
 import { findProjectByPath, findProjectByRepo, normalisePath, repoFullName } from "./match";
 
 const ACTOR = "hook:claude-code";
@@ -27,6 +28,7 @@ const str = (v: unknown, max: number): string | null => (typeof v === "string" &
 /** POST /api/hooks/claude-code (SPEC §6). Matches by repo_url, then by local_path. */
 export async function handleClaudeCodeHook(body: HookBody, env: Env): Promise<Record<string, unknown>> {
   const db = env.DB;
+  const by = await serviceCaller(db, ACTOR);
   const sessionId = str(body.session_id, 100);
   const cwd = str(body.cwd, 500);
   const repoUrl = str(body.repo_url, 500);
@@ -49,7 +51,7 @@ export async function handleClaudeCodeHook(body: HookBody, env: Env): Promise<Re
   if (!project) {
     await db.batch([
       eventStmt(db, {
-        actor: ACTOR,
+        by,
         project_id: null,
         entity: "hook",
         entity_id: sessionId,
@@ -76,7 +78,7 @@ export async function handleClaudeCodeHook(body: HookBody, env: Env): Promise<Re
       db,
       project.id,
       { repo, name: branch, kind: isWorktree ? "worktree" : "branch", last_commit: lastCommit, last_activity: new Date().toISOString() },
-      ACTOR,
+      by,
     );
     result.branch_id = b.id;
   }
@@ -84,7 +86,7 @@ export async function handleClaudeCodeHook(body: HookBody, env: Env): Promise<Re
   await logProgress(
     db,
     { project_id: project.id, summary: `Claude Code session ended (${reason})${branch ? ` on ${branch}` : ""}`, session_id: sessionId },
-    ACTOR,
+    by,
   );
 
   const file = body.context_file;
@@ -111,7 +113,7 @@ export async function handleClaudeCodeHook(body: HookBody, env: Env): Promise<Re
           source: "sync",
           filename: name,
         },
-        ACTOR,
+        by,
       );
       result.context_doc_id = doc.id;
     }

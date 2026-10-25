@@ -1,6 +1,7 @@
-import type { Env } from "../types";
+import type { Caller, Env } from "../types";
 import { findBranch, linkBranch } from "../data/branches";
 import { eventStmt } from "../data/util";
+import { serviceCaller } from "../auth/caller";
 import { findProjectByRepo, repoFullName } from "../api/match";
 
 const ACTOR = "webhook:github";
@@ -72,11 +73,12 @@ export async function processGithubEvent(db: D1Database, event: string, p: GhPay
   const htmlUrl = p.repository?.html_url ?? "";
   const repo = p.repository?.full_name ?? repoFullName(htmlUrl) ?? "";
   const project = htmlUrl ? await findProjectByRepo(db, htmlUrl) : null;
+  const by = await serviceCaller(db, ACTOR);
 
   if (!project) {
     await db.batch([
       eventStmt(db, {
-        actor: ACTOR,
+        by,
         project_id: null,
         entity: "webhook",
         entity_id: repo || null,
@@ -93,27 +95,27 @@ export async function processGithubEvent(db: D1Database, event: string, p: GhPay
   switch (event) {
     case "create":
       if (p.ref_type === "branch" && p.ref) {
-        await linkBranch(db, pid, { repo, name: p.ref, base: p.master_branch ?? defaultBranch ?? null, status: "open" }, ACTOR);
+        await linkBranch(db, pid, { repo, name: p.ref, base: p.master_branch ?? defaultBranch ?? null, status: "open" }, by);
       }
       break;
     case "delete":
-      if (p.ref_type === "branch" && p.ref) await closeBranch(db, pid, repo, p.ref);
+      if (p.ref_type === "branch" && p.ref) await closeBranch(db, by, pid, repo, p.ref);
       break;
     case "push": {
       const name = p.ref?.startsWith("refs/heads/") ? p.ref.slice(11) : null;
       if (!name) break;
-      if (p.deleted) await closeBranch(db, pid, repo, name);
+      if (p.deleted) await closeBranch(db, by, pid, repo, name);
       else if (name !== defaultBranch) {
         await linkBranch(
           db,
           pid,
           { repo, name, last_commit: commitLabel(p.head_commit), last_activity: utcIso(p.head_commit?.timestamp) },
-          ACTOR,
+          by,
         );
       } else {
         await db.batch([
           eventStmt(db, {
-            actor: ACTOR,
+            by,
             project_id: pid,
             entity: "repo",
             entity_id: repo,
@@ -142,14 +144,14 @@ export async function processGithubEvent(db: D1Database, event: string, p: GhPay
           status,
           last_activity: new Date().toISOString(),
         },
-        ACTOR,
+        by,
       );
       break;
     }
     case "fork": {
       const f = p.forkee;
       if (f?.full_name)
-        await linkBranch(db, pid, { repo: f.full_name, name: f.default_branch ?? "main", kind: "fork", note: f.html_url ?? null }, ACTOR);
+        await linkBranch(db, pid, { repo: f.full_name, name: f.default_branch ?? "main", kind: "fork", note: f.html_url ?? null }, by);
       break;
     }
     default:
@@ -159,13 +161,13 @@ export async function processGithubEvent(db: D1Database, event: string, p: GhPay
 }
 
 /** Branch deleted on GitHub: closed, unless it was already merged. */
-async function closeBranch(db: D1Database, pid: string, repo: string, name: string): Promise<void> {
+async function closeBranch(db: D1Database, by: Caller, pid: string, repo: string, name: string): Promise<void> {
   const b = await findBranch(db, repo, name);
-  if (b && b.status !== "merged") await linkBranch(db, pid, { repo, name, status: "closed" }, ACTOR);
+  if (b && b.status !== "merged") await linkBranch(db, pid, { repo, name, status: "closed" }, by);
   if (!b) {
     await db.batch([
       eventStmt(db, {
-        actor: ACTOR,
+        by,
         project_id: pid,
         entity: "branch",
         entity_id: null,

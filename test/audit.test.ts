@@ -6,7 +6,7 @@ import { upsertMilestone } from "../src/data/milestones";
 import { createProject } from "../src/data/projects";
 import { deleteContext, writeContext } from "../src/data/context-write";
 import { deleteEntity } from "../src/data/entities";
-import { call, installTestKeys, userJwt } from "./helpers";
+import { call, installTestKeys, testCaller, userJwt } from "./helpers";
 
 const REPO = "example-org/tracker-audit";
 const API = `https://api.github.com/repos/${REPO}`;
@@ -112,7 +112,7 @@ class FakeGitHub {
 
 let gh: FakeGitHub;
 const db = env.DB;
-const actor = "user:user@example.com";
+const actor = testCaller({ actor: "user:user@example.com" });
 
 async function resetDb() {
   await db.batch([
@@ -267,9 +267,9 @@ describe("audit export (SPEC §8)", () => {
 
 describe("snapshot", () => {
   it("includes milestones with their links", async () => {
-    const p = await createProject(env.DB, { title: "Snap MS" }, "user:t@example.com");
-    const w = await upsertWorkpackage(env.DB, p.id, { title: "w" }, "user:t@example.com");
-    await upsertMilestone(env.DB, p.id, { title: "Snap M", requires: [w.id] }, "user:t@example.com");
+    const p = await createProject(env.DB, { title: "Snap MS" }, testCaller({ actor: "user:t@example.com" }));
+    const w = await upsertWorkpackage(env.DB, p.id, { title: "w" }, testCaller({ actor: "user:t@example.com" }));
+    await upsertMilestone(env.DB, p.id, { title: "Snap M", requires: [w.id] }, testCaller({ actor: "user:t@example.com" }));
     const snap = JSON.parse(await buildSnapshot(env.DB));
     const proj = snap.projects.find((x: { id: string }) => x.id === p.id);
     expect(proj.milestones).toMatchObject([{ title: "Snap M", requires: [w.id], unlocks: [] }]);
