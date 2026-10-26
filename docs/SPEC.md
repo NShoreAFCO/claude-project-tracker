@@ -51,12 +51,12 @@ Team domain: `<team>.cloudflareaccess.com`.
 
 These must stay reachable because Anthropic's cloud (claude.ai connectors) and GitHub cannot complete an Access login. Each bypass path authenticates on its own:
 
-| Path | Protection |
-|---|---|
-| `/mcp` | OAuth bearer token issued by `workers-oauth-provider`. Without a token it returns 401. |
+| Path                              | Protection                                                                                                       |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `/mcp`                            | OAuth bearer token issued by `workers-oauth-provider`. Without a token it returns 401.                           |
 | `/oauth/token`, `/oauth/register` | OAuth protocol rules. Registration alone grants no access; a token requires the Access-gated `/authorize` login. |
-| `/.well-known/*` | Public OAuth metadata (endpoint URLs only, no data). |
-| `/webhooks/github` | HMAC-SHA256 over the body (`GITHUB_WEBHOOK_SECRET`), checked before any processing. |
+| `/.well-known/*`                  | Public OAuth metadata (endpoint URLs only, no data).                                                             |
+| `/webhooks/github`                | HMAC-SHA256 over the body (`GITHUB_WEBHOOK_SECRET`), checked before any processing.                              |
 
 **Design points**
 
@@ -190,39 +190,40 @@ R1 adds owner, closure and trash fields and tools (§15–§17); the 23-tool tot
 
 zod schemas, short imperative descriptions, compact JSON output.
 
-| Tool | Purpose |
-|---|---|
-| `list_projects(status?, tag?)` | id, title, status, progress, target_date, last_activity |
-| `get_project(id)` | Project + WP tree + branches + current scores + last 10 events + **context doc index** (titles and sizes, no content) |
-| `create_project(...)` | §4 fields; id auto-slugged |
-| `update_project(id, patch, expected_version?)` | Partial update |
-| `upsert_workpackage(project_id, id?, ...)` | Supports `parent_id`, `blocked_by` |
-| `move_workpackages(project_id, to_project_id, ids)` | Move open WPs with their sub-WPs to a follow-up project (§16) |
-| `get_portfolio_summary()` | Read-only portfolio counters (§22) |
-| `list_persons(users_only?)`, `upsert_person(id?, name, …)` | People and stakeholders (§15) |
-| `delete_entity(kind, id, confirm)` | `confirm: true` required; moves to the trash (§17) |
-| `restore_entity(kind, id)` | Take an item out of the trash (§17) |
-| `log_progress(project_id, summary, workpackage_id?, progress?, session_id?)` | Main "log what we did" tool |
-| `link_branch(project_id, repo, name, kind?, base?, pr_number?, pr_url?, status?, note?)` | Upsert |
-| `set_scores(project_id, scores[])` | Append score rows |
-| `log_token_cost(project_id, claude_tokens?, copilot_prompts?, note?, workpackage_id?)` | Record usage per project or work package |
-| `search(query)` | LIKE search over title, summary, description **and context content**; returns snippets |
+| Tool                                                                                     | Purpose                                                                                                               |
+| ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `list_projects(status?, tag?)`                                                           | id, title, status, progress, target_date, last_activity                                                               |
+| `get_project(id)`                                                                        | Project + WP tree + branches + current scores + last 10 events + **context doc index** (titles and sizes, no content) |
+| `create_project(...)`                                                                    | §4 fields; id auto-slugged                                                                                            |
+| `update_project(id, patch, expected_version?)`                                           | Partial update                                                                                                        |
+| `upsert_workpackage(project_id, id?, ...)`                                               | Supports `parent_id`, `blocked_by`                                                                                    |
+| `move_workpackages(project_id, to_project_id, ids)`                                      | Move open WPs with their sub-WPs to a follow-up project (§16)                                                         |
+| `get_portfolio_summary()`                                                                | Read-only portfolio counters (§22)                                                                                    |
+| `list_persons(users_only?)`, `upsert_person(id?, name, …)`                               | People and stakeholders (§15)                                                                                         |
+| `delete_entity(kind, id, confirm)`                                                       | `confirm: true` required; moves to the trash (§17)                                                                    |
+| `restore_entity(kind, id)`                                                               | Take an item out of the trash (§17)                                                                                   |
+| `log_progress(project_id, summary, workpackage_id?, progress?, session_id?)`             | Main "log what we did" tool                                                                                           |
+| `link_branch(project_id, repo, name, kind?, base?, pr_number?, pr_url?, status?, note?)` | Upsert                                                                                                                |
+| `set_scores(project_id, scores[])`                                                       | Append score rows                                                                                                     |
+| `log_token_cost(project_id, claude_tokens?, copilot_prompts?, note?, workpackage_id?)`   | Record usage per project or work package                                                                              |
+| `search(query)`                                                                          | LIKE search over title, summary, description **and context content**; returns snippets                                |
 
 ### 5.1 Context tools
 
-| Tool | Purpose |
-|---|---|
-| `list_context(owner_kind, owner_id, inherited?)` | Doc index: id, title, slug, owner, source, bytes, version, updated_at/by |
-| `read_context(doc_id \| {owner_kind, owner_id, slug})` | One doc with its header line |
-| `get_context_bundle(project_id, workpackage_id?, branch_id?, max_bytes?=60000)` | Session bootstrap. Inherited docs (pinned first, then by `sort`) concatenated with headers. If `max_bytes` is exceeded, return only the index for the rest. |
-| `write_context(owner_kind, owner_id, title, content_md, slug?, expected_version?, pinned?)` | Create or replace |
-| `append_context(doc_id \| {owner, slug}, text, heading?)` | Append a section stamped with timestamp and actor. Creates the doc if missing. For running handover logs, so multiple sessions add without overwriting each other. One atomic `UPDATE … SET content_md = content_md || ?`, never read-modify-write. |
-| `delete_context(doc_id, confirm)` | Moves the doc to the trash (§17) |
-| `set_context_meta(doc_id, title?, pinned?, sort?, status?)` | Title, pin, sort, document status (§17) |
+| Tool                                                                                        | Purpose                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_context(owner_kind, owner_id, inherited?)`                                            | Doc index: id, title, slug, owner, source, bytes, version, updated_at/by                                                                                                                                            |
+| `read_context(doc_id \| {owner_kind, owner_id, slug})`                                      | One doc with its header line                                                                                                                                                                                        |
+| `get_context_bundle(project_id, workpackage_id?, branch_id?, max_bytes?=60000)`             | Session bootstrap. Inherited docs (pinned first, then by `sort`) concatenated with headers. If `max_bytes` is exceeded, return only the index for the rest.                                                         |
+| `write_context(owner_kind, owner_id, title, content_md, slug?, expected_version?, pinned?)` | Create or replace                                                                                                                                                                                                   |
+| `append_context(doc_id \| {owner, slug}, text, heading?)`                                   | Append a section stamped with timestamp and actor. Creates the doc if missing. For running handover logs, so multiple sessions add without overwriting each other. One atomic `UPDATE … SET content_md = content_md |     | ?`, never read-modify-write. |
+| `delete_context(doc_id, confirm)`                                                           | Moves the doc to the trash (§17)                                                                                                                                                                                    |
+| `set_context_meta(doc_id, title?, pinned?, sort?, status?)`                                 | Title, pin, sort, document status (§17)                                                                                                                                                                             |
 
 Each doc is also exposed as an MCP resource `tracker://context/{doc_id}`.
 
 **Session convention.** Encoded in each tool's description and in the `instructions` field of the MCP server:
+
 - At the start of work on a project, call `get_context_bundle`.
 - Before ending, `append_context` to the doc slug `handover` on the project or work package with: what was done, decisions, open points, and the session ID.
 
@@ -320,17 +321,17 @@ Optional. It runs only when both `AUDIT_REPO` and `AUDIT_GITHUB_TOKEN` are set. 
 
 **Access control**
 
-| Request (production) | Expected |
-|---|---|
-| `GET /` without Access login | Access login page (never tracker content) |
-| `GET /api/projects` without Access login | Access login page or 401/403 |
-| `GET /api/projects` with a forged or absent `Cf-Access-Jwt-Assertion` reaching the Worker | 401 (fail closed) |
-| `POST /api/hooks/claude-code` with a valid service token | 200 |
-| `GET /api/projects` with a valid service token | 403 (service tokens only on `/api/hooks/*`) |
-| `POST /mcp` without a bearer token | 401 |
-| `POST /webhooks/github` with a bad signature | 401, nothing parsed |
-| OIDC login as an email not in `ALLOWED_EMAILS` | 403, no grant issued |
-| `DEV_AUTH_EMAIL` set, host ≠ localhost | ignored |
+| Request (production)                                                                      | Expected                                    |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `GET /` without Access login                                                              | Access login page (never tracker content)   |
+| `GET /api/projects` without Access login                                                  | Access login page or 401/403                |
+| `GET /api/projects` with a forged or absent `Cf-Access-Jwt-Assertion` reaching the Worker | 401 (fail closed)                           |
+| `POST /api/hooks/claude-code` with a valid service token                                  | 200                                         |
+| `GET /api/projects` with a valid service token                                            | 403 (service tokens only on `/api/hooks/*`) |
+| `POST /mcp` without a bearer token                                                        | 401                                         |
+| `POST /webhooks/github` with a bad signature                                              | 401, nothing parsed                         |
+| OIDC login as an email not in `ALLOWED_EMAILS`                                            | 403, no grant issued                        |
+| `DEV_AUTH_EMAIL` set, host ≠ localhost                                                    | ignored                                     |
 
 **Function**
 
@@ -444,22 +445,22 @@ Optional. It runs only when both `AUDIT_REPO` and `AUDIT_GITHUB_TOKEN` are set. 
 ## 24. R5 additions: role enforcement and hygiene
 
 - **No migration.** R5 changes behaviour only.
-- **Roles and actions.** Roles rank viewer < editor < decider < admin. Every REST route and MCP tool maps to exactly one action (`src/auth/permissions.ts`, central tables `REST_ACTIONS` and `TOOL_ACTIONS`): `read`, `write`, `decide`, `close`, `verify_sign_off`, `manage_roles`, `purge`. The dispatchers check the action before the handler; an unmapped route or tool is refused (`403`, fail closed). Content-dependent actions are checked again in the data layer. Roles are read on every request (no cache, no session), so a change applies on the next request.
-- **Minimum role.** `read` viewer; `write` editor; `decide`, `close` and `verify_sign_off` decider; `manage_roles` and `purge` admin. Service tokens act as editor and never get `decide`, `close`, `verify_sign_off`, `manage_roles` or `purge`, even with `on_behalf_of` or a raised role. MCP callers (claude.ai OAuth) act with the person's role but never get `manage_roles` or `purge`. The system caller is not restricted.
+- **Roles and actions.** Roles rank viewer < editor < decider < admin. Every REST route and MCP tool maps to exactly one action (`src/auth/permissions.ts`, central tables `REST_ACTIONS` and `TOOL_ACTIONS`): `read`, `write`, `decide`, `close`, `verify_sign_off`, `manage_roles`, `purge`, `restore`. The dispatchers check the action before the handler; an unmapped route or tool is refused (`403`, fail closed). Content-dependent actions are checked again in the data layer. Roles are read on every request (no cache, no session), so a change applies on the next request.
+- **Minimum role.** `read` viewer; `write` editor; `decide`, `close` and `verify_sign_off` decider; `manage_roles`, `purge` and `restore` admin. Service tokens act as editor and never get `decide`, `close`, `verify_sign_off`, `manage_roles`, `purge` or `restore`, even with `on_behalf_of` or a raised role. MCP callers (claude.ai OAuth) act with the person's role but never get `manage_roles` or `purge`; the MCP login of an admin may `restore`. The system caller is not restricted.
 
-| Caller | read | write | decide | close | verify_sign_off | manage_roles | purge |
-|---|---|---|---|---|---|---|---|
-| dashboard viewer | yes | no | no | no | no | no | no |
-| dashboard editor | yes | yes | no | no | no | no | no |
-| dashboard decider | yes | yes | yes | yes | yes | no | no |
-| dashboard admin | yes | yes | yes | yes | yes | yes | yes |
-| MCP viewer | yes | no | no | no | no | no | no |
-| MCP editor | yes | yes | no | no | no | no | no |
-| MCP decider | yes | yes | yes (as the OAuth person) | yes | yes (own person) | no | no |
-| MCP admin | yes | yes | yes (as the OAuth person) | yes | yes (own person) | no (agent) | no (agent) |
-| service token, with or without `on_behalf_of` | yes | yes (as editor) | no | no | no | no | no |
-| system | yes | yes | yes (still needs a person) | yes | yes | yes | yes |
-| no role | no | no | no | no | no | no | no |
+| Caller                                        | read | write           | decide                     | close | verify_sign_off  | manage_roles | purge      | restore           |
+| --------------------------------------------- | ---- | --------------- | -------------------------- | ----- | ---------------- | ------------ | ---------- | ----------------- |
+| dashboard viewer                              | yes  | no              | no                         | no    | no               | no           | no         | no                |
+| dashboard editor                              | yes  | yes             | no                         | no    | no               | no           | no         | no                |
+| dashboard decider                             | yes  | yes             | yes                        | yes   | yes              | no           | no         | no                |
+| dashboard admin                               | yes  | yes             | yes                        | yes   | yes              | yes          | yes        | yes               |
+| MCP viewer                                    | yes  | no              | no                         | no    | no               | no           | no         | no                |
+| MCP editor                                    | yes  | yes             | no                         | no    | no               | no           | no         | no                |
+| MCP decider                                   | yes  | yes             | yes (as the OAuth person)  | yes   | yes (own person) | no           | no         | no                |
+| MCP admin                                     | yes  | yes             | yes (as the OAuth person)  | yes   | yes (own person) | no (agent)   | no (agent) | yes (admin login) |
+| service token, with or without `on_behalf_of` | yes  | yes (as editor) | no                         | no    | no               | no           | no         | no                |
+| system                                        | yes  | yes             | yes (still needs a person) | yes   | yes              | yes          | yes        | yes               |
+| no role                                       | no   | no              | no                         | no    | no               | no           | no         | no                |
 
 - **Content-dependent actions.** `close`: moving a project into `done` or `abandoned` (at creation or later) and moving it out again (reopening) both need a decider; editing other fields of a closed project is a `write`. `verify_sign_off`: recording, changing or re-dating a `sign_off` verification, completing a `sign_off` WP (also via `log_progress` reaching 100) and lowering `verification` away from `sign_off` need a decider; `log_progress` carries an in-batch guard against a WP that became `sign_off` after the read. `review`, `test` and `demo` verification need a person only (service tokens via `on_behalf_of`, §22). The role of the person named in `verified_by` is not checked; the caller's is.
 - **Other mappings.** Restore from the trash is `restore` (admin, spec §4.2; an MCP client with an admin login may restore, service tokens never); purge is `purge` (admin, dashboard only). `PATCH /api/persons/me` is `read`: viewers may change only their own `locale`, `display_name` and `phone`. `POST /api/audit/run` is `write` (it exports to the configured audit repo). `POST /api/workpackages/:id/gate-override` is `write`, still dashboard only. `GET /api/whoami` accepts GET only. `POST /api/hooks/claude-code` needs `write` for a logged-in user, so a viewer cannot write through the hook.

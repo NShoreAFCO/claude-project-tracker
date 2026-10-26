@@ -1,12 +1,84 @@
 # Changelog
 
+## v0.2.0 — 2026-10-26
+
+v0.2.0 bundles the conformity releases R1 to R5 below plus the fixes from the final review. Read "Breaking" and "Upgrade from v0.1.0" before you deploy.
+
+### Fixed / changed in the final review
+
+- Creating or reopening a work package is atomic against a concurrent close of the project: if the project was closed in between, nothing is written and the answer is 409 `PROJECT_CLOSED` (404 when the project is in the trash).
+- Admin bootstrap: a login whose email is in `policy.admins` becomes admin when no live (not deleted) admin exists, and a `person` update event records it. While an admin exists, a deliberate demotion stays.
+- `get_context_bundle` has a "Gates" section: undecided gate milestones and gate-locked work packages (left out when there is nothing to list).
+- Restoring an open work package (or a sub-work-package restored with it) into a `done` or `abandoned` project gives 409 `PROJECT_CLOSED`.
+- Risk links into a work package or milestone in the trash read as empty (REST, MCP, reports) and come back when the item is restored. A risk with such a link stays editable.
+- Work packages created by a `go_with_conditions` decision are linked to the gate milestone with the role `requires`, so a later `hold` does not lock them.
+- Overdue checks (portfolio and project views) and the `verified_at` date check use the UTC date.
+- The gate decision event carries `note_md`, `evidence`, `conditions` and `on_behalf`.
+- Restore from the trash is an admin action, no longer an editor action (see Breaking). The R5 section below is corrected accordingly.
+- The MCP server reports version 0.2.0.
+
+### Breaking (all of v0.2.0)
+
+From R1:
+
+- `wp_counts` on project cards and `list_projects` is now `{open, in_progress, waiting_blocked, done}`. `open` counts leaf work packages with status `todo` only; `in_progress` is `doing`; `waiting_blocked` is `waiting` plus `blocked`; parent work packages and `dropped` are not counted. The old `started` alias is removed. Code that read `open` as "not done" must change.
+- Closed (`done`/`abandoned`) projects refuse new open work packages (409 `PROJECT_CLOSED`); reopen the project first.
+- `npm run setup:check` fails until `policy.admins` is set.
+
+From R2:
+
+- Gate decisions need a project decision maker (409 `DECISION_MAKER_MISSING`); once a gate exists the decision maker can be changed but not cleared (409 `DECISION_MAKER_REQUIRED`).
+- Writes with unknown `depends_on` ids and dependency cycles are refused (400). Stored legacy values are kept and reported as `DEP_UNKNOWN`.
+
+From R3:
+
+- The card field `last_activity` means the last progress (`last_progress_at`), not the latest event.
+- A project with open risks shows a derived `risk` score; the manual score applies again once none are open.
+
+From R5:
+
+- Viewers lose write access everywhere (403).
+- Reopening a closed project needs a decider.
+- Viewers no longer see `local_path`, `session_id` or `repo_url`.
+
+New in the final review:
+
+- Restore from the trash is admin-only: REST, MCP `restore_entity` and the dashboard. Service tokens never restore; the MCP login of an admin may. Editors, deciders, viewers and MCP logins of non-admins get 403, and the dashboard shows the Restore button to admins only.
+
+### Also in this release
+
+Earlier sections did not list these.
+
+- Error codes `PARENT_DELETED` (restore while the parent is in the trash), `SLUG_TAKEN` (restore of a context document whose slug was reused) and `TARGET_CLOSED` (moving work packages into a closed project), all 409.
+- A context document deleted on its own gives up its slug (renamed `<slug>~deleted-<time>`), so a new document can take it.
+- The agent view of persons (service tokens and MCP) leaves out phone, contact note and deletion data; the audit export shows contact data changes only as `[changed]`.
+- Changing a person's access role or a user's email, and deleting a user's person, are admin-only; agents never do them.
+
+### Known limitations (planned for v0.2.x)
+
+- The audit export has no snapshot tables for decisions, risks and baselines; decisions are in the events.
+- Editing a risk in the dashboard while its linked work package or milestone is in the trash clears that link.
+- The context bundle lists undecided gates even when `policy.gates.require_decision` is false.
+- The `PROJECT_CLOSED` check on restore runs just before the write, not inside it.
+- The role-bootstrap event is recorded with channel `dashboard` even when the trigger is an MCP login.
+
+### Upgrade from v0.1.0
+
+1. Back up first: `npm run backup`.
+2. Apply the migrations 0003 to 0006: `npm run db:migrate:remote`. They are additive; the previous Worker version keeps running on them.
+3. Review the new `policy` keys in `instance/instance.config.json` (defaults in `instance.example/`): `admins`, `default_role`, `locales`, `stale_days`, `schedule_strict_default`, `target_date_required_categories`, `gates.require_decision`, `retention_days`, `hide_empty_categories`, `report.paper`, `report.pdf`, `score_scales`.
+4. Make sure `policy.admins` holds at least one email.
+5. Assign the `decider` role in the People view to everyone who should close projects, decide gates or verify sign-offs.
+6. Reconnect MCP clients: the tool list changed (28 tools).
+7. Run `npm test` and `npm run check`, then deploy.
+
 ## R5
 
 ### Added
 
 - Dashboard by role: one client helper (`public/js/access.js`, mirrors the server's minimum roles) hides or disables write, close, decide, sign_off and purge controls; the header shows your name, role and a language switch (`policy.locales`, saved to your profile, applied without a reload). Empty project categories hide or collapse per `policy.hide_empty_categories`; active projects without a target date in a `policy.target_date_required_categories` category get an amber hint. The public instance config now carries `policy.locales`, `hide_empty_categories` and `target_date_required_categories`.
-- Role enforcement: every REST route and MCP tool maps to one action (`read | write | decide | close | verify_sign_off | manage_roles | purge`) with a minimum role (viewer < editor < decider < admin); an unmapped route or tool answers 403. Service tokens act as editor and never decide, close, verify a `sign_off`, manage roles or purge, even with `on_behalf_of`. MCP logins act with the person's role but never manage roles or purge. Roles are read on every request. The full matrix is in `docs/SPEC.md` section 24.
-- Closing a project (`done`, `abandoned`) and reopening it need a decider. Recording, changing or lowering a `sign_off` verification needs a decider; `review`, `test` and `demo` verification need a person. Restore from the trash is an editor action, purge an admin action. Viewers may edit only their own language, display name and phone (`PATCH /api/persons/me`). The Claude Code hook checks the user's role.
+- Role enforcement: every REST route and MCP tool maps to one action (`read | write | decide | close | verify_sign_off | manage_roles | purge | restore`) with a minimum role (viewer < editor < decider < admin); an unmapped route or tool answers 403. Service tokens act as editor and never decide, close, verify a `sign_off`, manage roles, purge or restore, even with `on_behalf_of`. MCP logins act with the person's role but never manage roles or purge. Roles are read on every request. The full matrix is in `docs/SPEC.md` section 24.
+- Closing a project (`done`, `abandoned`) and reopening it need a decider. Recording, changing or lowering a `sign_off` verification needs a decider; `review`, `test` and `demo` verification need a person. Restore from the trash and purge are admin actions (restore was an editor action before v0.2.0). Viewers may edit only their own language, display name and phone (`PATCH /api/persons/me`). The Claude Code hook checks the user's role.
 - Hygiene: a project in a `policy.target_date_required_categories` category needs a target date to become `active` (400); `create_project` without status then gives `idea` plus a warning. Project `language` is checked against `policy.locales`.
 - The OAuth consent and error pages use the instance default language and the instance string overrides.
 - Setup, backup and deploy scripts fall back to wrangler's own login (`wrangler login`) with the account from the instance config when no saved token file exists.

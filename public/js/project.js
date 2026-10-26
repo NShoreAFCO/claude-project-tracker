@@ -2,6 +2,7 @@
 import { t, fmtDate, fmtDateTime, fmtNum, fmtPct, STRINGS } from "./i18n.js";
 import { renderRisks } from "./risks.js";
 import { basisLabel, riskChip, staleChip, lastActivity } from "./progress-view.js";
+import { utcDateString } from "./portfolio.js";
 import { api } from "./api.js";
 import { h, clear, openModal, statusChip, progressBar, copyText, toast, toastError, menuButton, personBadge, ageDays } from "./dom.js";
 import { closureDialog } from "./closure.js";
@@ -504,8 +505,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       ),
     );
 
-    const todayDate = new Date();
-    const today = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, "0")}-${String(todayDate.getDate()).padStart(2, "0")}`;
+    const today = utcDateString();
 
     const milestoneItems = d.milestones.map((ms) =>
       milestoneItem(ms, {

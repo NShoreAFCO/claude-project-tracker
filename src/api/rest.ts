@@ -222,7 +222,7 @@ route("PATCH", "/api/persons/:id", async ({ db, req, by, params }) => {
 });
 route("DELETE", "/api/persons/:id", async ({ db, by, params }) => deleteEntity(db, "person", params[0], by));
 
-// ---- trash (spec F10): deletes are soft; restore any time, purge (admins) after policy.retention_days
+// ---- trash (spec F10): deletes are soft; restore (admins only), purge (admins) after policy.retention_days
 route("GET", "/api/trash", async ({ db }) => listTrash(db));
 route("POST", "/api/trash/:kind/:id/restore", async ({ db, by, params }) => restoreEntity(db, params[0] as EntityKind, params[1], by));
 route("DELETE", "/api/trash/:kind/:id", async ({ db, by, params }) => purgeEntity(db, params[0] as EntityKind, params[1], by));
