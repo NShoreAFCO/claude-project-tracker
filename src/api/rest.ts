@@ -26,6 +26,7 @@ import { handleUpload } from "./upload";
 import { userCaller } from "../auth/caller";
 import { ensureUserPerson, getPerson, listPersons, upsertPerson } from "../data/persons";
 import { handleClaudeCodeHook, type HookBody } from "./hooks";
+import { printCssResponse, reportResponse } from "../report/respond";
 import { isAuditConfigured, runAuditExport } from "../audit/export";
 
 const MAX_JSON = 1024 * 1024;
@@ -92,6 +93,11 @@ route("GET", "/api/projects", async ({ db, url }) =>
 );
 route("POST", "/api/projects", async ({ db, req, by }) => createProject(db, await readJson(req), by));
 route("GET", "/api/projects/:id", async ({ db, params }) => getProjectDetail(db, params[0]));
+/** F9: read-only project report; format=md|html|pdf. Returns a ready Response (not JSON). */
+route("GET", "/api/projects/:id/report", async ({ db, env, url, params }) =>
+  reportResponse(db, env, params[0], url.searchParams.get("format") ?? "html"),
+);
+route("GET", "/api/report/print.css", async () => printCssResponse());
 route("PATCH", "/api/projects/:id", async ({ db, req, by, params }) => {
   const { expected_version, ...patch } = await readJson(req);
   return updateProject(db, params[0], patch, by, optNum(expected_version));
@@ -364,6 +370,7 @@ export async function handleApi(request: Request, env: Env, identity: Identity &
           !path.endsWith("/move-workpackages") &&
           !path.endsWith("/gate-override") &&
           !path.startsWith("/api/trash/");
+        if (out instanceof Response) return out;
         return json(out, created ? 201 : 200);
       }
     }

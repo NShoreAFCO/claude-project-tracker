@@ -216,6 +216,9 @@ export function normaliseEmails(input) {
 /** Fill ${deploy.x.y} placeholders. Arrays join with ","; empty ids become a dummy id so dev/tests run. */
 export function renderWrangler(template, config) {
   const deploy = config.deploy ?? {};
+  if (config.policy?.report?.pdf === false) {
+    template = template.replace(/[ \t]*\/\/ @browser-begin[\s\S]*?\/\/ @browser-end\n/, "");
+  }
   return template.replace(/\$\{deploy\.([a-zA-Z0-9_.]+)\}/g, (_, path) => {
     let v = path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), deploy);
     if (Array.isArray(v)) v = v.join(",");

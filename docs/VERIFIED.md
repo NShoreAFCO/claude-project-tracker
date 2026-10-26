@@ -121,3 +121,14 @@ Verified 2026-10-24 against the API reference (developers.cloudflare.com/api) an
 ## Secret input under the Claude Code `!` prefix
 
 Checked 2026-10-24 with `! node scripts/lib/prompt.mjs --selftest` on Windows 11: commands run with `!` get no interactive terminal (stdin is not a TTY), so `askSecret` refuses with "Secret input needs an interactive terminal…" before reading anything. `npm run setup`, `teardown`, `secrets:rotate` and `hook:install` therefore cannot be run through `!`; they run in a separate terminal window only.
+
+## Browser Rendering (server-side PDF reports)
+
+Verified 2026-10-26 on developers.cloudflare.com.
+
+- Binding: wrangler key `"browser": { "binding": "BROWSER" }` (https://developers.cloudflare.com/browser-rendering/workers-bindings/). No API token is needed for a binding.
+- Chosen API: the **quick action** `env.BROWSER.quickAction("pdf", { html, addStyleTag, pdfOptions })` (https://developers.cloudflare.com/browser-run/quick-actions/pdf-endpoint/). It needs `compatibility_date` 2026-03-24 or later (this repo uses 2026-10-01) and **no new dependency**, so `@cloudflare/puppeteer` is not added. The docs say one of `url` or `html` is required; the binding example only shows `url`, and the call returns a `Response` (inferred from the handler type, not stated). The Worker therefore reads `response.arrayBuffer()` and checks `ok`.
+- `pdfOptions` keys listed in the REST examples (https://developers.cloudflare.com/browser-rendering/rest-api/pdf-endpoint/): `format`, `landscape`, `printBackground`, `preferCSSPageSize`, `scale`, `displayHeaderFooter`, `headerTemplate`, `footerTemplate`, `margin`, `timeout`. The docs do not show them with the binding call; the binding is described as the same endpoint. **Unverified until a real render**: that the binding accepts `html` and `pdfOptions`.
+- The report page is Access-protected, so the browser cannot fetch it by `url`; the Worker passes the report HTML and the print CSS (`addStyleTag`) inline.
+- Local dev: `wrangler dev` has no local browser; a real one needs `"remote": true` on the binding (which uses a Cloudflare account). The template does not set it. Tests use a binding stub.
+- Limits, Workers Free (https://developers.cloudflare.com/browser-rendering/limits/): 10 browser minutes per day, 3 concurrent browsers, new browser 1 per 20 s (Browser Sessions), **quick action requests 1 per 10 s**, browser timeout 60 s; exceeding returns HTTP 429 (daily cap until the next UTC day). The endpoint maps a 429 or any failure to 503.
