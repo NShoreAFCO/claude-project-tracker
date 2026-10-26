@@ -234,6 +234,9 @@ export function registerTools(reg: Reg): void {
             target_date: optionalDate("Set the target date as YYYY-MM-DD."),
             progress_mode: progressModeSchema.optional().describe("Set the progress calculation mode."),
             progress_manual: z.number().min(0).max(100).nullable().optional().describe("Set manual progress from 0 to 100."),
+            progress_manual_reason: optionalText(
+              "Explain why progress is set by hand. Required when switching to manual mode or changing the manual progress.",
+            ),
             tags: z.array(z.string()).optional().describe("Set the project tags."),
             category: projectCategorySchema.nullable().optional().describe("Set the project category."),
             owner: personRef("Set the project owner."),
@@ -272,7 +275,14 @@ export function registerTools(reg: Reg): void {
         waiting_reason: optionalText("Set why the WP is deferred (status waiting)."),
         drop_reason: optionalText("Set why the WP is dropped (required for status dropped)."),
         progress: z.number().min(0).max(100).optional().describe("Set progress from 0 to 100."),
-        weight: z.number().positive().optional().describe("Set a positive progress weight."),
+        weight: z.number().positive().optional().describe("Set the effort in person-days (PD); it also weights progress."),
+        effort_planned_pd: z.number().min(0).nullable().optional().describe("Set the planned effort in person-days."),
+        effort_actual_pd: z
+          .number()
+          .min(0)
+          .nullable()
+          .optional()
+          .describe("Set the actual effort in person-days (log_progress effort_pd adds to it)."),
         start_date: optionalDate("Set the start date as YYYY-MM-DD."),
         end_date: optionalDate("Set the end date as YYYY-MM-DD."),
         depends_on: z
@@ -489,6 +499,12 @@ export function registerTools(reg: Reg): void {
         summary: z.string().min(1).describe("Summarize the completed work."),
         workpackage_id: optionalText("Link a work package."),
         progress: z.number().min(0).max(100).optional().describe("Set progress from 0 to 100."),
+        effort_pd: z
+          .number()
+          .positive()
+          .max(1000)
+          .optional()
+          .describe("Add person-days of effort spent to the work package's actual effort (needs workpackage_id)."),
         session_id: optionalText("Link the session identifier."),
         on_behalf_of: onBehalfOf,
       }),
