@@ -1,5 +1,25 @@
 # Changelog
 
+## R4
+
+### Added
+
+- Acceptance: project `objectives_md`, `scope_in_md`, `scope_out_md`, `success_criteria_md` and `language`; work package `deliverable`, `acceptance_criteria_md`, `verification` (`none | review | test | demo | sign_off`), `verified_by` and `verified_at`.
+- Verification: completing a work package with a verification method (status `done`, or `log_progress` reaching 100) needs a person as verifier. Dashboard users and MCP logins verify as themselves, service tokens need `on_behalf_of`; otherwise 409 `VERIFICATION_REQUIRED`. Agents may name only their own person, cannot change another person's verification (403) and can raise but never lower the method (403). Reopening clears the verification.
+- Portfolio overview: `GET /api/portfolio/summary` (`by_status`, overdue milestones, gates awaiting decision, blocked, stale, missing target date, missing owner, schedule issues, open high risks, each with count and project ids), `GET /api/workpackages/upcoming` and `GET /api/workpackages/mine`.
+- Reports: `GET /api/projects/:id/report?format=md|html|pdf` in the project's language (else the instance default), names only, no contact data. PDF is rendered by the Cloudflare Browser Rendering binding `BROWSER`; `policy.report.pdf: false` leaves the binding out, and the PDF route then answers 503. `policy.report.paper` (`a4` | `letter`) sets the paper size.
+- Server-side texts (reports) can be overridden per language in `instance/strings.<locale>.json`.
+- MCP tool: `get_portfolio_summary`, read-only (28 tools in total). `create_project`, `update_project` and `upsert_workpackage` take the new fields.
+
+### Changed
+
+- `log_progress` reaching 100 on a work package with a verification method records the verifier like a status change to done.
+
+### Migration
+
+- `0006_r4_acceptance.sql`, additive only; the previous Worker version keeps running on it, but until the new Worker is deployed it can set work packages done without a verifier. Run `npm run db:migrate:remote`, then deploy straight away.
+- PDF reports: no setup step, the binding is part of the generated `wrangler.jsonc`. On the Workers Free plan Browser Rendering allows 10 minutes a day and one PDF every 10 seconds (503 with `Retry-After` beyond that). The real PDF render is not verified yet: open one report as PDF after the first deploy. To switch PDF off, set `policy.report.pdf` to `false` and deploy.
+
 ## R3
 
 ### Added

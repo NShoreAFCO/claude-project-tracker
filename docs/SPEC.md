@@ -186,7 +186,7 @@ CREATE INDEX ctx_owner ON context_doc(owner_kind, owner_id);
 
 ## 5. MCP tools
 
-R1 adds owner, closure and trash fields and tools (§15–§17); the 23-tool total is counted there. R2 adds `create_baseline` (§18) and `record_gate_decision` (§19), 25 tools. R3 adds `upsert_risk` and `list_risks` (§21), 27 tools.
+R1 adds owner, closure and trash fields and tools (§15–§17); the 23-tool total is counted there. R2 adds `create_baseline` (§18) and `record_gate_decision` (§19), 25 tools. R3 adds `upsert_risk` and `list_risks` (§21), 27 tools. R4 adds `get_portfolio_summary` (§22), 28 tools.
 
 zod schemas, short imperative descriptions, compact JSON output.
 
@@ -198,6 +198,7 @@ zod schemas, short imperative descriptions, compact JSON output.
 | `update_project(id, patch, expected_version?)` | Partial update |
 | `upsert_workpackage(project_id, id?, ...)` | Supports `parent_id`, `blocked_by` |
 | `move_workpackages(project_id, to_project_id, ids)` | Move open WPs with their sub-WPs to a follow-up project (§16) |
+| `get_portfolio_summary()` | Read-only portfolio counters (§22) |
 | `list_persons(users_only?)`, `upsert_person(id?, name, …)` | People and stakeholders (§15) |
 | `delete_entity(kind, id, confirm)` | `confirm: true` required; moves to the trash (§17) |
 | `restore_entity(kind, id)` | Take an item out of the trash (§17) |
@@ -229,6 +230,7 @@ Each doc is also exposed as an MCP resource `tracker://context/{doc_id}`.
 
 - CRUD mirroring the MCP tools under:
   - `/api/projects`, `/api/workpackages`, `/api/branches`, `/api/scores`, `/api/token-cost`
+  - `/api/portfolio/summary`, `/api/workpackages/upcoming`, `/api/workpackages/mine` (§22), `GET /api/projects/:id/report` (§23)
   - `/api/persons`, `/api/trash`, `/api/delete-preview` (§15, §17), `POST /api/projects/:id/move-workpackages` (§16)
   - `/api/context`: list, get, create, update, append, delete, revisions, restore, plus bundle as markdown download (`GET /api/context/bundle?project_id=&workpackage_id=&format=md`)
 - `GET /api/events`.
@@ -424,3 +426,17 @@ Optional. It runs only when both `AUDIT_REPO` and `AUDIT_GITHUB_TOKEN` are set. 
 - **Activity.** `last_progress_at` is set by progress-type writes (`log_progress`, status or progress changes, effort logs, gate decisions), `last_changed_at` by any write. Refused writes and system-channel writes change neither.
 - **Staleness.** `stale` is true for an active project whose last progress is more than `stale_days` UTC calendar days ago (`policy.stale_days`; a project type may override it in the instance categories). Project detail and cards carry `last_progress_at`, `last_changed_at` and `stale`.
 - **Breaking.** The card field `last_activity` is now `last_progress_at` (falling back to `created_at`); it was the latest event.
+
+## 22. R4 additions: acceptance, verification, portfolio overview
+
+- **Migration `0006_r4_acceptance.sql`** (additive only): project `objectives_md`, `scope_in_md`, `scope_out_md`, `success_criteria_md`, `language`; work package `deliverable` (at most 500 characters), `acceptance_criteria_md`, `verification` (`none | review | test | demo | sign_off`, default `none`), `verified_by` (person), `verified_at`. `language` must be one of `policy.locales` (null = instance default). `create_project`, `update_project` and `upsert_workpackage` take the new fields. Between running the migration and deploying, the previous Worker can still set a work package done without a verifier.
+- **Verification.** Completing a WP with `verification` other than `none` (status `done`, or `log_progress` reaching 100) needs a person as verifier, else `409` `VERIFICATION_REQUIRED` (`missing: ["verified_by"]`). `verified_by` defaults to the caller's person: the dashboard user, the MCP login, or a service token's `on_behalf_of`; a service token without `on_behalf_of` is refused. It must be a live person (free text, agent names and trashed persons: `400`). `verified_at` defaults to now whenever the verifier is new; an explicit value may not lie in the future. Reopening a WP clears `verified_by` and `verified_at`; the event history keeps them. The rule bites only on a transition to done or a change of the verification fields, so editing other fields of a done legacy WP without a verifier still works.
+- **Agents.** Agents (MCP, service tokens) may name only their own person as verifier, may not change or re-date a verification another person recorded (`403`), and may raise `verification` but never lower it (`403`; ranks none < review < test = demo < sign_off, so test and demo are interchangeable). Dashboard users may lower it. Role checks for the verifier and the decider requirement for `sign_off` come with R5.
+- **Portfolio summary.** `GET /api/portfolio/summary` and MCP `get_portfolio_summary` (read-only, 28 tools in total) return `by_status` and the counters `overdue_milestones`, `gates_awaiting_decision`, `blocked`, `stale`, `missing_target_date`, `missing_owner`, `schedule_issues`, `open_high_risks`, each `{count, project_ids}`. All counters except `by_status` cover open projects only (not done or abandoned); trashed projects and children of trashed projects never count. An overdue milestone is live, due before today (UTC) and not reached; a gate awaits a decision when it is reached and has none; a high risk is open with a score of 15 or more.
+- **Lists.** `GET /api/workpackages/upcoming?project_id=&limit=` lists WPs with an end date, nearest first, without done or dropped (limit 1–200, default 50). `GET /api/workpackages/mine?assigned_only=&sort=project|in_progress|start|end` lists the caller's open WPs: owned by the person, or without own owner in a project the person owns, unless `assigned_only`; an unknown `sort` gives `400`. Both are for dashboard users, not service tokens.
+
+## 23. R4 additions: reports
+
+- **Route.** `GET /api/projects/:id/report?format=md|html|pdf` (dashboard users, read-only). Language: the project's `language`, else the instance default. The report shows names only, no contact data and no internal fields. Texts come from the server-side string table (`src/i18n/server.ts`); `instance/strings.<locale>.json` overrides single keys.
+- **HTML.** No script and no inline style; one `<link>` to the same-origin `GET /api/report/print.css`, which sets the paper size from `policy.report.paper`. The Markdown renderer escapes first and emits no links or images.
+- **PDF.** Rendered by the Cloudflare Browser Rendering quick action through the Worker binding `browser: {binding: "BROWSER"}`; the Worker passes the report HTML and the print CSS inline (the page is behind Access). `build:instance` leaves the binding out of `wrangler.jsonc` when `policy.report.pdf` is false. Without the binding, or when Cloudflare refuses or fails (including the free-plan limits in `VERIFIED.md`), the route answers `503` `pdf_unavailable` with `Retry-After`. A real render is not verified yet: check it on the first deploy.
