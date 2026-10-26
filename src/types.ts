@@ -1,9 +1,16 @@
 import type { OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 
+/** The part of the Browser Rendering binding the report uses (quick action "pdf"). */
+export interface BrowserBinding {
+  quickAction(action: "pdf", options: Record<string, unknown>): Promise<Response>;
+}
+
 export interface Env {
   DB: D1Database;
   OAUTH_KV: KVNamespace;
   ASSETS: Fetcher;
+  /** Browser Rendering binding for PDF reports; absent when policy.report.pdf is false. */
+  BROWSER?: BrowserBinding;
   OAUTH_PROVIDER: OAuthHelpers;
 
   // vars (wrangler.jsonc)

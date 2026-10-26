@@ -31,6 +31,12 @@
 			"id": "${deploy.kv.id}"
 		}
 	],
+	// @browser-begin (omitted by build:instance when policy.report.pdf is false)
+	// Server-side PDF reports (Browser Rendering quick action). No API token needed.
+	"browser": {
+		"binding": "BROWSER"
+	},
+	// @browser-end
 	"triggers": {
 		"crons": [
 			"0 * * * *"
