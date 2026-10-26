@@ -4,6 +4,7 @@ import { api } from "./api.js";
 import { h, formDialog, saveWithConflict, toast, confirmDialog, toastError, deleteText } from "./dom.js";
 import { PROJECT_CATEGORIES, WP_CATEGORIES, catLabel } from "./categories.js";
 import { closureDialog } from "./closure.js";
+import { guardedWrite } from "./gates-ui.js";
 
 export const changed = (project_id) => window.dispatchEvent(new CustomEvent("tracker:changed", { detail: { project_id } }));
 
@@ -243,14 +244,14 @@ export async function wpForm(projectId, existing, tree, parentId = null, milesto
       { name: "start_date", label: t("fStart"), type: "date", value: w.start_date },
       { name: "end_date", label: t("fEnd"), type: "date", value: w.end_date },
       { name: "sort", label: t("fSort"), type: "number", step: 1, value: w.sort ?? 0 },
-      { name: "depends_on", label: `${t("fDependsOn")} (ID, Komma)`, value: deps.join(", ") },
+      { name: "depends_on", label: t("fDependsOn"), type: "checklist", options: wpOptions(tree, existing?.id), value: deps },
       { name: "description_md", label: t("fDescription"), type: "textarea", value: w.description_md },
     ],
     onSubmit: async (v) => {
       const body = {
         ...v,
         project_id: projectId,
-        depends_on: tagsIn(v.depends_on),
+        depends_on: v.depends_on || [],
         parent_id: v.parent_id || null,
         human: v.human === "1" ? true : v.human === "0" ? false : null,
       };
@@ -260,7 +261,11 @@ export async function wpForm(projectId, existing, tree, parentId = null, milesto
         changed(projectId);
         return created;
       }
-      const res = await saveWithConflict((ver) => api.updateWp(existing.id, body, ver), existing.version, conflictSummary);
+      const res = await guardedWrite(
+        existing,
+        () => saveWithConflict((ver) => api.updateWp(existing.id, body, ver), existing.version, conflictSummary),
+        projectId,
+      );
       if (res?.cancelled) return undefined;
       if (!res?.reload) toast(t("saved"));
       changed(projectId);
@@ -282,6 +287,7 @@ export function milestoneForm(projectId, existing, tree) {
       { name: "due_date", label: t("due"), type: "date", value: m.due_date },
       { name: "workpackage_id", label: t("fOwnerWp"), type: "select", options: [["", t("none")], ...mains], value: m.workpackage_id ?? "" },
       { name: "sort", label: t("fSort"), type: "number", step: 1, value: m.sort ?? 0 },
+      { name: "gate", label: t("fGate"), type: "checkbox", value: !!m.gate },
       { name: "requires", label: t("requires"), type: "checklist", options: all, value: m.requires },
       { name: "unlocks", label: t("unlocks"), type: "checklist", options: all, value: m.unlocks },
       { name: "description_md", label: t("fDescription"), type: "textarea", rows: 4, value: m.description_md },
@@ -314,7 +320,11 @@ function safeJson(s) {
 /** Inline progress slider save (leaf WPs). Conflict → dialog. */
 export async function saveWpProgress(projectId, wp, progress) {
   try {
-    const res = await saveWithConflict((ver) => api.updateWp(wp.id, { project_id: projectId, progress }, ver), wp.version, conflictSummary);
+    const res = await guardedWrite(
+      wp,
+      () => saveWithConflict((ver) => api.updateWp(wp.id, { project_id: projectId, progress }, ver), wp.version, conflictSummary),
+      projectId,
+    );
     if (!res?.cancelled && !res?.reload) toast(t("progressSaved"));
   } catch (e) {
     toastError(e);
@@ -403,7 +413,13 @@ export function logProgressForm(projectId, tree) {
       { name: "progress", label: `${t("fProgress")} (${t("fWorkpackage")})`, type: "number", min: 0, max: 100, step: 5 },
     ],
     onSubmit: async (v) => {
-      const res = await api.logProgress({ ...v, project_id: projectId, workpackage_id: v.workpackage_id || null });
+      const wp = flatWps(tree).find((w) => w.id === v.workpackage_id) || { id: v.workpackage_id, title: v.workpackage_id };
+      const res = await guardedWrite(
+        wp,
+        () => api.logProgress({ ...v, project_id: projectId, workpackage_id: v.workpackage_id || null }),
+        projectId,
+      );
+      if (res?.cancelled) return undefined;
       toast(t("saved"));
       changed(projectId);
       return res;

@@ -17,6 +17,9 @@ import {
   deleteEntity,
 } from "./forms.js";
 import { renderContextPanel, openDocViewer } from "./context.js";
+import { collectIssues, issuesByEntity } from "./schedule-ui.js";
+import { issueList, issueBadge, scheduleMeta, milestoneItem } from "./schedule-view.js";
+import { decisionDialog, baselineDialog } from "./gates-ui.js";
 
 /** Render sanitised markdown into a container (the only innerHTML use in the app). */
 export function mdBlock(src) {
@@ -31,7 +34,7 @@ const smallBtn = (label, onClick, cls = "ghost") => h(`button.btn.small.${cls}`,
 export async function openProject(id, { tab = "overview", owner = null, openDoc = null } = {}) {
   let detail;
   let current = { tab, owner };
-  const fold = { open: new Set(), blocks: { branches: true, tokenCost: false, timeline: true } };
+  const fold = { open: new Set(), issuesOnly: false, blocks: { branches: true, tokenCost: false, timeline: true } };
   const tabs = h("div.tabs", { role: "tablist" });
   const m = openModal({
     title: t("loading"),
@@ -119,11 +122,13 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       clear(m.body, overview(detail));
       m.foot.append(
         menuButton(t("moreActions"), [
+          { label: t("setBaseline"), onClick: () => baselineDialog(p.id) },
           { label: t("delete"), danger: true, onClick: () => deleteEntity("project", p.id, p.title, p.id).then((ok) => ok && m.close()) },
         ]),
         ["done", "abandoned"].includes(p.status)
           ? null
           : smallBtn(t("closeProject"), () => closureDialog({ project: p, workpackages: detail.workpackages }), "secondary"),
+        h("a.btn.small.secondary", { href: `#/gantt?project=${encodeURIComponent(p.id)}` }, t("cardGantt")),
         smallBtn(t("logProgress"), () => logProgressForm(p.id, detail.workpackages), "secondary"),
         smallBtn(t("edit"), () => projectForm(p, { workpackages: detail.workpackages }), ""),
       );
@@ -159,9 +164,26 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
     return n === null ? null : ` · ${t("blockedSince", { n, date: fmtDate(w.blocked_since) })}`;
   }
 
-  function wpNode(w) {
+  /** Title of a work package or milestone of this project (schedule issue texts name the other party). */
+  const titleOf = (x) => flatten(detail.workpackages).find((w) => w.id === x)?.title ?? detail.milestones.find((ms) => ms.id === x)?.title;
+
+  /** Work packages shown in the list: all, or (issues filter) those with issues and their ancestors. */
+  function issueWpIds(d) {
+    const withIssues = issuesByEntity(collectIssues(d));
+    const keep = new Set();
+    const walk = (w) => {
+      let hit = withIssues.has(w.id);
+      for (const c of w.children || []) hit = walk(c) || hit;
+      if (hit) keep.add(w.id);
+      return hit;
+    };
+    d.workpackages.forEach(walk);
+    return keep;
+  }
+
+  function wpNode(w, shown) {
     const leaf = !w.children?.length;
-    const open = !leaf && fold.open.has(w.id);
+    const open = !leaf && (fold.open.has(w.id) || (shown && fold.issuesOnly));
     let slider = null;
     if (leaf) {
       const out = h("output", fmtPct(w.progress));
@@ -183,6 +205,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
     const dates = w.start_date || w.end_date ? h("span.meta", `${fmtDate(w.start_date)} – ${fmtDate(w.end_date)}`) : null;
     const lockingMilestone = w.locked ? detail.milestones.find((ms) => ms.unlocks?.includes(w.id) && ms.reached_at === null) : null;
     const name = lockingMilestone?.title || "";
+    const schedMeta = scheduleMeta(w).filter((n) => !n.classList.contains("critical"));
 
     return h(
       "li",
@@ -214,6 +237,8 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
           personBadge(w.effective_owner, { inherited: !w.owner, label: w.owner ? t("fOwner") : t("inheritedOwner") }),
           w.is_human ? h("span.badge.human", { title: t("human"), "aria-label": t("human") }, "👤") : null,
           w.locked ? h("span.badge.locked", { title: t("lockedBy", { name }) }, "🔒 ", t("locked")) : null,
+          issueBadge(w, titleOf),
+          w.critical ? h("span.badge.critical", t("criticalMark")) : null,
           !leaf ? h("span.meta", t("subCount", { n: w.children.length })) : null,
           ctxBadge("workpackage", w.id),
           dates,
@@ -227,12 +252,24 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
             { label: t("delete"), danger: true, onClick: () => deleteEntity("workpackage", w.id, w.title, id) },
           ]),
         ),
+        schedMeta.length
+          ? h(
+              "div.meta",
+              schedMeta.flatMap((n, i) => (i ? [" · ", n] : [n])),
+            )
+          : null,
+        issueList(w, titleOf),
         w.blocked_by ? h("div.blocked", `${t("blockedBy")}: ${blockedLabel(w.blocked_by)}`, blockedAge(w)) : null,
         w.waiting_reason ? h("div.blocked", `${t("fWaitingReason")}: ${w.waiting_reason}`) : null,
         w.drop_reason ? h("div.blocked", `${t("fDropReason")}: ${w.drop_reason}`) : null,
         w.description_md ? h("details.blocked", h("summary", t("description")), mdBlock(w.description_md)) : null,
       ),
-      !leaf && open ? h("ul", w.children.map(wpNode)) : null,
+      !leaf && open
+        ? h(
+            "ul",
+            w.children.filter((c) => !shown || shown.has(c.id)).map((c) => wpNode(c, shown)),
+          )
+        : null,
     );
   }
 
@@ -240,6 +277,8 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
     const p = d.project;
     const allWps = flatten(d.workpackages);
     const wpTitle = Object.fromEntries(allWps.map((w) => [w.id, w.title]));
+    const allIssues = collectIssues(d);
+    const shownWps = fold.issuesOnly && allIssues.length ? issueWpIds(d) : null;
     const expandableWps = allWps.filter((w) => w.children?.length);
     const hasFoldedWp = expandableWps.some((w) => !fold.open.has(w.id));
 
@@ -274,6 +313,24 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
           )
         : null,
       ctxBadge("project", p.id),
+      d.baseline ? h("span", t("baselineInfo", { label: d.baseline.label, date: fmtDate(d.baseline.created_at.slice(0, 10)) })) : null,
+      allIssues.length
+        ? h(
+            "button.badge.issue",
+            {
+              type: "button",
+              "aria-pressed": String(fold.issuesOnly),
+              title: fold.issuesOnly ? t("issuesOnlyOn") : t("issuesOnlyHint"),
+              on: {
+                click: () => {
+                  fold.issuesOnly = !fold.issuesOnly;
+                  render();
+                },
+              },
+            },
+            `⚠ ${t("scheduleIssues", { n: allIssues.length })}`,
+          )
+        : null,
     );
 
     // owner, sponsor, decision maker (spec F1): chip + name, or the free text
@@ -347,27 +404,21 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
     const todayDate = new Date();
     const today = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, "0")}-${String(todayDate.getDate()).padStart(2, "0")}`;
 
-    const milestoneItems = d.milestones.map((ms) => {
-      const state = ms.done ? "done" : ms.due_date && ms.due_date < today ? "overdue" : "open";
-      const label = state === "done" ? t("reached") : state === "overdue" ? t("overdue") : t("msOpen");
-      const requires = ms.requires?.length ? ms.requires.map((wpId) => wpTitle[wpId] || wpId).join(", ") : t("none");
-      const unlocks = ms.unlocks?.length ? ms.unlocks.map((wpId) => wpTitle[wpId] || wpId).join(", ") : t("none");
-
-      return h(
-        "li.ms",
-        h(`span.ms-diamond.${state}`, { "aria-hidden": "true" }),
-        h("strong", ms.title),
-        h(`span.ms-state.${state}`, label),
-        h("div.meta", `${t("due")}: ${fmtDate(ms.due_date)}`, " · ", `${t("requires")}: ${requires}`, " · ", `${t("unlocks")}: ${unlocks}`),
-        h(
-          "div.actions",
+    const milestoneItems = d.milestones.map((ms) =>
+      milestoneItem(ms, {
+        today,
+        titleOf,
+        requiresText: ms.requires?.length ? ms.requires.map((wpId) => wpTitle[wpId] || wpId).join(", ") : t("none"),
+        unlocksText: ms.unlocks?.length ? ms.unlocks.map((wpId) => wpTitle[wpId] || wpId).join(", ") : t("none"),
+        decide: () => decisionDialog({ project: p, milestone: ms }),
+        actions: [
           smallBtn(t("edit"), () => milestoneForm(id, ms, detail.workpackages)),
           menuButton(t("moreActions"), [
             { label: t("delete"), danger: true, onClick: () => deleteEntity("milestone", ms.id, ms.title, id) },
           ]),
-        ),
-      );
-    });
+        ],
+      }),
+    );
 
     const workpackageActions = h(
       "div.actions",
@@ -440,7 +491,12 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       block(
         t("workpackages"),
         workpackageActions,
-        d.workpackages.length ? h("ul.tree", d.workpackages.map(wpNode)) : h("p.empty", t("noWorkpackages")),
+        d.workpackages.length
+          ? h(
+              "ul.tree",
+              d.workpackages.filter((w) => !shownWps || shownWps.has(w.id)).map((w) => wpNode(w, shownWps)),
+            )
+          : h("p.empty", t("noWorkpackages")),
       ),
       cblock(
         "branches",
