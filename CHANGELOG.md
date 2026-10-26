@@ -1,5 +1,25 @@
 # Changelog
 
+## R3
+
+### Added
+
+- Risk and nonconformity log: `type` `risk | issue | opportunity | nc`, probability and impact (1–5), derived score 1–25, owner, response, action, status; `nc_*` fields for type `nc` only (400 otherwise; changing the type away from `nc` clears them). MCP `upsert_risk` and `list_risks`, REST `/api/risks`. Risks go to the trash with their project. The context bundle has an "Open risks" section.
+- Derived `risk` score: while open risks exist (not closed, not opportunities) it is round((highest score − 1) / 24 × 10) and marked `derived`; the manual score is the fallback. Cards add `risk_summary` {open, max_score, high_without_action}; scores of 15 or more without an action are a portfolio warning.
+- Progress transparency: `progress_basis` {mode, done, total, weighted_percent, reason} on projects. Manual progress needs `progress_manual_reason` when switching to manual or changing the value. Work package `effort_planned_pd` and `effort_actual_pd` (person-days); `log_progress` takes `effort_pd`, which adds to the actual effort.
+- Activity: `last_progress_at` and `last_changed_at` on projects and work packages, and a derived `stale` flag (active project, last progress more than `stale_days` UTC calendar days ago; `policy.stale_days`, overridable per project type).
+- MCP tools: `upsert_risk`, `list_risks` (27 tools in total).
+
+### Breaking
+
+- The card field `last_activity` now means the last progress (`last_progress_at`), not the latest event.
+- A project with open risks shows a derived `risk` score; the manual score applies again once none are open.
+
+### Migration
+
+- `0005_r3_risk_progress_activity.sql`, additive only; the previous Worker version keeps running on it. Existing rows are backfilled from `updated_at`. Run `npm run db:migrate:remote`, then deploy.
+- Legacy manual-progress projects without a reason stay editable; a reason is asked for at the next change of the manual value.
+
 ## R2
 
 ### Added
