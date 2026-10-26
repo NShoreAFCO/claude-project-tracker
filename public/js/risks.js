@@ -1,9 +1,11 @@
 // Risks & deviations tab: 5x5 heat map, list and form (spec F6). heatMapCells/heatMapSvg/riskForm drafted by Copilot.
 import { t, fmtDate } from "./i18n.js";
 import { api } from "./api.js";
-import { h, clear, formDialog, saveWithConflict, toast, toastError, personBadge, menuButton } from "./dom.js";
+import { h, clear, formDialog, saveWithConflict, toast, toastError, errorText, personBadge, menuButton } from "./dom.js";
+import { riskBand } from "./risk-band.js";
 import { changed, personOptions, wpOptions, deleteEntity } from "./forms.js";
 
+export { riskBand };
 const SVG_NS = "http://www.w3.org/2000/svg";
 const RISK_TYPES = ["risk", "issue", "opportunity", "nc"];
 
@@ -13,14 +15,6 @@ export function svgEl(tag, attrs, ...children) {
   for (const [k, v] of Object.entries(attrs || {})) if (v !== undefined && v !== null) el.setAttribute(k, String(v));
   for (const c of children.flat()) if (c !== null && c !== undefined) el.append(c instanceof Node ? c : document.createTextNode(String(c)));
   return el;
-}
-
-/** Band of a score 1-25: low 1-4, medium 5-9, high 10-14, critical 15-25. */
-export function riskBand(score) {
-  if (score <= 4) return "low";
-  if (score <= 9) return "medium";
-  if (score <= 14) return "high";
-  return "critical";
 }
 
 /** The 25 heat-map cells (probability 5 at the top), counting non-closed entries. Pure and DOM-free. */
@@ -44,13 +38,7 @@ export function heatMapSvg(cells, { svgEl: el = svgEl, labels }) {
     const row = 5 - cell.probability;
     const x = 40 + (cell.impact - 1) * 50;
     const y = 10 + row * 50;
-    svg.append(
-      el(
-        "rect",
-        { x, y, width: 48, height: 48, class: `heat-cell band-${cell.band}` },
-        el("title", {}, `P${cell.probability} x I${cell.impact}: ${cell.count}`),
-      ),
-    );
+    svg.append(el("rect", { x, y, width: 48, height: 48, class: `heat-cell band-${cell.band}` }, el("title", {}, labels.cellTitle(cell))));
     if (cell.count > 0) {
       svg.append(
         el(
@@ -179,12 +167,12 @@ const typeChip = (type) => h(`span.chip.risk-type.rt-${type}`, t(`riskType.${typ
 const scoreChip = (r) => h(`span.chip.risk-score.band-${riskBand(r.score)}`, { title: scoreText(r) }, String(r.score));
 
 /** Renders the tab into `body`. detail = project detail payload (for pickers). */
-export async function renderRisks(body, { detail, projectId }) {
+export async function renderRisks(body, { detail, projectId, isCurrent = () => true }) {
   let risks;
   try {
     risks = await api.risks({ project_id: projectId });
   } catch (e) {
-    toastError(e);
+    if (isCurrent()) clear(body, h("div.callout.conflict", { role: "alert" }, errorText(e)));
     return;
   }
   let persons = [];
@@ -193,6 +181,7 @@ export async function renderRisks(body, { detail, projectId }) {
   } catch (e) {
     toastError(e);
   }
+  if (!isCurrent()) return;
   const wps = wpOptions(detail.workpackages);
   const wpTitle = (id) => wps.find(([i]) => i === id)?.[1].replace(/^(— )+/, "");
   const open = (existing) =>
@@ -240,7 +229,12 @@ export async function renderRisks(body, { detail, projectId }) {
       h(
         "div.heat-wrap",
         heatMapSvg(heatMapCells(risks), {
-          labels: { title: t("riskHeatMapTitle"), probability: t("fProbability"), impact: t("fImpact") },
+          labels: {
+            title: t("riskHeatMapTitle"),
+            probability: t("fProbability"),
+            impact: t("fImpact"),
+            cellTitle: (c) => t(c.count === 1 ? "heatCellTitle_one" : "heatCellTitle", { p: c.probability, i: c.impact, n: c.count }),
+          },
         }),
         legend,
       ),

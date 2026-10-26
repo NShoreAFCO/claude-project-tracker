@@ -1,7 +1,7 @@
 // Progress transparency, risk and staleness chips shared by the cards and the project page (spec F6-F8).
 import { t, fmtPct, fmtDateTime } from "./i18n.js";
 import { h } from "./dom.js";
-import { riskBand } from "./risks.js";
+import { riskBand } from "./risk-band.js";
 
 /** Plain-text basis of a project percentage: derived from done/total work packages, or set by hand with a reason. */
 export function basisText(basis) {

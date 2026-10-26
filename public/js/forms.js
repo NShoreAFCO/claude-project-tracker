@@ -256,7 +256,6 @@ export async function wpForm(projectId, existing, tree, parentId = null, milesto
         full: true,
         showWhen: { field: "status", values: ["dropped"] },
       },
-      { name: "progress", label: t("fProgress"), type: "range", min: 0, max: 100, step: 5, value: w.progress ?? 0 },
       { name: "weight", label: t("fWeight"), type: "number", min: 0, step: 0.5, value: w.weight ?? 1 },
       { name: "effort_planned_pd", label: t("fEffortPlanned"), type: "number", min: 0, step: 0.5, value: w.effort_planned_pd },
       { name: "effort_actual_pd", label: t("fEffortActual"), type: "number", min: 0, step: 0.5, value: w.effort_actual_pd },
@@ -336,21 +335,6 @@ function safeJson(s) {
   }
 }
 
-/** Inline progress slider save (leaf WPs). Conflict → dialog. */
-export async function saveWpProgress(projectId, wp, progress) {
-  try {
-    const res = await guardedWrite(
-      wp,
-      () => saveWithConflict((ver) => api.updateWp(wp.id, { project_id: projectId, progress }, ver), wp.version, conflictSummary),
-      projectId,
-    );
-    if (!res?.cancelled && !res?.reload) toast(t("progressSaved"));
-  } catch (e) {
-    toastError(e);
-  }
-  changed(projectId);
-}
-
 /** "Adjust progress" of a leaf work package: the slider is read-only in the row, changes go through this dialog. */
 export function adjustProgressDialog(projectId, wp) {
   return formDialog({
@@ -405,12 +389,13 @@ export function adjustProjectProgressForm(project) {
         label: t("fProgressReason"),
         value: project.progress_manual_reason,
         full: true,
-        required: true,
-        hint: t("fProgressReasonHint"),
+        required: !project.progress_manual_reason,
+        hint: project.progress_manual_reason ? t("fProgressReasonKept") : t("fProgressReasonHint"),
         showWhen: { field: "progress_mode", values: ["manual"] },
       },
     ],
     onSubmit: async (v) => {
+      if (!v.progress_manual_reason) delete v.progress_manual_reason; // a stored reason keeps applying
       const res = await saveWithConflict((ver) => api.updateProject(project.id, v, ver), project.version, conflictSummary);
       if (res?.cancelled) return undefined;
       if (!res?.reload) toast(t("saved"));

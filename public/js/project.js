@@ -104,7 +104,9 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
     render();
   }
 
+  let renderSeq = 0;
   function render() {
+    const seq = ++renderSeq;
     const p = detail.project;
     m.heading.replaceChildren(p.title, " ", statusChip(p.status));
     clear(
@@ -123,7 +125,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       clear(m.body);
       renderContextPanel(m.body, { detail, owner: own, onOwner: (o) => setTab("context", o) });
     } else if (current.tab === "risks") {
-      renderRisks(m.body, { detail, projectId: id });
+      renderRisks(m.body, { detail, projectId: id, isCurrent: () => seq === renderSeq && current.tab === "risks" });
     } else {
       clear(m.body, overview(detail));
       m.foot.append(

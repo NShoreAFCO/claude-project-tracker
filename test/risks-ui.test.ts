@@ -94,7 +94,13 @@ describe("heatMapSvg", () => {
 
     const root = heatMapSvg(cells, {
       svgEl,
-      labels: { title: "Risk heat map", probability: "Probability", impact: "Impact" },
+      labels: {
+        title: "Risk heat map",
+        probability: "Probability",
+        impact: "Impact",
+        cellTitle: (c: { probability: number; impact: number; count: number }) =>
+          `Probability ${c.probability} × impact ${c.impact}: ${c.count}`,
+      },
     }) as FakeNode;
 
     const walk = (node: FakeNode): FakeNode[] => [
@@ -110,6 +116,9 @@ describe("heatMapSvg", () => {
     expect(root.attrs.role).toBe("img");
     expect(root.attrs["aria-label"]).toBe("Risk heat map");
     expect(root.attrs.viewBox).toBeTruthy();
+    const titles = nodes.filter((n) => n.tag === "title").map((n) => n.children[0]);
+    expect(titles).toContain("Probability 5 × impact 5: 1");
+    expect(titles.some((x) => /^P\d x I\d/.test(String(x)))).toBe(false);
 
     expect(rects).toHaveLength(25);
     for (const rect of rects) {
@@ -185,10 +194,9 @@ describe("deleteText", () => {
     expect(withChildren).not.toBe(withoutChildren);
 
     // @ts-expect-error untyped JS module
-    const { LOCALE } = await import("../public/js/i18n.js");
-    if (LOCALE === "en") {
-      expect(withChildren).toContain("with 2 risks");
-    }
+    const { t } = await import("../public/js/i18n.js");
+    expect(t("deleteKids.risks", { n: 2 })).not.toBe("deleteKids.risks"); // key exists in the active locale
+    expect(withChildren).toContain(t("deleteKids.risks", { n: 2 }));
   });
 });
 
