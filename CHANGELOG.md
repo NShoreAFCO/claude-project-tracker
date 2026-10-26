@@ -1,5 +1,32 @@
 # Changelog
 
+## R2
+
+### Added
+
+- Schedule validation: write results carry `warnings` for `DEP_START_BEFORE_PRED_END`, `START_BEFORE_GATE`, `CHILD_OUTSIDE_PARENT`, `MILESTONE_BEFORE_REQUIRED_END` and `DEP_UNKNOWN` (unknown or legacy free-text `depends_on`). Equal dates are no conflict. New `depends_on` ids must be work packages of the project, and cycles are refused (400). Per-project `schedule_strict` (policy `schedule_strict_default`): a write that adds an issue fails with 409 `SCHEDULE_STRICT`; existing issues never block unrelated edits; racing schedule writes get 409 `SCHEDULE_CONFLICT`.
+- Baselines: `create_baseline` (MCP) and `POST /api/projects/:id/baselines`. Project detail adds `baseline`, `baseline_start`, `baseline_end`, `slip_days` and `critical` (longest calendar-day path over `depends_on` and milestone requires/unlocks; none when the plan has a cycle).
+- Gates: milestone `gate`, decisions `go | go_with_conditions | hold | stop` via `record_gate_decision` and `POST /api/milestones/:id/decisions`. The decider is always the calling person (service tokens are refused); a named decision maker decides alone (admins on their behalf, with a note), a free-text one needs a note. `go` and `go_with_conditions` take a baseline, each condition becomes a work package, `stop` puts the project on hold with a pending closure decision.
+- Gate lock: work packages an undecided gate unlocks (and their sub-WPs) cannot be started, progressed or finished (409 `GATE_LOCKED`). A person overrides with a reason (`POST /api/workpackages/:id/gate-override`); agents never can.
+- Dashboard: Gantt schedule issues, baseline bars and slip, critical path, gate decision dialog and override dialog.
+- MCP tools: `create_baseline`, `record_gate_decision` (25 tools in total). `update_project` takes `schedule_strict`.
+
+### Changed
+
+- `log_progress` no longer auto-starts a gate-locked work package.
+- Agents cannot clear a gate flag, drop work packages from an undecided gate, delete the gate, move a locked work package, or change the project's decision maker while a gate is undecided (409 `DECISION_MAKER_LOCKED` for the last).
+
+### Breaking
+
+- Gate decisions need a project decision maker (409 `DECISION_MAKER_MISSING`); once a gate exists the decision maker can be changed but not cleared (409 `DECISION_MAKER_REQUIRED`).
+- Writes with unknown `depends_on` ids and dependency cycles are refused (400). Stored legacy values are kept and reported as `DEP_UNKNOWN`.
+
+### Migration
+
+- `0004_r2_schedule_gates.sql`, additive only; the previous Worker version keeps running on it. Run `npm run db:migrate:remote`, then deploy.
+- Schedule issues are computed lazily: rows hold NULL until a project is first read (project detail or context bundle) after the deploy, which stores them.
+- Optional: set `policy.schedule_strict_default` and `policy.gates.require_decision` in `instance/instance.config.json`.
+
 ## R1
 
 ### Added
