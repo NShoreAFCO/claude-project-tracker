@@ -12,7 +12,7 @@ import { POLICY } from "../policy";
 import { activitySet, isSystem, touchProject } from "./activity";
 import { createBaselineStmts } from "./baselines";
 import { isClosedProjectStatus, projectClosedError, TransitionError } from "./rules";
-import { recomputeScheduleStmts, scheduleBatch, snapWp } from "./schedule";
+import { recomputeScheduleStmts, scheduleBatch, snapMs, snapWp } from "./schedule";
 import {
   ConflictError,
   ForbiddenError,
@@ -94,6 +94,41 @@ export async function gateLockedWpIds(db: D1Database, projectId: string): Promis
     .all<{ wp_id: string } & GateRef>();
   for (const r of results) if (!out.has(r.wp_id)) out.set(r.wp_id, { milestone_id: r.milestone_id, title: r.title });
   return out;
+}
+
+/**
+ * "Gates" section of the context bundle (spec §4.4), after the open risks: the project's undecided gates
+ * (live gates whose latest decision is not go / go_with_conditions) and its gate-locked WPs. "" when there
+ * are none. Trashed gates and WPs are left out.
+ */
+export async function gateStatusMarkdown(db: D1Database, projectId: string): Promise<string> {
+  const { results: gates } = await db
+    .prepare(
+      `SELECT m.id, m.title, m.due_date, ${latestDecisionSql("m")} AS latest FROM milestone m
+       WHERE m.project_id = ? AND ${gateClosedSql("m")} ORDER BY m.due_date IS NULL, m.due_date, m.sort, m.title, m.id`,
+    )
+    .bind(projectId)
+    .all<{ id: string; title: string; due_date: string | null; latest: string | null }>();
+  const locked = await gateLockedWpIds(db, projectId);
+  if (!gates.length && !locked.size) return "";
+  const { results: wps } = locked.size
+    ? await db
+        .prepare(`SELECT id, title FROM workpackage WHERE id IN (SELECT value FROM json_each(?)) AND ${LIVE()} ORDER BY sort, title, id`)
+        .bind(JSON.stringify([...locked.keys()]))
+        .all<{ id: string; title: string }>()
+    : { results: [] as Array<{ id: string; title: string }> };
+  const parts = ["## Gates\n"];
+  if (gates.length)
+    parts.push(
+      `\nUndecided gates:\n\n${gates.map((g) => `- ${g.title} (${g.id}; due ${g.due_date ?? "none"}; latest decision: ${g.latest ?? "none"})`).join("\n")}\n`,
+    );
+  if (wps.length)
+    parts.push(
+      `\nGate-locked work packages (not started until a go decision or a person's override):\n\n${wps
+        .map((w) => `- ${w.title} (${w.id}; locked by gate ${locked.get(w.id)!.title})`)
+        .join("\n")}\n`,
+    );
+  return parts.join("");
 }
 
 /** The gates that lock one WP right now, directly or through a locked ancestor ([] = not locked). */
@@ -336,9 +371,10 @@ async function newWpIds(db: D1Database, projectId: string, titles: string[]): Pr
  *   service tokens and callers without a person are refused, and the caller needs the decider role.
  * - The project needs a decision maker. A person: only they decide, or an admin on their behalf
  *   (`on_behalf_of_decision_maker` with a note). Free text (a body): any decider, the note naming the body.
- * - go / go_with_conditions take a baseline in the same batch; conditions become `todo` WPs (not linked
- *   as requires or unlocks; the decision row keeps their ids); stop puts the project on hold with
- *   `closure_decision_pending`.
+ * - go / go_with_conditions take a baseline in the same batch; conditions become `todo` WPs linked to the
+ *   gate as `requires` (spec F5; never `unlocks`, so a later hold does not lock them; the decision row
+ *   keeps their ids too); stop puts the project on hold with `closure_decision_pending`.
+ * - The decision event carries the decision, note, evidence, conditions and on_behalf (audit trail).
  * The batch re-checks the gate, the project status and the decision maker; a change meanwhile → 409.
  */
 export async function recordGateDecision(
@@ -365,9 +401,9 @@ export async function recordGateDecision(
     throw new ValidationError("on_behalf_of_decision_maker must be true or false");
 
   const m = await db
-    .prepare(`SELECT id, project_id, title, gate FROM milestone WHERE id = ? AND ${LIVE()}`)
+    .prepare(`SELECT id, project_id, title, gate, due_date FROM milestone WHERE id = ? AND ${LIVE()}`)
     .bind(milestoneId)
-    .first<{ id: string; project_id: string; title: string; gate: number }>();
+    .first<{ id: string; project_id: string; title: string; gate: number; due_date: string | null }>();
   if (!m) throw new NotFoundError(`milestone ${milestoneId} not found`);
   if (m.gate !== 1) throw new ValidationError(`milestone ${m.id} is not a gate; set gate=true first`);
   const project = await db.prepare(`SELECT * FROM project WHERE id = ? AND ${LIVE()}`).bind(m.project_id).first<ProjectRow>();
@@ -408,9 +444,28 @@ export async function recordGateDecision(
   const baseline = opening
     ? createBaselineStmts(db, project.id, `Gate decision: ${m.title.slice(0, 150)} (${decision})`, by, { decision_id: decisionId })
     : null;
+  // M4: the condition WPs are linked to the gate as requires (the gate's follow-up work).
+  const links = wpIds.length
+    ? (
+        await db
+          .prepare("SELECT workpackage_id, role FROM milestone_link WHERE milestone_id = ? ORDER BY workpackage_id")
+          .bind(m.id)
+          .all<{ workpackage_id: string; role: string }>()
+      ).results
+    : [];
+  const requiresBefore = links.filter((l) => l.role === "requires").map((l) => l.workpackage_id);
+  const requiresAfter = [...requiresBefore, ...wpIds];
   const schedule = wpIds.length
     ? await recomputeScheduleStmts(db, project.id, {
         wps: wpIds.map((id) => snapWp({ id, parent_id: null, start_date: null, end_date: null, depends_on: null })),
+        milestones: [
+          snapMs({
+            id: m.id,
+            due_date: m.due_date,
+            requires: requiresAfter,
+            unlocks: links.filter((l) => l.role === "unlocks").map((l) => l.workpackage_id),
+          }),
+        ],
         strict: false,
       })
     : null;
@@ -447,10 +502,19 @@ export async function recordGateDecision(
         ts,
       ),
   ];
-  const diff: Diff = { decision: [prev?.decision ?? null, decision] };
-  if (onBehalf) diff.on_behalf = [null, true];
+  // The decision record in the audit trail: what was decided, why, on what evidence, under which conditions.
+  const diff: Diff = {
+    decision: [prev?.decision ?? null, decision],
+    note_md: [null, note],
+    evidence: [null, evidence],
+    conditions: [null, conditionRows],
+    on_behalf: [null, onBehalf],
+  };
   if (baseline) diff.baseline_id = [null, baseline.id];
-  if (wpIds.length) diff.created_workpackages = [null, wpIds];
+  if (wpIds.length) {
+    diff.created_workpackages = [null, wpIds];
+    diff.requires = [requiresBefore, requiresAfter];
+  }
   stmts.push(
     eventStmt(db, {
       by,
@@ -476,8 +540,9 @@ export async function recordGateDecision(
         entity_id: id,
         action: "create",
         summary: conditions[i],
-        diff: { title: [null, conditions[i]], status: [null, "todo"], decision_id: [null, decisionId] },
+        diff: { title: [null, conditions[i]], status: [null, "todo"], decision_id: [null, decisionId], required_by: [null, [m.id]] },
       }),
+      db.prepare("INSERT INTO milestone_link (milestone_id, workpackage_id, role) VALUES (?, ?, 'requires')").bind(m.id, id),
     );
   }
   if (baseline) stmts.push(...baseline.stmts);

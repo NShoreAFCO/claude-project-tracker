@@ -5,7 +5,7 @@ export type ScoreLevel = "0" | "5" | "10";
 
 /** The instance's policy block (spec §4.3). build-instance applies the defaults, so every field is set. */
 export interface Policy {
-  /** Emails that become admins on first login. */
+  /** Emails that become admins on first login (later only while no live admin exists: admin bootstrap). */
   admins: string[];
   /** Role a new user gets on first login. */
   default_role: Role;

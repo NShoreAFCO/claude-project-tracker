@@ -503,7 +503,7 @@ export function registerTools(reg: Reg): void {
     {
       title: "Delete entity",
       description:
-        "Delete a project, work package (with its sub-WPs), milestone, context document or stakeholder: it moves to the trash together with what it contains; restore with restore_entity; purge is admin-only in the dashboard. Branches are deleted permanently. Agents cannot delete users (persons with a login). Ask the user first.",
+        "Delete a project, work package (with its sub-WPs), milestone, context document or stakeholder: it moves to the trash together with what it contains; an admin can restore it (restore_entity); purge is admin-only in the dashboard. Branches are deleted permanently. Agents cannot delete users (persons with a login). Ask the user first.",
       inputSchema: z.object({
         kind: entityKindSchema.describe("Select the entity kind."),
         id: z.string().describe("Identify the entity."),
@@ -526,7 +526,7 @@ export function registerTools(reg: Reg): void {
     {
       title: "Restore entity",
       description:
-        "Take a deleted item out of the trash, together with everything deleted with it. Fails while its parent (project, parent WP, owner) is still in the trash: restore that first.",
+        "Take a deleted item out of the trash, together with everything deleted with it. Needs the admin role (the user's login). Fails while its parent (project, parent WP, owner) is still in the trash: restore that first; and with PROJECT_CLOSED when open work packages would come back into a done or abandoned project: reopen the project first.",
       inputSchema: z.object({
         kind: trashKindSchema.describe("Select the entity kind."),
         id: z.string().describe("Identify the entity."),

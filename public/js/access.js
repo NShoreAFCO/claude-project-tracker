@@ -20,6 +20,7 @@ export const MIN_ROLE = {
   verify_sign_off: "decider",
   manage_roles: "admin",
   purge: "admin",
+  restore: "admin",
 };
 
 let me = null;

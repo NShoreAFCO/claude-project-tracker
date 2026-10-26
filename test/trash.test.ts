@@ -2,7 +2,7 @@
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import { call, installTestKeys, testCaller, userJwt } from "./helpers";
-import { createProject, getProjectDetail, listProjects } from "../src/data/projects";
+import { createProject, getProjectDetail, listProjects, updateProject } from "../src/data/projects";
 import { upsertWorkpackage, listWorkpackagesOut } from "../src/data/workpackages";
 import { upsertMilestone, listMilestones } from "../src/data/milestones";
 import { linkBranch } from "../src/data/branches";
@@ -11,7 +11,7 @@ import { getContextBundle, listContext, readContext } from "../src/data/context-
 import { deleteContext, setContextMeta, writeContext } from "../src/data/context-write";
 import { search } from "../src/data/search";
 import { countChildren, deleteEntity, deletePreview, listTrash, purgeEntity, restoreEntity } from "../src/data/entities";
-import { listPersons, personOuts, resolvePersonRef, upsertPerson } from "../src/data/persons";
+import { ensureUserPerson, listPersons, personOuts, resolvePersonRef, upsertPerson } from "../src/data/persons";
 import { buildSnapshot } from "../src/audit/export";
 import { TransitionError } from "../src/data/rules";
 import { ForbiddenError, NotFoundError } from "../src/data/util";
@@ -23,6 +23,9 @@ const db = env.DB;
 const A = testCaller({ actor: "test" });
 const EDITOR = testCaller({ actor: "user:editor@example.com", role: "editor", channel: "dashboard" });
 const AGENT = testCaller({ actor: "mcp:Claude", role: "admin", channel: "mcp" });
+const ADMIN = testCaller({ actor: "user:admin@example.com", role: "admin", channel: "dashboard" });
+/** A login with the admin role (restore is an admin action, spec §4.2). */
+const ADMIN_EMAIL = "trash-admin@example.com";
 let n = 0;
 const uniq = (s: string) => `${s} ${++n}`;
 const owned = (title: string) => createProject(db, { title: uniq(title), owner: "Owner" }, A);
@@ -87,7 +90,11 @@ async function tree() {
 const deletedAt = async (table: string, id: string) =>
   (await db.prepare(`SELECT deleted_at FROM ${table} WHERE id = ?`).bind(id).first<{ deleted_at: string | null }>())?.deleted_at ?? null;
 
-beforeAll(installTestKeys);
+beforeAll(async () => {
+  await installTestKeys();
+  const admin = await ensureUserPerson(db, ADMIN_EMAIL);
+  await db.prepare("UPDATE person SET access_role = 'admin' WHERE id = ?").bind(admin.id).run();
+});
 
 describe("soft delete", () => {
   it("deleted WP excluded from search, bundle, progress, counts", async () => {
@@ -209,6 +216,27 @@ describe("soft delete", () => {
     expect((await readContext(db, { owner_kind: "project", owner_id: p.id, slug: "plan" })).content_md).toBe("v1");
   });
 
+  it("restoring open WPs into a closed project is refused (PROJECT_CLOSED)", async () => {
+    const p = await owned("Restore closed");
+    const open = await upsertWorkpackage(db, p.id, { title: "still open" }, A);
+    const parent = await upsertWorkpackage(db, p.id, { title: "finished parent", status: "done" }, A);
+    await upsertWorkpackage(db, p.id, { title: "open child", parent_id: parent.id }, A);
+    const finished = await upsertWorkpackage(db, p.id, { title: "finished alone", status: "done" }, A);
+    for (const w of [open, parent, finished]) await deleteEntity(db, "workpackage", w.id, A);
+    await updateProject(db, p.id, { status: "done", closure_note_md: "Closed.", lessons_learned_md: "none" }, A);
+    // an open WP, and a done WP whose subtree holds an open one, stay in the trash
+    for (const w of [open, parent])
+      await expect(restoreEntity(db, "workpackage", w.id, A)).rejects.toMatchObject({ status: 409, current: { code: "PROJECT_CLOSED" } });
+    expect(await deletedAt("workpackage", open.id)).not.toBeNull();
+    expect(await deletedAt("workpackage", parent.id)).not.toBeNull();
+    // a closed subtree comes back
+    expect(await restoreEntity(db, "workpackage", finished.id, A)).toEqual({ restored: finished.id, children: 0 });
+    // after reopening the project the open work can come back
+    await updateProject(db, p.id, { status: "active" }, A);
+    await restoreEntity(db, "workpackage", open.id, A);
+    expect(await deletedAt("workpackage", open.id)).toBeNull();
+  });
+
   it("trash lists deleted roots with their children; preview counts what a delete takes along", async () => {
     const { p, a, m } = await tree();
     expect(await countChildren(db, "workpackage", a.id)).toBe(4);
@@ -314,7 +342,9 @@ describe("persons", () => {
     expect((await getProjectDetail(db, p.id)).project.owner).toBeNull();
     const ev = (await listEvents(db, { project_id: p.id })).find((e) => e.action === "create")!;
     expect(ev.person_name).toBe(s.name);
-    await restoreEntity(db, "person", s.id, EDITOR);
+    // restoring is an admin action (spec §4.2), also for stakeholders
+    await expect(restoreEntity(db, "person", s.id, EDITOR)).rejects.toBeInstanceOf(ForbiddenError);
+    await restoreEntity(db, "person", s.id, ADMIN);
     expect((await getProjectDetail(db, p.id)).project.owner).toMatchObject({ person_id: s.id });
   });
 
@@ -358,10 +388,30 @@ describe("REST and MCP", () => {
     const trash = await api("/api/trash");
     expect(trash.status).toBe(200);
     expect(trash.body.find((t: any) => t.id === a.id)).toMatchObject({ kind: "workpackage", children: 4 });
-    const r = await api(`/api/trash/workpackage/${a.id}/restore`, { method: "POST" });
+    // restore is admin-only (spec §4.2): the editor login is refused, nothing comes back
+    const denied = await api(`/api/trash/workpackage/${a.id}/restore`, { method: "POST" });
+    expect(denied.status).toBe(403);
+    expect(await deletedAt("workpackage", a.id)).not.toBeNull();
+    const r = await api(`/api/trash/workpackage/${a.id}/restore`, { method: "POST", email: ADMIN_EMAIL });
     expect([r.status, r.body]).toEqual([200, { restored: a.id, children: 4 }]);
     expect((await api(`/api/projects/${p.id}`)).body.workpackages.map((w: any) => w.id)).toContain(a.id);
-    expect((await api(`/api/trash/workpackage/${a.id}/restore`, { method: "POST" })).status).toBe(404);
+    expect((await api(`/api/trash/workpackage/${a.id}/restore`, { method: "POST", email: ADMIN_EMAIL })).status).toBe(404);
+  });
+
+  it("restore is admin-only on REST, MCP and in the data layer", async () => {
+    const p = await owned("Restore role");
+    const w = await upsertWorkpackage(db, p.id, { title: "w" }, A);
+    await deleteEntity(db, "workpackage", w.id, A);
+    const DECIDER = testCaller({ actor: "user:decider@example.com", role: "decider", channel: "dashboard" });
+    const SERVICE = testCaller({ actor: "hook:x", role: "admin", channel: "service" });
+    for (const by of [EDITOR, DECIDER, SERVICE])
+      await expect(restoreEntity(db, "workpackage", w.id, by)).rejects.toBeInstanceOf(ForbiddenError);
+    const viaMcp = await mcp("restore_entity", { kind: "workpackage", id: w.id });
+    expect(viaMcp.isError).toBe(true);
+    expect(JSON.parse(viaMcp.text).error).toBe("forbidden");
+    expect(await deletedAt("workpackage", w.id)).not.toBeNull();
+    // an MCP client with an admin login may restore (roles apply equally to MCP, spec §4.2)
+    expect(await restoreEntity(db, "workpackage", w.id, AGENT)).toEqual({ restored: w.id, children: 0 });
   });
 
   it("persons can be deleted via REST", async () => {
@@ -376,7 +426,7 @@ describe("REST and MCP", () => {
     const del = await mcp("delete_entity", { kind: "workpackage", id: w.id, confirm: true });
     expect(JSON.parse(del.text)).toEqual({ deleted: w.id, children: 0 });
     expect(await deletedAt("workpackage", w.id)).not.toBeNull();
-    const res = await mcp("restore_entity", { kind: "workpackage", id: w.id });
+    const res = await mcp("restore_entity", { kind: "workpackage", id: w.id }, ADMIN_EMAIL);
     expect(JSON.parse(res.text)).toEqual({ restored: w.id, children: 0 });
     expect(await deletedAt("workpackage", w.id)).toBeNull();
     const ev = (await listEvents(db, { project_id: p.id })).find((e: EventRow) => e.action === "restore")!;

@@ -5,6 +5,8 @@ import { createProject, getProjectDetail, listProjects } from "../src/data/proje
 import { getContextBundle } from "../src/data/context-read";
 import { deleteEntity, deletePreview, restoreEntity } from "../src/data/entities";
 import { setScores } from "../src/data/logs";
+import { upsertWorkpackage } from "../src/data/workpackages";
+import { upsertMilestone } from "../src/data/milestones";
 import { listRisks, riskCriterion, upsertRisk } from "../src/data/risks";
 import { ConflictError, ValidationError } from "../src/data/util";
 import { POLICY } from "../src/policy";
@@ -373,6 +375,34 @@ describe("risk log trash", () => {
 
     expect((await listRisks(db, {})).some((r) => r.id === risk.id)).toBe(true);
     expect((await listRisks(db, {})).some((r) => r.id === own.id)).toBe(false);
+  });
+});
+
+describe("risk links to trashed items", () => {
+  it("a link to a trashed WP or milestone reads as absent; restoring the item brings it back", async () => {
+    const project = await proj();
+    const parent = await upsertWorkpackage(db, project.id, { title: "parent" }, A);
+    const child = await upsertWorkpackage(db, project.id, { title: "child", parent_id: parent.id }, A);
+    const m = await upsertMilestone(db, project.id, { title: "m on parent", workpackage_id: parent.id }, A);
+    const r = await upsertRisk(
+      db,
+      project.id,
+      { title: "Linked risk", probability: 2, impact: 2, workpackage_id: child.id, milestone_id: m.id },
+      A,
+    );
+    const links = async () => {
+      const x = (await listRisks(db, { project_id: project.id })).find((y) => y.id === r.id)!;
+      return [x.workpackage_id, x.milestone_id];
+    };
+    // deleting the subtree (the child and the milestone go with the parent) leaves the risk live
+    await deleteEntity(db, "workpackage", parent.id, A);
+    expect(await links()).toEqual([null, null]);
+    expect((await getProjectDetail(db, project.id)).project.id).toBe(project.id);
+    // the risk stays editable; the stored link is kept for a restore
+    const edited = await upsertRisk(db, project.id, { id: r.id, title: "Linked risk (edited)" }, A);
+    expect([edited.title, edited.workpackage_id, edited.milestone_id]).toEqual(["Linked risk (edited)", null, null]);
+    await restoreEntity(db, "workpackage", parent.id, A);
+    expect(await links()).toEqual([child.id, m.id]);
   });
 });
 

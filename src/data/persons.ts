@@ -71,8 +71,9 @@ async function findByEmail(db: D1Database, email: string): Promise<PersonRow | n
 /**
  * The person behind an allow-listed login email, created on first use (spec §4.1): name = local part,
  * internal, role admin when listed in policy.admins, else policy.default_role. A stakeholder row with the
- * same email becomes the user; if it has no access role yet it gets one now. A person in the trash is a
- * deactivated login (403) until an admin restores it; no second person is created for the email.
+ * same email becomes the user; if it has no access role yet it gets one now. A listed login is promoted
+ * later only while no live admin exists (bootstrapAdmin). A person in the trash is a deactivated login
+ * (403) until an admin restores it; no second person is created for the email.
  */
 export async function ensureUserPerson(db: D1Database, email: string): Promise<PersonRow> {
   const addr = email.trim().toLowerCase();
@@ -122,7 +123,37 @@ export async function ensureUserPerson(db: D1Database, email: string): Promise<P
     ]);
     p = await getPerson(db, p.id);
   }
-  return p;
+  return bootstrapAdmin(db, addr, p);
+}
+
+/**
+ * Admin bootstrap (Ruling 59): a login listed in policy.admins becomes admin while no live person is
+ * admin, e.g. a deployment whose people signed in before policy.admins was filled. Never overrides a
+ * deliberate demotion once an admin exists. One conditional UPDATE, so concurrent logins promote at
+ * most as the rule allows; the event follows only a promotion that happened.
+ */
+async function bootstrapAdmin(db: D1Database, addr: string, p: PersonRow): Promise<PersonRow> {
+  if (p.access_role === "admin" || !POLICY.admins.includes(addr)) return p;
+  const noAdmin = "NOT EXISTS (SELECT 1 FROM person WHERE access_role = 'admin' AND deleted_at IS NULL)";
+  // Cheap read first: listed non-admins sign in on every request once an admin exists.
+  if (!(await db.prepare(`SELECT ${noAdmin} AS none`).first<{ none: number }>())?.none) return p;
+  await db.batch([
+    db
+      .prepare(
+        `UPDATE person SET access_role = 'admin', version = version + 1, updated_at = ? WHERE id = ? AND deleted_at IS NULL AND access_role IS NOT 'admin' AND ${noAdmin}`,
+      )
+      .bind(now(), p.id),
+    eventStmtIfChanged(db, {
+      by: { actor: `user:${addr}`, personId: p.id, role: "admin", channel: "dashboard" },
+      project_id: null,
+      entity: "person",
+      entity_id: p.id,
+      action: "update",
+      summary: `${p.name}: access_role (policy.admins, no admin existed)`,
+      diff: { access_role: [p.access_role, "admin"] },
+    }),
+  ]);
+  return getPerson(db, p.id);
 }
 
 /**
