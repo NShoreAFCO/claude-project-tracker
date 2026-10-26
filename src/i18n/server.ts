@@ -71,6 +71,24 @@ export const STRINGS: Record<string, Record<string, string>> = {
     "riskstatus.open": "Open",
     "riskstatus.monitoring": "Monitoring",
     "riskstatus.closed": "Closed",
+    "oauth.notConfigured": "OIDC is not configured.",
+    "oauth.invalidRequest": "Invalid authorization request: {detail}",
+    "oauth.consentInvalid": "Consent invalid or expired: {detail}",
+    "oauth.methodNotAllowed": "Method Not Allowed",
+    "oauth.signInInvalid": "Sign-in invalid or expired: {detail}",
+    "oauth.signInCancelled": "Sign-in cancelled: {detail}",
+    "oauth.noCode": "no code",
+    "oauth.tokenExchangeFailed": "Token exchange failed ({status}).",
+    "oauth.noIdToken": "No id_token received.",
+    "oauth.invalidIdToken": "Invalid id_token.",
+    "oauth.accessDenied": "Access denied.",
+    "consent.title": "Allow access – {app}",
+    "consent.heading": "Allow access?",
+    "consent.wants": "{client} wants to access {app} (read and write projects).",
+    "consent.redirect": "Redirect to: {host}",
+    "consent.loopback": "The redirect goes to a local application. Any program on this computer could receive it.",
+    "consent.allow": "Allow",
+    "consent.deny": "Deny",
   },
 
   de: {
@@ -140,6 +158,24 @@ export const STRINGS: Record<string, Record<string, string>> = {
     "riskstatus.open": "Offen",
     "riskstatus.monitoring": "Unter Beobachtung",
     "riskstatus.closed": "Geschlossen",
+    "oauth.notConfigured": "OIDC ist nicht konfiguriert.",
+    "oauth.invalidRequest": "Ungültige Autorisierungsanfrage: {detail}",
+    "oauth.consentInvalid": "Zustimmung ungültig oder abgelaufen: {detail}",
+    "oauth.methodNotAllowed": "Methode nicht erlaubt",
+    "oauth.signInInvalid": "Anmeldung ungültig oder abgelaufen: {detail}",
+    "oauth.signInCancelled": "Anmeldung abgebrochen: {detail}",
+    "oauth.noCode": "kein Code",
+    "oauth.tokenExchangeFailed": "Token-Austausch fehlgeschlagen ({status}).",
+    "oauth.noIdToken": "Kein id_token erhalten.",
+    "oauth.invalidIdToken": "Ungültiges id_token.",
+    "oauth.accessDenied": "Zugriff verweigert.",
+    "consent.title": "Zugriff erlauben – {app}",
+    "consent.heading": "Zugriff erlauben?",
+    "consent.wants": "{client} möchte auf {app} zugreifen (Projekte lesen und schreiben).",
+    "consent.redirect": "Weiterleitung an: {host}",
+    "consent.loopback": "Die Weiterleitung geht an eine lokale Anwendung. Jedes Programm auf diesem Computer könnte sie empfangen.",
+    "consent.allow": "Erlauben",
+    "consent.deny": "Ablehnen",
   },
 };
 
@@ -181,4 +217,23 @@ export function reportLocale(project: { language?: string | null }): string {
   }
 
   return POLICY.locales[0] ?? "en";
+}
+
+/** The instance default locale (first of policy.locales, else app.locale): worker pages a person reads. */
+export function defaultLocale(): string {
+  return POLICY.locales[0] ?? (INSTANCE.app as { locale?: string }).locale ?? "en";
+}
+
+/** HTML-escape text (&, <, >, quotes). */
+export function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+}
+
+/**
+ * serverT for HTML pages: the translated text (core or instance override) is escaped, then the
+ * placeholders are filled in one pass with `html` values, which the caller has already escaped
+ * (they may carry markup such as <strong>). A value is never re-interpolated.
+ */
+export function serverTHtml(locale: string, key: string, html: Record<string, string> = {}): string {
+  return interpolate(escapeHtml(serverT(locale, key)), html);
 }
