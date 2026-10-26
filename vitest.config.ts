@@ -1,24 +1,7 @@
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { defineConfig } from "vitest/config";
 // @ts-expect-error untyped JS module
-import { buildSeed } from "./seed/build-seed.mjs";
-
-/** The acceptance test seeds from the example seed, whatever instance/ is built: run the real seed generator on a temp root that holds only instance.example/seed.json. */
-function exampleSeedSql(): string {
-  const root = mkdtempSync(join(tmpdir(), "tracker-example-seed-"));
-  try {
-    mkdirSync(join(root, "seed"));
-    mkdirSync(join(root, "instance.example"));
-    cpSync("instance.example/seed.json", join(root, "instance.example", "seed.json"));
-    buildSeed(root);
-    return readFileSync(join(root, "seed", "seed.sql"), "utf8");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-}
+import { exampleSeedSql } from "./test/example-seed.mjs";
 
 export default defineConfig({
   define: { __EXAMPLE_SEED_SQL__: JSON.stringify(exampleSeedSql()) },
