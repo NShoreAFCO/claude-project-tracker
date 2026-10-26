@@ -8,3 +8,8 @@ declare global {
     }
   }
 }
+
+/** Injected by vitest.config.ts: SQL generated from instance.example/seed.json. */
+declare global {
+  const __EXAMPLE_SEED_SQL__: string;
+}
