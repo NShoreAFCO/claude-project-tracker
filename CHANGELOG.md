@@ -1,5 +1,30 @@
 # Changelog
 
+## R5
+
+### Added
+
+- Role enforcement: every REST route and MCP tool maps to one action (`read | write | decide | close | verify_sign_off | manage_roles | purge`) with a minimum role (viewer < editor < decider < admin); an unmapped route or tool answers 403. Service tokens act as editor and never decide, close, verify a `sign_off`, manage roles or purge, even with `on_behalf_of`. MCP logins act with the person's role but never manage roles or purge. Roles are read on every request. The full matrix is in `docs/SPEC.md` section 24.
+- Closing a project (`done`, `abandoned`) and reopening it need a decider. Recording, changing or lowering a `sign_off` verification needs a decider; `review`, `test` and `demo` verification need a person. Restore from the trash is an editor action, purge an admin action. Viewers may edit only their own language, display name and phone (`PATCH /api/persons/me`). The Claude Code hook checks the user's role.
+- Hygiene: a project in a `policy.target_date_required_categories` category needs a target date to become `active` (400); `create_project` without status then gives `idea` plus a warning. Project `language` is checked against `policy.locales`.
+- The OAuth consent and error pages use the instance default language and the instance string overrides.
+- Setup, backup and deploy scripts fall back to wrangler's own login (`wrangler login`) with the account from the instance config when no saved token file exists.
+
+### Changed
+
+- Viewers no longer see `local_path`, `session_id` or `repo_url` (REST and MCP); branch `repo` and `pr_url` stay visible.
+- `GET /api/whoami` accepts GET only.
+
+### Breaking
+
+- Viewers lose write access everywhere (403).
+- Reopening a closed project needs a decider.
+- Viewers no longer see the internal fields above.
+
+### Migration
+
+- None. Update, run `npm test` and `npm run check`, then deploy. Review the People view before deploying: everyone who should close projects or verify sign-offs needs the `decider` role, and the default role is still `editor`.
+
 ## R4
 
 ### Added
