@@ -3,6 +3,7 @@ import { reachStmts } from "./milestones";
 import { gateGuardedBatch, gateLockedSql, lockingGates, startGuard } from "./gates";
 import { LIVE, NotFoundError, ValidationError, eventStmt, newId, now, type Diff } from "./util";
 import { activitySet } from "./activity";
+import { verificationGuardStmt, verificationGuarded, verificationRequiredError } from "./rules";
 
 async function requireProject(db: D1Database, id: string): Promise<void> {
   if (!(await db.prepare(`SELECT 1 FROM project WHERE id = ? AND ${LIVE()}`).bind(id).first()))
@@ -173,15 +174,26 @@ export async function logProgress(
     wp && progress !== null
       ? await startGuard(db, by, wp, { status: nextStatus, progress }, { always: true })
       : { stmts: [] as D1PreparedStatement[], ids: [] as string[] };
+  // F2: progress >= 100 completes the WP; with a verification method the caller's person verifies it
+  // (no person: refused, and re-checked by a guard first in the batch in case a verification appears meanwhile).
+  const completes = !!wp && progress !== null && progress >= 100 && wp.status !== "done";
+  const verifier = by.personId ?? null;
+  const needsVerifier = completes && (wp.verification ?? "none") !== "none";
+  if (needsVerifier && !verifier) throw verificationRequiredError(String(wp.verification));
+  // Guarded whenever the log may complete the WP, also when it was done at read time: it may be reopened
+  // with a verification meanwhile (the guard checks status and verification when the batch runs).
+  const verifyGuard = wp && progress !== null && progress >= 100 && !verifier ? [verificationGuardStmt(db, wp.id)] : [];
   if (wp && progress !== null) {
+    const verify = "? >= 100 AND status != 'done' AND verification != 'none' AND verified_by IS NULL";
     stmts.push(
       db
         .prepare(
           `UPDATE workpackage SET progress = ?, status = CASE WHEN ? >= 100 THEN 'done' WHEN status = 'todo' THEN 'doing' ELSE status END,
             blocked_since = CASE WHEN ? >= 100 THEN NULL ELSE blocked_since END, waiting_reason = CASE WHEN ? >= 100 THEN NULL ELSE waiting_reason END,
+            verified_by = CASE WHEN ${verify} THEN ? ELSE verified_by END, verified_at = CASE WHEN ${verify} THEN ? ELSE verified_at END,
             version = version + 1, updated_at = ?${act.sql} WHERE id = ?`,
         )
-        .bind(progress, progress, progress, progress, ts, ...act.params, wp.id),
+        .bind(progress, progress, progress, progress, progress, verifier, progress, ts, ts, ...act.params, wp.id),
     );
   } else if (wp && wp.status === "todo" && !autoStartLocked) {
     stmts.push(
@@ -197,6 +209,10 @@ export async function logProgress(
   if (wp && effort !== null) diff.effort_actual_pd = [wp.effort_actual_pd ?? null, (wp.effort_actual_pd ?? 0) + effort];
   if (wp && progress !== null) diff.progress = [wp.progress, progress];
   if (wp && nextStatus !== wp.status) diff.status = [wp.status, nextStatus];
+  if (needsVerifier) {
+    diff.verified_by = [null, verifier];
+    diff.verified_at = [null, ts];
+  }
   if (input.session_id) {
     stmts.push(
       db
@@ -218,10 +234,10 @@ export async function logProgress(
     }),
   );
   const reach = Object.keys(diff).length ? reachStmts(db, input.project_id, by) : [];
-  const batch = [...gateGuard.stmts, ...stmts, ...reach];
+  const batch = [...gateGuard.stmts, ...verifyGuard, ...stmts, ...reach];
   if (beforeProgressWrite) await beforeProgressWrite();
-  const res = await gateGuardedBatch(db, batch, gateGuard.ids, by);
-  const eventId = Number(res[gateGuard.stmts.length + stmts.length - 1].meta.last_row_id);
+  const res = await verificationGuarded(db, wp?.id ?? "", () => gateGuardedBatch(db, batch, gateGuard.ids, by));
+  const eventId = Number(res[gateGuard.stmts.length + verifyGuard.length + stmts.length - 1].meta.last_row_id);
   if (!wp) return { event_id: eventId };
   return {
     event_id: eventId,

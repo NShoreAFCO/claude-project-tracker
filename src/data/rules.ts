@@ -6,8 +6,19 @@ import type { Caller, ProjectRow, WorkpackageRow } from "../types";
 import { activitySet } from "./activity";
 import { reachStmts } from "./milestones";
 import { recomputeScheduleStmts, scheduleBatch, storeSchedule, storedDependsOn, type ScheduleIssue } from "./schedule";
-import { ConflictError, LIVE, NotFoundError, ValidationError, eventStmtWhere, now, parseJsonArray, type Diff } from "./util";
+import {
+  ConflictError,
+  ForbiddenError,
+  LIVE,
+  NotFoundError,
+  ValidationError,
+  eventStmtWhere,
+  now,
+  parseJsonArray,
+  type Diff,
+} from "./util";
 import { gateLockedError, gateLockedSql, gatesEnforced, lockingGates } from "./gates";
+import { resolvePersonRef } from "./persons";
 import { isAgent } from "../auth/caller";
 
 /** Machine-readable details of a refused transition (the 409 body's `current`). */
@@ -176,6 +187,133 @@ export function applyWpRules(before: WpRuleState | null, fields: Record<string, 
     const reason = "drop_reason" in fields ? fields.drop_reason : before?.drop_reason;
     if (!filled(reason))
       throw new TransitionError("status dropped requires drop_reason", { code: "DROP_REASON_MISSING", missing: ["drop_reason"] });
+  }
+}
+
+// ---- verification (spec F2)
+
+/** How a WP's completion is verified; `none` = no verification needed. */
+export const VERIFICATIONS = ["review", "test", "demo", "sign_off", "none"] as const;
+export type Verification = (typeof VERIFICATIONS)[number];
+
+/** Strength of a verification method; agents may raise it but never lower it (test and demo are equal). */
+const VERIFICATION_RANK: Record<string, number> = { none: 0, review: 1, test: 2, demo: 2, sign_off: 3 };
+export const verificationRank = (v: unknown): number => VERIFICATION_RANK[String(v ?? "none")] ?? 0;
+
+/**
+ * SQL list of the stored verification values an agent may change from when writing `to` (rank not above
+ * `to`'s): the in-batch re-check of the no-lowering rule. Values come from VERIFICATIONS, never from input.
+ */
+export const verificationNotAboveSql = (to: unknown): string =>
+  `(${VERIFICATIONS.filter((v) => verificationRank(v) <= verificationRank(to))
+    .map((v) => `'${v}'`)
+    .join(", ")})`;
+
+export const verificationLoweredError = (from: string, to: string): ForbiddenError =>
+  new ForbiddenError(
+    `agents may raise a work package's verification but not lower it (${from} -> ${to}); a person lowers it in the dashboard`,
+  );
+
+export const verificationRequiredError = (verification: string): TransitionError =>
+  new TransitionError(
+    `status done with verification ${verification} requires verified_by: a person (the logged-in user by default; a service token needs on_behalf_of)`,
+    { code: "VERIFICATION_REQUIRED", missing: ["verified_by"] },
+  );
+
+/**
+ * The `verified_by` input: undefined keeps the stored value, null or "" clears it, anything else must
+ * resolve to a live person (id, email or exact name; free text and agent names are refused). Agents
+ * (MCP, service tokens) may only name their own person: the OAuth login, or the service's on_behalf_of.
+ */
+export async function verifierInput(db: D1Database, v: unknown, by: Caller): Promise<string | null | undefined> {
+  if (v === undefined) return undefined;
+  if (v === null || v === "") return null;
+  if (typeof v !== "string" || v.trim().length > 200) throw new ValidationError("verified_by must be a person id or email");
+  const { person_id } = await resolvePersonRef(db, v);
+  if (!person_id)
+    throw new ValidationError(
+      `verified_by: "${v.trim()}" matches no person; verified_by must reference a person, not free text or an agent`,
+    );
+  if (isAgent(by) && person_id !== by.personId)
+    throw new ForbiddenError(
+      "agents may only record their own login's person as verified_by; the person who verified records it in the dashboard",
+    );
+  return person_id;
+}
+
+type VerifyState = Pick<WorkpackageRow, "status" | "verification" | "verified_by" | "verified_at">;
+
+/**
+ * Apply the verification rule to a write (mutates `fields`; run after applyWpRules). `before` is the
+ * stored row, null on create.
+ * - A WP that is not done carries no verification: verified_by/verified_at are cleared.
+ * - The rule bites only on a transition: the WP becomes done, or a done WP's verification, verified_by
+ *   or verified_at change. Other edits of a done WP (also a legacy unverified one) stay possible.
+ * - done with verification != none needs verified_by; it defaults to the caller's person (dashboard
+ *   login, MCP OAuth login, service on_behalf_of). No person (a service token without on_behalf_of)
+ *   → 409 VERIFICATION_REQUIRED, as is an explicit null.
+ * - verified_at defaults to now whenever verified_by gets a new value.
+ */
+export function applyVerificationRules(before: VerifyState | null, fields: Record<string, unknown>, by: Caller, ts = now()): void {
+  // Agents (mcp, service) never lower the verification a person set, in any status (the UPDATE re-checks).
+  if (
+    isAgent(by) &&
+    before &&
+    fields.verification !== undefined &&
+    verificationRank(fields.verification) < verificationRank(before.verification)
+  )
+    throw verificationLoweredError(String(before.verification ?? "none"), String(fields.verification));
+  const next = String(fields.status ?? before?.status ?? "todo");
+  if (next !== "done") {
+    fields.verified_by = null;
+    fields.verified_at = null;
+    return;
+  }
+  const verification = String(fields.verification ?? before?.verification ?? "none");
+  const keep = !!before && before.status === "done" && (before.verification ?? "none") === verification;
+  const storedBy = keep ? (before.verified_by ?? null) : null;
+  const storedAt = keep ? (before.verified_at ?? null) : null;
+  const byGiven = "verified_by" in fields && fields.verified_by !== undefined;
+  const atGiven = "verified_at" in fields && fields.verified_at !== undefined;
+  const touched = !keep || (byGiven && fields.verified_by !== storedBy) || (atGiven && fields.verified_at !== storedAt);
+  if (!touched) return;
+  let verifiedBy = byGiven ? ((fields.verified_by as string | null) ?? null) : storedBy;
+  if (verification !== "none" && verifiedBy === null && !byGiven) verifiedBy = by.personId ?? null;
+  let verifiedAt = atGiven ? ((fields.verified_at as string | null) ?? null) : verifiedBy === storedBy ? storedAt : null;
+  if (verifiedBy !== null && verifiedAt === null) verifiedAt = ts;
+  if (verifiedBy === null) verifiedAt = null;
+  // Agents never rewrite a verification another person recorded (they may reopen the WP, which clears it
+  // and stays in the history).
+  const prevBy = before?.status === "done" ? (before.verified_by ?? null) : null;
+  if (isAgent(by) && prevBy !== null && prevBy !== by.personId && (verifiedBy !== prevBy || verifiedAt !== (before?.verified_at ?? null)))
+    throw new ForbiddenError(
+      "agents cannot change a verification recorded by another person; that person changes it in the dashboard, or reopen the work package",
+    );
+  if (verification !== "none" && verifiedBy === null) throw verificationRequiredError(verification);
+  fields.verified_by = verifiedBy;
+  fields.verified_at = verifiedAt;
+}
+
+const VERIFY_GUARD_FAILED = /NOT NULL constraint failed: workpackage\.title/i;
+
+/**
+ * Guard statement (put it first in the batch) for a write that may complete WP `wpId` without a
+ * verifier: a no-op unless the WP needs verification and has no verifier, else it fails a NOT NULL
+ * constraint and D1 rolls the whole batch back. Catches a verification set between read and write.
+ */
+export const verificationGuardStmt = (db: D1Database, wpId: string): D1PreparedStatement =>
+  db
+    .prepare("UPDATE workpackage SET title = NULL WHERE id = ? AND status != 'done' AND verification != 'none' AND verified_by IS NULL")
+    .bind(wpId);
+
+/** Runs `write`; a failed verificationGuardStmt becomes 409 VERIFICATION_REQUIRED. */
+export async function verificationGuarded<T>(db: D1Database, wpId: string, write: () => Promise<T>): Promise<T> {
+  try {
+    return await write();
+  } catch (e) {
+    if (!VERIFY_GUARD_FAILED.test(String((e as Error)?.message ?? e))) throw e;
+    const row = await db.prepare("SELECT verification FROM workpackage WHERE id = ?").bind(wpId).first<{ verification: string }>();
+    throw verificationRequiredError(row?.verification ?? "set");
   }
 }
 
