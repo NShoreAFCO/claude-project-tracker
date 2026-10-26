@@ -11,6 +11,7 @@ import {
   now,
   parseJsonArray,
 } from "./util";
+import { touchProject } from "./activity";
 import { issuesOf, recomputeScheduleStmts, scheduleBatch, storeSchedule, type ScheduleIssue } from "./schedule";
 import { OPENING_DECISIONS, agentGateRemovalError, gateClosedSql, gatesEnforced, type Decision } from "./gates";
 import { initials } from "./persons";
@@ -319,6 +320,7 @@ export async function upsertMilestone(
         summary: `${String(next.title)}: ${Object.keys(diff).join(", ")}`,
         diff,
       }),
+      ...touchProject(db, by, projectId, ts, false, true),
       ...linkStmts(existing.id, { version: existing.version + 1 }),
       ...reachStmts(db, projectId, by),
       ...schedule.stmts,
@@ -370,6 +372,7 @@ export async function upsertMilestone(
       },
     }),
     ...linkStmts(row.id, null),
+    ...touchProject(db, by, projectId, ts),
     ...reachStmts(db, projectId, by),
     ...schedule.stmts,
   ]);

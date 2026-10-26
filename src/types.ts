@@ -79,6 +79,9 @@ export interface ProjectRow {
   version: number;
   created_at: string;
   updated_at: string;
+  /** Activity data (spec F8): last progress / last write; null until first tracked write. */
+  last_progress_at: string | null;
+  last_changed_at: string | null;
 }
 
 export interface WorkpackageRow {
@@ -122,6 +125,8 @@ export interface WorkpackageRow {
   version: number;
   created_at: string;
   updated_at: string;
+  last_progress_at: string | null;
+  last_changed_at: string | null;
 }
 
 export interface MilestoneRow {

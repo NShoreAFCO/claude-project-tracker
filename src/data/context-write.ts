@@ -15,6 +15,7 @@ import {
   slugify,
   utf8Bytes,
 } from "./util";
+import { touchProject } from "./activity";
 
 type Source = "upload" | "paste" | "claude" | "sync";
 const SOURCES: readonly Source[] = ["upload", "paste", "claude", "sync"];
@@ -108,6 +109,7 @@ async function replaceContent(
       summary: label(existing) + summarySuffix,
       diff: { version: [existing.version, existing.version + 1], bytes: [existing.bytes, bytes] },
     }),
+    ...touchProject(db, by, existing.project_id, ts, false, true),
     pruneStmt(db, existing.id),
   ]);
   if (!res[1].meta.changes) {
@@ -206,6 +208,7 @@ export async function writeContext(
       summary: label({ ...owner, slug }),
       diff: { bytes: [null, bytes] },
     }),
+    ...touchProject(db, by, owner.project_id, ts),
   ]);
   return getDoc(db, id);
 }
@@ -293,6 +296,8 @@ export async function appendContext(
       )
       .bind(...keyArgs, ...keyArgs, CONTEXT_REVISIONS_KEPT),
   ];
+  // Right after the event statement, which only runs if the append applied.
+  stmts.splice(pre.length + 3, 0, ...touchProject(db, by, owner.project_id, ts, false, true));
   const res = await db.batch(stmts);
   const doc = await db
     .prepare(`SELECT * FROM context_doc WHERE ${keySql}`)

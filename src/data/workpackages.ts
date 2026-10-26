@@ -1,5 +1,6 @@
 import type { Caller, PersonOut, PersonRefOut, ProjectRow, WorkpackageRow } from "../types";
 import { ConflictError, LIVE, NotFoundError, ValidationError, diffFields, eventStmt, eventStmtIfChanged, now, slugify } from "./util";
+import { activitySet, isSystem, projectActivityStmt } from "./activity";
 import { dependsOnInput, issuesOf, recomputeScheduleStmts, scheduleBatch, storeSchedule, snapWp, type ScheduleIssue } from "./schedule";
 import { WP_CATEGORIES, checkCategory, checkHuman } from "./categories";
 import { reachStmts } from "./milestones";
@@ -286,6 +287,11 @@ export async function upsertWorkpackage(
       wps: [snapWp(next as unknown as WorkpackageRow)],
       checkDependsOn: "depends_on" in diff ? existing.id : undefined,
     });
+    // Spec F8: status or progress changes are progress; other edits only count as a change.
+    const ts = now();
+    const progressWrite = changed.includes("status") || changed.includes("progress");
+    const act = activitySet(by, ts, progressWrite);
+    const projectAct = projectActivityStmt(db, by, projectId, ts, progressWrite, true);
     const res = await gateGuardedBatch(
       db,
       [
@@ -293,9 +299,9 @@ export async function upsertWorkpackage(
         ...stakeStmts,
         db
           .prepare(
-            `UPDATE workpackage SET ${changed.map((f) => `${f} = ?, `).join("")}version = version + 1, updated_at = ? WHERE id = ? AND version = ?`,
+            `UPDATE workpackage SET ${changed.map((f) => `${f} = ?, `).join("")}version = version + 1, updated_at = ?${act.sql} WHERE id = ? AND version = ?`,
           )
-          .bind(...changed.map((f) => next[f] ?? null), now(), existing.id, existing.version),
+          .bind(...changed.map((f) => next[f] ?? null), ts, ...act.params, existing.id, existing.version),
         eventStmtIfChanged(db, {
           by,
           project_id: projectId,
@@ -305,6 +311,7 @@ export async function upsertWorkpackage(
           summary: `${String(next.title)}: ${Object.keys(diff).join(", ")}`,
           diff,
         }),
+        ...(projectAct ? [projectAct] : []),
         ...reachStmts(db, projectId, by),
         ...schedule.stmts,
       ],
@@ -360,12 +367,15 @@ export async function upsertWorkpackage(
     version: 1,
     created_at: ts,
     updated_at: ts,
+    last_progress_at: isSystem(by) ? null : ts,
+    last_changed_at: isSystem(by) ? null : ts,
   };
+  const projectAct = projectActivityStmt(db, by, projectId, ts, false);
   const schedule = await recomputeScheduleStmts(db, projectId, {
     wps: [snapWp(row)],
     checkDependsOn: fields.depends_on !== undefined ? id : undefined,
   });
-  const cols = ["id", "project_id", ...WRITE_COLS, "version", "created_at", "updated_at"] as const;
+  const cols = ["id", "project_id", ...WRITE_COLS, "version", "created_at", "updated_at", "last_progress_at", "last_changed_at"] as const;
   await gateGuardedBatch(
     db,
     [
@@ -386,6 +396,7 @@ export async function upsertWorkpackage(
         },
       }),
       ...(stakeholders?.length ? stakeholderStmts(db, id, 1, stakeholders) : []),
+      ...(projectAct ? [projectAct] : []),
       ...reachStmts(db, projectId, by),
       ...schedule.stmts,
     ],

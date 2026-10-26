@@ -39,6 +39,7 @@ import {
 } from "./rules";
 import { gateClosedSql, gateLockedWpIds } from "./gates";
 import { isAgent } from "../auth/caller";
+import { activitySet, isSystem, projectStale } from "./activity";
 import {
   ConflictError,
   LIVE,
@@ -123,7 +124,10 @@ export type ProjectCard = {
   /** Number of waiting WPs (deferrals), for the card's Waiting chip. */
   waiting_count: number;
   next_milestone: { id: string; title: string; due_date: string | null } | null;
+  /** Last progress (log_progress, status change, WP done); not touched by system writes. */
   last_activity: string | null;
+  /** Active project without progress for stale_days (policy, per-category override). */
+  stale: boolean;
   open_branches: number;
   context_docs: number;
   blocked: string[];
@@ -170,6 +174,8 @@ export type ProjectOut = Omit<ProjectRow, "tags"> & {
   stalled_blocked: boolean;
   /** 100 % derived progress, all WPs done (or dropped), project not yet closed. */
   closure_due: boolean;
+  /** Active project without progress for stale_days (spec F8). */
+  stale: boolean;
   /** What the percentage rests on (spec F7): mode, done/total leaf WPs, derived weighted percent, manual reason. */
   progress_basis: ProgressBasis;
   /** Projects this one continues / its follow-up projects (project_link kind "follows"). */
@@ -192,6 +198,7 @@ export async function toProjectOut(db: D1Database, row: ProjectRow, wps?: Workpa
     wps ?? (await db.prepare(`SELECT * FROM workpackage WHERE project_id = ? AND ${LIVE()}`).bind(row.id).all<WorkpackageRow>()).results;
   return {
     ...row,
+    stale: projectStale(row),
     tags: parseJsonArray(row.tags),
     owner: personRefOut(row.owner_person_id, row.owner_text, people),
     sponsor: personRefOut(row.sponsor_person_id, row.sponsor_text, people),
@@ -275,14 +282,13 @@ export async function listProjects(
   db: D1Database,
   filter: { status?: string; tag?: string; category?: string; owner?: string } = {},
 ): Promise<ProjectCard[]> {
-  const [projects, wps, branches, docs, events, ms] = await db.batch([
+  const [projects, wps, branches, docs, ms] = await db.batch([
     filter.status
       ? db.prepare(`SELECT * FROM project WHERE status = ? AND ${LIVE()} ORDER BY updated_at DESC`).bind(filter.status)
       : db.prepare(`SELECT * FROM project WHERE ${LIVE()} ORDER BY updated_at DESC`),
     db.prepare(`SELECT * FROM workpackage WHERE ${LIVE()}`),
     db.prepare("SELECT project_id, COUNT(*) AS n FROM branch WHERE status = 'open' GROUP BY project_id"),
     db.prepare(`SELECT project_id, COUNT(*) AS n FROM context_doc WHERE ${LIVE()} GROUP BY project_id`),
-    db.prepare("SELECT project_id, MAX(ts) AS ts FROM event WHERE project_id IS NOT NULL GROUP BY project_id"),
     db.prepare(
       `SELECT m.project_id, m.id, m.title, m.due_date FROM milestone m WHERE ${LIVE("m")} AND NOT (${QUALIFIES}) ORDER BY m.due_date IS NULL, m.due_date, m.sort, m.title`,
     ),
@@ -295,7 +301,6 @@ export async function listProjects(
   const count = (rows: unknown[]) => new Map((rows as Array<{ project_id: string; n: number }>).map((r) => [r.project_id, r.n]));
   const openBranches = count(branches.results);
   const docCount = count(docs.results);
-  const lastEvent = new Map((events.results as Array<{ project_id: string; ts: string }>).map((r) => [r.project_id, r.ts]));
   const tag = filter.tag?.toLowerCase();
   const rows = (projects.results as ProjectRow[]).filter((p) => !filter.owner || p.owner_person_id === filter.owner);
   const people = await personOuts(
@@ -310,7 +315,6 @@ export async function listProjects(
   return rows
     .map((p) => {
       const list = wpBy.get(p.id) ?? [];
-      const ev = lastEvent.get(p.id) ?? null;
       return {
         risk_summary: risks.get(p.id)!,
         id: p.id,
@@ -335,7 +339,8 @@ export async function listProjects(
             .sort()[0] ?? null,
         waiting_count: list.filter((w) => !w.deleted_at && w.status === "waiting").length,
         next_milestone: nextMs.get(p.id) ?? null,
-        last_activity: ev && ev > p.updated_at ? ev : p.updated_at,
+        last_activity: p.last_progress_at ?? p.created_at,
+        stale: projectStale(p),
         open_branches: openBranches.get(p.id) ?? 0,
         context_docs: docCount.get(p.id) ?? 0,
         blocked: list
@@ -500,6 +505,8 @@ export async function createProject(db: D1Database, input: ProjectInput, by: Cal
     version: 1,
     created_at: ts,
     updated_at: ts,
+    last_progress_at: isSystem(by) ? null : ts,
+    last_changed_at: isSystem(by) ? null : ts,
   };
   const closure = closureMissing(row.status, row);
   if (closure.length) throw closureError(row.status, closure);
@@ -514,7 +521,7 @@ export async function createProject(db: D1Database, input: ProjectInput, by: Cal
       fields: missing,
     });
   }
-  const cols = ["id", ...WRITE_COLS, "version", "created_at", "updated_at"] as const;
+  const cols = ["id", ...WRITE_COLS, "version", "created_at", "updated_at", "last_progress_at", "last_changed_at"] as const;
   await db.batch([
     db
       .prepare(`INSERT INTO project (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`)
@@ -594,14 +601,18 @@ export async function updateProject(
   const noOpenWps = toDone ? ` AND NOT EXISTS (SELECT 1 FROM workpackage WHERE project_id = ? AND ${OPEN_WP_SQL})` : "";
   const noGate = clearsDm ? ` AND NOT EXISTS (SELECT 1 FROM milestone WHERE ${GATE_OF_PROJECT})` : "";
   const noUndecided = agentDm ? ` AND NOT EXISTS (SELECT 1 FROM milestone gm WHERE ${undecidedGateOfProject()})` : "";
+  const ts = now();
+  // Spec F8: a status or manual-progress change is progress; other edits only count as a change.
+  const act = activitySet(by, ts, changed.includes("status") || changed.includes("progress_manual"));
   const res = await db.batch([
     db
       .prepare(
-        `UPDATE project SET ${changed.map((f) => `${f} = ?`).join(", ")}, version = version + 1, updated_at = ? WHERE id = ? AND version = ?${noOpenWps}${noGate}${noUndecided}`,
+        `UPDATE project SET ${changed.map((f) => `${f} = ?`).join(", ")}, version = version + 1, updated_at = ?${act.sql} WHERE id = ? AND version = ?${noOpenWps}${noGate}${noUndecided}`,
       )
       .bind(
         ...changed.map((f) => next[f] ?? null),
-        now(),
+        ts,
+        ...act.params,
         id,
         current.version,
         ...(toDone ? [id] : []),

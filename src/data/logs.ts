@@ -2,6 +2,7 @@ import type { Caller, EventOut, EventRow, ScoreRow, TokenCostRow, WorkpackageRow
 import { reachStmts } from "./milestones";
 import { gateGuardedBatch, gateLockedSql, lockingGates, startGuard } from "./gates";
 import { LIVE, NotFoundError, ValidationError, eventStmt, newId, now, type Diff } from "./util";
+import { activitySet } from "./activity";
 
 async function requireProject(db: D1Database, id: string): Promise<void> {
   if (!(await db.prepare(`SELECT 1 FROM project WHERE id = ? AND ${LIVE()}`).bind(id).first()))
@@ -113,12 +114,13 @@ export function parseEffortPd(v: unknown): number | null {
   return v;
 }
 
-export function effortStmt(db: D1Database, wpId: string, pd: number, ts: string): D1PreparedStatement {
+export function effortStmt(db: D1Database, wpId: string, pd: number, ts: string, by: Caller): D1PreparedStatement {
+  const act = activitySet(by, ts, true);
   return db
     .prepare(
-      "UPDATE workpackage SET effort_actual_pd = COALESCE(effort_actual_pd, 0) + ?, version = version + 1, updated_at = ? WHERE id = ?",
+      `UPDATE workpackage SET effort_actual_pd = COALESCE(effort_actual_pd, 0) + ?, version = version + 1, updated_at = ?${act.sql} WHERE id = ?`,
     )
-    .bind(pd, ts, wpId);
+    .bind(pd, ts, ...act.params, wpId);
 }
 
 /** Test seam: runs between the reads of logProgress and its batch. */
@@ -152,6 +154,8 @@ export async function logProgress(
   }
   const ts = now();
   const stmts: D1PreparedStatement[] = [];
+  // Spec F8: log_progress is progress on the WP and the project; system callers update no activity data.
+  const act = activitySet(by, ts, true);
   // Auto-start (spec F3): any progress log on a todo WP moves it to doing; progress ≥ 100 finishes it.
   // F5: a log without progress does not start a gate-locked WP (any caller); progress on one (agents, and
   // dashboard persons without an override) is refused (pre-check, and a guard statement first in the batch).
@@ -175,20 +179,20 @@ export async function logProgress(
         .prepare(
           `UPDATE workpackage SET progress = ?, status = CASE WHEN ? >= 100 THEN 'done' WHEN status = 'todo' THEN 'doing' ELSE status END,
             blocked_since = CASE WHEN ? >= 100 THEN NULL ELSE blocked_since END, waiting_reason = CASE WHEN ? >= 100 THEN NULL ELSE waiting_reason END,
-            version = version + 1, updated_at = ? WHERE id = ?`,
+            version = version + 1, updated_at = ?${act.sql} WHERE id = ?`,
         )
-        .bind(progress, progress, progress, progress, ts, wp.id),
+        .bind(progress, progress, progress, progress, ts, ...act.params, wp.id),
     );
   } else if (wp && wp.status === "todo" && !autoStartLocked) {
     stmts.push(
       db
         .prepare(
-          `UPDATE workpackage AS w SET status = 'doing', version = version + 1, updated_at = ? WHERE w.id = ? AND w.status = 'todo' AND NOT ${gateLockedSql("w")}`,
+          `UPDATE workpackage AS w SET status = 'doing', version = version + 1, updated_at = ?${act.sql} WHERE w.id = ? AND w.status = 'todo' AND NOT ${gateLockedSql("w")}`,
         )
-        .bind(ts, wp.id),
+        .bind(ts, ...act.params, wp.id),
     );
   }
-  if (wp && effort !== null) stmts.push(effortStmt(db, wp.id, effort, ts));
+  if (wp && effort !== null) stmts.push(effortStmt(db, wp.id, effort, ts, by));
   const diff: Diff = {};
   if (wp && effort !== null) diff.effort_actual_pd = [wp.effort_actual_pd ?? null, (wp.effort_actual_pd ?? 0) + effort];
   if (wp && progress !== null) diff.progress = [wp.progress, progress];
@@ -196,11 +200,11 @@ export async function logProgress(
   if (input.session_id) {
     stmts.push(
       db
-        .prepare("UPDATE project SET session_id = ?, version = version + 1, updated_at = ? WHERE id = ?")
-        .bind(input.session_id, ts, input.project_id),
+        .prepare(`UPDATE project SET session_id = ?, version = version + 1, updated_at = ?${act.sql} WHERE id = ?`)
+        .bind(input.session_id, ts, ...act.params, input.project_id),
     );
   } else {
-    stmts.push(db.prepare("UPDATE project SET updated_at = ? WHERE id = ?").bind(ts, input.project_id));
+    stmts.push(db.prepare(`UPDATE project SET updated_at = ?${act.sql} WHERE id = ?`).bind(ts, ...act.params, input.project_id));
   }
   stmts.push(
     eventStmt(db, {
