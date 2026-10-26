@@ -15,6 +15,7 @@ import { QUALIFIES, listMilestones, lockedWpIds } from "./milestones";
 import { PROJECT_CATEGORIES, checkCategory } from "./categories";
 import { personOuts, personRefInput, personRefOut, refInitials } from "./persons";
 import { withPersonOuts } from "./workpackages";
+import { riskCriterion, riskSummaries, type RiskSummary } from "./risks";
 import { ensureSchedule, snapMs, snapWp } from "./schedule";
 import { criticalPath } from "./critical-path";
 import {
@@ -96,6 +97,8 @@ const ID_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export type ProjectCard = {
+  /** Open risks, highest open score, and open risks scored 15+ without an action (spec F6). */
+  risk_summary: RiskSummary;
   id: string;
   title: string;
   summary: string | null;
@@ -268,12 +271,17 @@ export async function listProjects(
     db,
     rows.map((p) => p.owner_person_id),
   );
+  const risks = await riskSummaries(
+    db,
+    rows.map((p) => p.id),
+  );
 
   return rows
     .map((p) => {
       const list = wpBy.get(p.id) ?? [];
       const ev = lastEvent.get(p.id) ?? null;
       return {
+        risk_summary: risks.get(p.id)!,
         id: p.id,
         title: p.title,
         summary: p.summary,
@@ -354,6 +362,26 @@ export async function getProjectDetail(db: D1Database, id: string) {
     critical: critical.has(m.id),
   }));
   const totals = cost.results[0] as { claude_tokens: number; copilot_prompts: number };
+  // F6: the risk criterion follows the highest open risk score while open risks exist; the manual value is the fallback.
+  const risk_summary = (await riskSummaries(db, [id])).get(id)!;
+  const derivedRisk = riskCriterion(risk_summary.max_score === null ? [] : [risk_summary.max_score]);
+  const scoreRows = scores.results as Array<ScoreRow & { derived?: boolean }>;
+  const shownScores =
+    derivedRisk === null
+      ? scoreRows
+      : [
+          ...scoreRows.filter((s) => s.criterion !== "risk"),
+          {
+            id: "derived:risk",
+            project_id: id,
+            criterion: "risk",
+            value: derivedRisk,
+            note: `derived from the highest open risk score (${risk_summary.max_score})`,
+            recorded_at: now(),
+            actor: "system",
+            derived: true,
+          },
+        ].sort((a, b) => a.criterion.localeCompare(b.criterion));
   // F5: `locked` = unlocked by a never-reached milestone, or gate-locked (`gate_locked` names the gate).
   const gateLocks = await gateLockedWpIds(db, id);
   const locked = new Set([...lockedWpIds(milestones), ...gateLocks.keys()]);
@@ -372,7 +400,8 @@ export async function getProjectDetail(db: D1Database, id: string) {
     milestones,
     baseline: (baseline.results[0] as BaselineRef | undefined) ?? null,
     branches: branches.results as BranchRow[],
-    scores: scores.results as ScoreRow[],
+    scores: shownScores,
+    risk_summary,
     score_history_count: (scoreCount.results[0] as { n: number }).n,
     token_cost: { ...totals, entries: costEntries.results as TokenCostRow[] },
     events: events.results as EventOut[],
