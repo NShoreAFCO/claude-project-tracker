@@ -49,7 +49,7 @@ export function flatWps(tree, out = []) {
 export const openWps = (tree) => flatWps(tree).filter((w) => OPEN_WP_STATUS.includes(w.status));
 
 /** Returns project status select options with applicable access and completion restrictions. */
-function projectStatusOptions(existing, doneBlocked, doneTip) {
+export function projectStatusOptions(existing, doneBlocked, doneTip) {
   const statuses = ["idea", "active", "on_hold", "done", "abandoned"];
   const closed = ["done", "abandoned"];
   const closeDenied = existing !== null && !can("close");
@@ -86,28 +86,19 @@ function projectStatusOptions(existing, doneBlocked, doneTip) {
     });
 }
 
-/** Returns work package status select options with sign-off verification restrictions. */
-function wpStatusOptions(existing, statuses) {
-  const doneBlocked = !can("verify_sign_off") && existing !== null && existing.verification === "sign_off" && existing.status !== "done";
-
+/** Work package status options; Done needs the decider role while the SELECTED verification is sign_off. */
+export function wpStatusOptions(existing, statuses, verification = existing?.verification ?? "none") {
+  const doneBlocked = !can("verify_sign_off") && verification === "sign_off" && existing?.status !== "done";
   return statuses.map((status) => {
     if (status === "done" && doneBlocked) {
-      return [
-        status,
-        t("status." + status),
-        {
-          disabled: true,
-          title: roleTip("verify_sign_off"),
-        },
-      ];
+      return [status, t("status." + status), { disabled: true, title: roleTip("verify_sign_off") }];
     }
-
     return [status, t("status." + status)];
   });
 }
 
 /** Returns work package verification select options with sign-off downgrade restrictions. */
-function wpVerificationOptions(existing, methods) {
+export function wpVerificationOptions(existing, methods) {
   const downgradeBlocked = !can("verify_sign_off") && existing?.verification === "sign_off";
 
   return methods.map((method) => {
@@ -280,7 +271,26 @@ export async function wpForm(projectId, existing, tree, parentId = null, milesto
     narrow: false,
     fields: [
       { name: "title", label: t("fTitle"), required: true, value: w.title },
-      { name: "status", label: t("fStatus"), type: "select", options: wpStatusOptions(existing, WP_STATUS), value: w.status || "todo" },
+      {
+        name: "status",
+        label: t("fStatus"),
+        type: "select",
+        options: wpStatusOptions(existing, WP_STATUS),
+        value: w.status || "todo",
+        // follows the verification select live: completing a sign_off WP needs a decider
+        dependsOn: {
+          field: "verification",
+          update: (verification, select) => {
+            const opts = wpStatusOptions(existing, WP_STATUS, verification);
+            for (const o of select.options) {
+              const spec = opts.find((x) => x[0] === o.value)?.[2];
+              o.disabled = !!spec?.disabled;
+              o.title = spec?.title || "";
+            }
+            if (select.selectedOptions[0]?.disabled) select.value = existing?.status || "todo";
+          },
+        },
+      },
       { name: "parent_id", label: t("fParent"), type: "select", options: parents, value: w.parent_id ?? parentId ?? "" },
       {
         name: "category",

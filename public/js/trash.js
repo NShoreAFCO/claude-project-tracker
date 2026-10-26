@@ -48,7 +48,9 @@ export async function renderTrash(main) {
         "td.row-actions",
         h(
           "div.actions",
-          canRestore ? h("button.btn.small.secondary", { type: "button", on: { click: () => restore(it) } }, t("restore")) : null,
+          canRestore && (it.access_role == null || can("manage_roles"))
+            ? h("button.btn.small.secondary", { type: "button", on: { click: () => restore(it) } }, t("restore"))
+            : null,
           canPurge ? h("button.btn.small.danger", { type: "button", on: { click: () => purge(it) } }, t("purge")) : null,
         ),
       ),

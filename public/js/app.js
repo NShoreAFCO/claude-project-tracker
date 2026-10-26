@@ -1,7 +1,7 @@
 // Entry point: hash router (#/, #/gantt, #/inbox, #/search?q=…, #/p/<id>[/kontext]), nav and search.
 import config from "../instance/config.js";
 import { t, setLocale } from "./i18n.js";
-import { loadMe } from "./access.js";
+import { loadMe, POLICY } from "./access.js";
 import { renderUserBar } from "./userbar.js";
 import { api } from "./api.js";
 import { h, clear, toastError } from "./dom.js";
@@ -185,7 +185,7 @@ window.addEventListener("tracker:locale", () => onLocaleChange());
 window.addEventListener("tracker:changed", () => refresh());
 // The person's saved language wins over the browser's remembered one, which wins over the instance default.
 loadMe().then((me) => {
-  if (me?.locale) setLocale(me.locale);
+  if (me?.locale && POLICY.locales.includes(me.locale)) setLocale(me.locale);
   renderShell();
   return route().then(updateInboxCount);
 });

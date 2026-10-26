@@ -1,5 +1,14 @@
+import config from "../instance/config.js";
 import { api } from "./api.js";
 import { t } from "./i18n.js";
+
+/** Display policy of the instance (public config), with defaults when a key is missing. */
+export const POLICY = {
+  locales: ["en"],
+  hide_empty_categories: "collapse",
+  target_date_required_categories: [],
+  ...(config.policy || {}),
+};
 
 export const ROLES = ["viewer", "editor", "decider", "admin"];
 

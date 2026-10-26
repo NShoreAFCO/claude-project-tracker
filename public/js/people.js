@@ -2,12 +2,9 @@
 // roles or the email of a user.
 import { t, AVAILABLE, setLocale, rememberLocale } from "./i18n.js";
 import { api } from "./api.js";
-import { can, getMe, loadMe } from "./access.js";
-import config from "../instance/config.js";
+import { can, getMe, loadMe, ROLES, POLICY } from "./access.js";
 import { h, clear, formDialog, saveWithConflict, toast, menuButton, personBadge } from "./dom.js";
 import { changed, deleteEntity } from "./forms.js";
-
-const ROLES = ["viewer", "editor", "decider", "admin"];
 
 /** Create (existing = null) or edit a person. canAdmin: may set access role and a user's email. */
 export function personForm(existing, canAdmin) {
@@ -72,7 +69,7 @@ function profileForm(me) {
         type: "select",
         options: [
           ["", t("localeDefault")],
-          ...config.policy.locales.filter((code) => AVAILABLE.includes(code)).map((code) => [code, t(`localeName.${code}`)]),
+          ...POLICY.locales.filter((code) => AVAILABLE.includes(code)).map((code) => [code, t(`localeName.${code}`)]),
         ],
         value: me.locale ?? "",
       },

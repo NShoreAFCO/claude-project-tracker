@@ -1,11 +1,10 @@
-import config from "../instance/config.js";
 import { t, LOCALE, AVAILABLE, setLocale, rememberLocale } from "./i18n.js";
 import { api } from "./api.js";
 import { h, clear, toastError } from "./dom.js";
-import { getMe, role, loadMe } from "./access.js";
+import { getMe, role, loadMe, POLICY } from "./access.js";
 
 export function renderUserBar(el, onLocaleChange) {
-  const offered = config.policy.locales.filter((code) => AVAILABLE.includes(code));
+  const offered = POLICY.locales.filter((code) => AVAILABLE.includes(code));
   const person = getMe();
   const accessRole = role();
   const children = [];

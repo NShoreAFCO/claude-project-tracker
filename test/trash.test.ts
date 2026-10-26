@@ -325,6 +325,9 @@ describe("persons", () => {
     await expect(deleteEntity(db, "person", user.id, AGENT)).rejects.toBeInstanceOf(ForbiddenError);
     await deleteEntity(db, "person", stake.id, AGENT);
     await deleteEntity(db, "person", user.id, A);
+    const listed = await listTrash(db);
+    expect(listed.find((x) => x.id === user.id)?.access_role).toBe("editor");
+    expect(listed.find((x) => x.id === stake.id)?.access_role).toBeNull();
     await expect(restoreEntity(db, "person", user.id, EDITOR)).rejects.toBeInstanceOf(ForbiddenError);
     await restoreEntity(db, "person", user.id, A);
   });

@@ -1,6 +1,5 @@
 // Grid view: one card per project (SPEC §9).
-import config from "../instance/config.js";
-import { can } from "./access.js";
+import { can, POLICY } from "./access.js";
 import { t, fmtDate, fmtDateTime, STRINGS } from "./i18n.js";
 import { h, clear, statusChip, progressBar, personBadge, ageDays } from "./dom.js";
 import { openProject } from "./project.js";
@@ -93,14 +92,15 @@ function card(p, persons) {
 }
 
 function noTargetChip(p) {
-  if (p.status !== "active" || p.target_date || !config.policy.target_date_required_categories.includes(p.category)) {
+  if (p.status !== "active" || p.target_date || !POLICY.target_date_required_categories.includes(p.category)) {
     return null;
   }
 
   return h("span.chip.flag-waiting.flag-no-target", { title: t("noTargetDateHint") }, t("noTargetDate"));
 }
 
-function categoryBlocks(shown, persons, filter) {
+/** `all` = the unfiltered project list: a category is empty only when it has no projects at all. */
+function categoryBlocks(shown, persons, filter, all = shown) {
   return [...PROJECT_CATEGORIES, null]
     .map((key) => {
       const projects = shown.filter((p) => knownCategory("p", p.category) === key);
@@ -118,7 +118,9 @@ function categoryBlocks(shown, persons, filter) {
         );
       }
 
-      if (filter.category || config.policy.hide_empty_categories === "hide" || key === null) {
+      // a category that has projects, hidden only by a filter, is never shown as empty
+      if (all.some((p) => knownCategory("p", p.category) === key)) return null;
+      if (filter.category || POLICY.hide_empty_categories === "hide" || key === null) {
         return null;
       }
 
@@ -210,6 +212,6 @@ export function renderGrid(main, state) {
       h("span.spacer"),
       can("write") ? h("button.btn", { type: "button", on: { click: () => projectForm(null) } }, `+ ${t("newProject")}`) : null,
     ),
-    shown.length ? categoryBlocks(shown, persons, filter) : h("p.empty", t("noProjects")),
+    shown.length ? categoryBlocks(shown, persons, filter, state.projects) : h("p.empty", t("noProjects")),
   );
 }

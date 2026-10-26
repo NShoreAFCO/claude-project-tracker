@@ -32,6 +32,8 @@ export type TrashItem = {
   project_id: string | null;
   deleted_at: string;
   deleted_by: string;
+  /** Persons only: the access role they had (a deleted user needs an admin to be restored). */
+  access_role?: string | null;
   children: number;
 };
 
@@ -497,7 +499,7 @@ export async function listTrash(db: D1Database): Promise<TrashItem[]> {
     db.prepare("SELECT id, title, project_id, parent_id, deleted_at, deleted_by FROM workpackage WHERE deleted_at IS NOT NULL"),
     db.prepare("SELECT id, title, project_id, workpackage_id, deleted_at, deleted_by FROM milestone WHERE deleted_at IS NOT NULL"),
     db.prepare("SELECT id, title, project_id, owner_kind, owner_id, deleted_at, deleted_by FROM context_doc WHERE deleted_at IS NOT NULL"),
-    db.prepare("SELECT id, name AS title, NULL AS project_id, deleted_at, deleted_by FROM person WHERE deleted_at IS NOT NULL"),
+    db.prepare("SELECT id, name AS title, NULL AS project_id, access_role, deleted_at, deleted_by FROM person WHERE deleted_at IS NOT NULL"),
     db.prepare("SELECT id, title, project_id, deleted_at, deleted_by FROM risk WHERE deleted_at IS NOT NULL"),
   ]);
   const projects = p.results as T[];

@@ -3,6 +3,8 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 // @ts-expect-error untyped JS module
 import { can, loadMe, role, MIN_ROLE, ROLES, roleTip } from "../public/js/access.js";
 // @ts-expect-error untyped JS module
+import { projectStatusOptions, wpStatusOptions, wpVerificationOptions } from "../public/js/forms.js";
+// @ts-expect-error untyped JS module
 import { setLocale, t, LOCALE, AVAILABLE, storedLocale, rememberLocale, fmtDate } from "../public/js/i18n.js";
 import { MIN_ROLE as SERVER_MIN_ROLE, ACTIONS } from "../src/auth/permissions";
 // @ts-expect-error untyped JS module
@@ -144,5 +146,63 @@ describe("R5.3 role-based UI helpers", () => {
     expect(config.policy.locales).toContain("en");
     expect(["hide", "collapse"]).toContain(config.policy.hide_empty_categories);
     expect(Object.keys(config.policy).sort()).toEqual(["hide_empty_categories", "locales", "target_date_required_categories"].sort());
+  });
+});
+
+describe("R5.3 role-gated form options", () => {
+  const WP_STATUSES = ["todo", "doing", "blocked", "waiting", "done", "dropped"];
+  const METHODS = ["none", "review", "test", "demo", "sign_off"];
+  type Opt = [string, string, { disabled?: boolean; title?: string }?];
+  const disabled = (opts: Opt[]) => opts.filter((o) => o[2]?.disabled).map((o) => o[0]);
+
+  async function actAs(accessRole: string) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ identity: "x", person: { id: "p1", name: "N", access_role: accessRole } })),
+    );
+    await loadMe();
+  }
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("Done is gated by the selected verification, not by the stored one (editor)", async () => {
+    await actAs("editor");
+    // stored sign_off, open WP
+    expect(disabled(wpStatusOptions({ verification: "sign_off", status: "doing" }, WP_STATUSES))).toEqual(["done"]);
+    // stored none, but the form currently has sign_off selected
+    expect(disabled(wpStatusOptions({ verification: "none", status: "doing" }, WP_STATUSES, "sign_off"))).toEqual(["done"]);
+    expect(disabled(wpStatusOptions(null, WP_STATUSES, "sign_off"))).toEqual(["done"]);
+    // stored sign_off but the form lowered it? (selection review) Done is allowed by this helper
+    expect(disabled(wpStatusOptions({ verification: "sign_off", status: "doing" }, WP_STATUSES, "review"))).toEqual([]);
+    // other methods and an already done WP stay selectable
+    expect(disabled(wpStatusOptions({ verification: "review", status: "doing" }, WP_STATUSES))).toEqual([]);
+    expect(disabled(wpStatusOptions({ verification: "sign_off", status: "done" }, WP_STATUSES))).toEqual([]);
+    const done = wpStatusOptions({ verification: "sign_off", status: "doing" }, WP_STATUSES).find((o: Opt) => o[0] === "done");
+    expect(done?.[2]?.title).toBe(roleTip("verify_sign_off"));
+  });
+
+  it("deciders and admins may complete a sign_off WP", async () => {
+    for (const r of ["decider", "admin"]) {
+      await actAs(r);
+      expect(disabled(wpStatusOptions({ verification: "sign_off", status: "doing" }, WP_STATUSES, "sign_off"))).toEqual([]);
+    }
+  });
+
+  it("sign_off stays selectable for editors; lowering it from sign_off is gated", async () => {
+    await actAs("editor");
+    expect(disabled(wpVerificationOptions({ verification: "review" }, METHODS))).toEqual([]);
+    expect(disabled(wpVerificationOptions(null, METHODS))).toEqual([]);
+    expect(disabled(wpVerificationOptions({ verification: "sign_off" }, METHODS))).toEqual(["none", "review", "test", "demo"]);
+    await actAs("decider");
+    expect(disabled(wpVerificationOptions({ verification: "sign_off" }, METHODS))).toEqual([]);
+  });
+
+  it("closing and reopening a project needs a decider", async () => {
+    await actAs("editor");
+    expect(projectStatusOptions(null, false, "").map((o: Opt) => o[0])).toEqual(["idea", "active", "on_hold"]);
+    expect(disabled(projectStatusOptions({ status: "active" }, false, ""))).toEqual(["done", "abandoned"]);
+    expect(disabled(projectStatusOptions({ status: "done" }, false, ""))).toEqual(["idea", "active", "on_hold", "abandoned"]);
+    await actAs("decider");
+    expect(disabled(projectStatusOptions({ status: "done" }, false, ""))).toEqual([]);
+    expect(disabled(projectStatusOptions({ status: "active" }, true, "open WPs"))).toEqual(["done"]);
   });
 });
