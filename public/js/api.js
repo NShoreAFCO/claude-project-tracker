@@ -71,6 +71,9 @@ export const api = {
   updateMilestone: (id, body, expected_version) =>
     request("PATCH", `/api/milestones/${encodeURIComponent(id)}`, { ...body, expected_version }),
   deleteMilestone: (id) => request("DELETE", `/api/milestones/${encodeURIComponent(id)}`),
+  recordDecision: (milestone_id, body) => request("POST", `/api/milestones/${encodeURIComponent(milestone_id)}/decisions`, body),
+  gateOverride: (wp_id, reason) => request("POST", `/api/workpackages/${encodeURIComponent(wp_id)}/gate-override`, { reason }),
+  createBaseline: (project_id, label) => request("POST", `/api/projects/${encodeURIComponent(project_id)}/baselines`, { label }),
 
   linkBranch: (body) => request("POST", "/api/branches", body),
   deleteBranch: (id) => request("DELETE", `/api/branches/${encodeURIComponent(id)}`),

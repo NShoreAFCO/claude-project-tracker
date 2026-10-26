@@ -1260,3 +1260,142 @@ details.inherited > summary {
     text-align: left;
   }
 }
+
+/* ---- R2: schedule issues, baseline ghosts, critical path, gates (tokens only; marks, never text colours) */
+.gantt .baseline-ghost {
+  fill: none;
+  stroke: var(--color-text-muted);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 2;
+}
+.gantt .bar-bg.critical {
+  stroke: var(--status-blocked);
+  stroke-width: 3;
+}
+.gantt .ms.critical {
+  stroke: var(--status-blocked);
+  stroke-width: 3;
+}
+.gantt .dep.issue {
+  stroke: var(--status-blocked);
+  stroke-width: 2;
+  stroke-dasharray: 4 2;
+  opacity: 1;
+}
+.gantt .dep.critical {
+  stroke-width: 2.4;
+  opacity: 1;
+}
+.gantt .dep-head.issue {
+  fill: var(--status-blocked);
+}
+.gantt text.issue-mark {
+  fill: var(--status-blocked);
+  font-size: 14px;
+  font-weight: 700;
+}
+.gantt text.slip-mark {
+  font-size: 11px;
+}
+.gantt text.slip-mark.late {
+  font-weight: 700;
+}
+.gantt .gate-ring {
+  fill: none;
+  stroke: var(--color-text-strong);
+  stroke-width: 1.5;
+}
+.gantt .gate-ring.decision-pending,
+.gantt .gate-ring.decision-none {
+  stroke-dasharray: 3 2;
+}
+.gantt .gate-ring.decision-go,
+.gantt .gate-ring.decision-go_with_conditions {
+  stroke: var(--ms-done);
+  stroke-width: 2;
+}
+.gantt .gate-ring.decision-hold,
+.gantt .gate-ring.decision-stop {
+  stroke: var(--ms-overdue);
+  stroke-width: 2.5;
+}
+.ms-diamond.gate {
+  margin: 0 0.35rem 0 0.25rem;
+  box-shadow:
+    0 0 0 2px var(--color-surface),
+    0 0 0 4px var(--color-text-strong);
+}
+.badge.issue,
+.badge.critical {
+  border-color: var(--status-blocked);
+  border-left-width: 4px;
+}
+button.badge.issue[aria-pressed="true"] {
+  background: var(--color-tint);
+  border-width: 2px;
+}
+.badge.gate {
+  border-color: var(--color-text-strong);
+}
+.badge.decision-go,
+.badge.decision-go_with_conditions {
+  border-color: var(--ms-done);
+  border-left-width: 4px;
+}
+.badge.decision-hold,
+.badge.decision-stop {
+  border-color: var(--ms-overdue);
+  border-left-width: 4px;
+}
+.badge.decision-pending {
+  border-style: dashed;
+}
+.slip.late {
+  font-weight: 700;
+}
+ul.issues {
+  list-style: none;
+  margin: 0.3rem 0 0;
+  padding: 0;
+  flex-basis: 100%;
+  font-size: 0.9rem;
+}
+ul.issues .issue {
+  padding: 0.1rem 0 0.1rem 0.5rem;
+  border-left: 4px solid var(--status-blocked);
+  margin-top: 0.15rem;
+}
+.issue-mark {
+  font-weight: 700;
+}
+.legend-ghost,
+.legend-critical,
+.legend-issue {
+  display: inline-block;
+  min-width: 1.2rem;
+  margin: 0 0.3rem;
+  text-align: center;
+}
+.legend-ghost {
+  height: 0;
+  border-top: 2px dashed var(--color-text-muted);
+}
+.legend-critical {
+  height: 0.7rem;
+  border: 3px solid var(--status-blocked);
+  border-radius: 3px;
+}
+.legend-issue {
+  color: var(--status-blocked);
+  font-weight: 700;
+}
+.card-actions {
+  margin-top: 0.5rem;
+  display: flex;
+  justify-content: flex-end;
+}
+a.btn.small {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}

@@ -74,6 +74,14 @@ function card(p, persons) {
           p.blocked.map((b) => h("span.badge.blocked", `${t("blockedBy")}: ${b.replace(/^ext:/, "")}`)),
         )
       : null,
+    h(
+      "div.card-actions",
+      h(
+        "a.btn.small.secondary",
+        { href: `#/gantt?project=${encodeURIComponent(p.id)}`, on: { click: (e) => e.stopPropagation() } },
+        t("cardGantt"),
+      ),
+    ),
   );
 }
 

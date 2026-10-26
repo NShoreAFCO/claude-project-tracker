@@ -217,3 +217,91 @@ describe("locales", () => {
     expect(mergeStrings({ a: "x", n: { b: "y", c: "z" } }, { n: { b: "Y" } })).toEqual({ a: "x", n: { b: "Y", c: "z" } });
   });
 });
+
+describe("R2 UI: schedule, baselines, gates", () => {
+  const issue = (code: string, entity_id: string, related_id: string) => ({
+    code,
+    entity: "workpackage",
+    entity_id,
+    related_id,
+    message: `m ${code}`,
+  });
+  it("R2 modules are served behind Access and use no HTML injection", async () => {
+    const jwt = await userJwt();
+    for (const f of ["schedule-ui.js", "schedule-view.js", "gates-ui.js", "gantt-marks.js", "gantt.js"]) {
+      expect((await call(`/js/${f}`)).status, f).toBe(401);
+      const res = await call(`/js/${f}`, { jwt });
+      expect(res.status, f).toBe(200);
+      const src = await res.text();
+      expect(src, f).not.toMatch(/innerHTML|insertAdjacentHTML|\bon(click|change|submit)\s*=/);
+    }
+  });
+  it("R2 modules load and parse issues, dedupe and edge keys", async () => {
+    // @ts-expect-error untyped JS module
+    const ui = await import("../public/js/schedule-ui.js");
+    // @ts-expect-error untyped JS module
+    const marks = await import("../public/js/gantt-marks.js");
+    // @ts-expect-error untyped JS module
+    await import("../public/js/schedule-view.js");
+    // @ts-expect-error untyped JS module
+    await import("../public/js/gates-ui.js");
+    // @ts-expect-error untyped JS module
+    await import("../public/js/gantt.js");
+    const a = issue("DEP_START_BEFORE_PRED_END", "w2", "w1");
+    const detail = {
+      workpackages: [{ id: "w1", schedule_issues: "[]", children: [{ id: "w2", schedule_issues: JSON.stringify([a]) }] }],
+      milestones: [{ id: "m1", schedule_issues: JSON.stringify([a, issue("START_BEFORE_GATE", "w3", "m1")]) }],
+    };
+    expect(ui.parseIssues("not json")).toEqual([]);
+    expect(ui.parseIssues(null)).toEqual([]);
+    const all = ui.collectIssues(detail);
+    expect(all).toHaveLength(2);
+    expect([...marks.issueEdgeKeys(all)].sort()).toEqual(["m1>w3", "w1>w2"]);
+    expect(ui.issuesByEntity(all).get("w2")).toHaveLength(1);
+  });
+  it("localises issues, slip and milestone state", async () => {
+    // @ts-expect-error untyped JS module
+    const ui = await import("../public/js/schedule-ui.js");
+    const text = ui.issueText(issue("DEP_START_BEFORE_PRED_END", "w2", "w1"), (id: string) => (id === "w1" ? "Design" : undefined));
+    expect(text).toContain("Design");
+    expect(ui.issueText({ code: "UNKNOWN_CODE", entity_id: "x", related_id: "y", message: "raw" }, () => "")).toBe("raw");
+    expect(ui.slipText(null)).toBeNull();
+    expect(ui.slipText(3)).toContain("3");
+    expect(ui.slipText(-2)).not.toBe(ui.slipText(2));
+    const today = "2026-06-01";
+    expect(ui.milestoneView({ done: false, due_date: "2026-05-01", gate: true, decision_state: "pending" }, today)).toEqual({
+      state: "overdue",
+      gate: true,
+      decision: "pending",
+    });
+    expect(ui.milestoneView({ done: true, due_date: "2026-05-01", gate: false, decision_state: "go" }, today).decision).toBe("none");
+  });
+  it("maps gate, strict, conflict and decision-maker errors to localised messages", async () => {
+    // @ts-expect-error untyped JS module
+    const { errorText } = await import("../public/js/dom.js");
+    // @ts-expect-error untyped JS module
+    const ui = await import("../public/js/schedule-ui.js");
+    const err = (current: Record<string, unknown>) => ({
+      status: 409,
+      isConflict: true,
+      body: { current },
+      message: "api english",
+      code: current.code,
+    });
+    const gate = err({
+      code: "GATE_LOCKED",
+      gates: [{ milestone_id: "m1", title: "Go/No-go" }],
+      override_endpoint: "POST /api/workpackages/w9/gate-override",
+    });
+    expect(errorText(gate)).toContain("Go/No-go");
+    expect(ui.isGateLocked(gate)).toBe(true);
+    expect(ui.overrideTarget(gate)).toBe("w9");
+    expect(ui.overrideTarget(err({ code: "GATE_LOCKED", gates: [] }))).toBeNull();
+    const strict = errorText(err({ code: "SCHEDULE_STRICT", issues: [issue("DEP_UNKNOWN", "w1", "zz")] }));
+    expect(strict).not.toMatch(/errCode\./);
+    expect(strict).toContain("unknown");
+    for (const code of ["SCHEDULE_CONFLICT", "DECISION_MAKER_LOCKED", "DECISION_MAKER_MISSING"]) {
+      expect(errorText(err({ code })), code).not.toMatch(/errCode\.|api english/);
+    }
+  });
+});

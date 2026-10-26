@@ -1,6 +1,7 @@
 // DOM helpers. Everything is built with createElement/textContent; the only HTML string ever
 // assigned is the output of the sanitising markdown renderer (see markdown.js).
 import { t, fmtPct } from "./i18n.js";
+import { gateNames, issueText } from "./schedule-ui.js";
 
 /** h("div.cls#id", { attrs, on: { click } }, ...children). Strings become text nodes. */
 export function h(sel, attrs, ...children) {
@@ -101,7 +102,7 @@ export function toast(msg, error = false) {
 }
 /**
  * Localised text for a failed call. 409s with a machine-readable `current.code` (PROJECT_CLOSED, PARENT_DELETED,
- * SLUG_TAKEN, TARGET_CLOSED, OPEN_WORKPACKAGES ...) use the errCode.* strings; everything else shows the API message.
+ * SLUG_TAKEN, TARGET_CLOSED, OPEN_WORKPACKAGES, GATE_LOCKED, SCHEDULE_STRICT, SCHEDULE_CONFLICT, DECISION_MAKER_LOCKED ...) use the errCode.* strings; everything else shows the API message.
  */
 export function errorText(e) {
   if (e?.isAuth) return t("errorAuth");
@@ -109,7 +110,11 @@ export function errorText(e) {
   if (e?.isConflict && cur?.code) {
     const key = `errCode.${cur.code}`;
     const msg = t(key, {
-      list: (cur.open_workpackages || []).map((w) => w.title).join(", "),
+      list: cur.gates
+        ? gateNames(e)
+        : cur.issues
+          ? cur.issues.map((i) => issueText(i)).join(" ")
+          : (cur.open_workpackages || []).map((w) => w.title).join(", "),
       fields: (cur.missing || []).join(", "),
       date: cur.purgeable_at ? String(cur.purgeable_at).slice(0, 10) : "",
     });
