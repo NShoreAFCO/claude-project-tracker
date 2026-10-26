@@ -5,7 +5,20 @@ import { printCss } from "./print-css";
 import { escapeHtml } from "./md-html";
 import { serverT } from "../i18n/server";
 
-export class PdfUnavailableError extends Error {}
+export class PdfUnavailableError extends Error {
+  constructor(
+    message: string,
+    /** HTTP status of the Browser Rendering response, when there was one. */
+    readonly status?: number,
+    /** Start of the response body or the underlying error text, for the server log only. */
+    readonly detail?: string,
+  ) {
+    super(message);
+  }
+}
+
+/** Blocks everything but inline styles in the page the browser renders (defence in depth: the HTML has no script or external load). */
+const BROWSER_CSP = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">`;
 
 export async function renderPdf(env: Env, m: ReportModel): Promise<ArrayBuffer> {
   if (!env.BROWSER) {
@@ -16,7 +29,7 @@ export async function renderPdf(env: Env, m: ReportModel): Promise<ArrayBuffer> 
 
   try {
     const res = await env.BROWSER.quickAction("pdf", {
-      html: renderHtml(m, { stylesheet: false }),
+      html: renderHtml(m, { stylesheet: false }).replace("<head>", `<head>\n${BROWSER_CSP}`),
       addStyleTag: [{ content: printCss(m.paper) }],
       pdfOptions: {
         format: m.paper,
@@ -49,7 +62,8 @@ export async function renderPdf(env: Env, m: ReportModel): Promise<ArrayBuffer> 
     });
 
     if (!res.ok) {
-      throw new PdfUnavailableError(`PDF rendering failed with status ${res.status}`);
+      const body = await res.text().catch(() => "");
+      throw new PdfUnavailableError(`PDF rendering failed with status ${res.status}`, res.status, body.slice(0, 500));
     }
 
     const content = await res.arrayBuffer();
@@ -66,6 +80,10 @@ export async function renderPdf(env: Env, m: ReportModel): Promise<ArrayBuffer> 
 
     const detail = error instanceof Error && error.message ? `: ${error.message}` : "";
 
-    throw new PdfUnavailableError(`PDF rendering failed${detail}`);
+    throw new PdfUnavailableError(
+      `PDF rendering failed${detail}`,
+      undefined,
+      error instanceof Error ? (error.stack ?? error.message).slice(0, 500) : String(error).slice(0, 500),
+    );
   }
 }

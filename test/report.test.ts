@@ -1,6 +1,7 @@
 // F9 (release R4.3): project report as Markdown, HTML and server-side PDF.
 import { env } from "cloudflare:test";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+import { buildReport } from "../src/report/build";
 import { call, installTestKeys, testCaller, userJwt, serviceJwt } from "./helpers";
 import { createProject, updateProject } from "../src/data/projects";
 import { upsertWorkpackage } from "../src/data/workpackages";
@@ -216,6 +217,79 @@ describe("report", () => {
     expect(String(opts.footerTemplate)).toContain("totalPages");
     expect(String(opts.headerTemplate)).toContain(p.title);
     expect(JSON.stringify(seen!.options.addStyleTag)).toContain("@page");
+  });
+});
+
+describe("report hardening", () => {
+  const okStub = (calls: Array<Record<string, unknown>>): BrowserBinding => ({
+    quickAction: async (_a, options) => {
+      calls.push(options);
+      return new Response("%PDF-1.7", { headers: { "Content-Type": "application/pdf" } });
+    },
+  });
+
+  it("logs the cause of a failed pdf render and keeps the client body generic", async () => {
+    const p = await sample();
+    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const limited: BrowserBinding = { quickAction: async () => new Response("quota exhausted", { status: 429 }) };
+      const res = await get(p.id, "pdf", { envOverride: { BROWSER: limited } });
+      expect(res.status).toBe(503);
+      expect(JSON.stringify(await res.json())).not.toContain("quota");
+      const logged = JSON.stringify(spy.mock.calls);
+      expect(logged).toContain("429");
+      expect(logged).toContain("quota exhausted");
+      spy.mockClear();
+      const broken: BrowserBinding = {
+        quickAction: async () => {
+          throw new Error("boom");
+        },
+      };
+      await get(p.id, "pdf", { envOverride: { BROWSER: broken } });
+      expect(JSON.stringify(spy.mock.calls)).toContain("boom");
+      spy.mockClear();
+      await get(p.id, "pdf", { envOverride: { BROWSER: undefined } });
+      expect(JSON.stringify(spy.mock.calls)).toContain("binding missing");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("the html sent to the browser binding carries a restrictive CSP meta", async () => {
+    const p = await sample();
+    const calls: Array<Record<string, unknown>> = [];
+    await get(p.id, "pdf", { envOverride: { BROWSER: okStub(calls) } });
+    expect(String(calls[0].html)).toContain(
+      `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">`,
+    );
+  });
+
+  it("pdf returns 503 without calling the binding when policy.report.pdf is false", async () => {
+    const p = await sample();
+    const calls: Array<Record<string, unknown>> = [];
+    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const before = POLICY.report.pdf;
+    POLICY.report.pdf = false;
+    try {
+      const res = await get(p.id, "pdf", { envOverride: { BROWSER: okStub(calls) } });
+      expect(res.status).toBe(503);
+      expect(calls).toHaveLength(0);
+      expect((await get(p.id, "md")).status).toBe(200);
+    } finally {
+      POLICY.report.pdf = before;
+      spy.mockRestore();
+    }
+  });
+
+  it("orphan work packages sharing a missing parent appear once", async () => {
+    const p = await sample();
+    await upsertWorkpackage(db, p.id, { id: `${p.id}-par`, title: "Gone parent" }, SYS);
+    for (const k of ["a", "b"])
+      await upsertWorkpackage(db, p.id, { id: `${p.id}-o${k}`, title: `Orphan ${k}`, parent_id: `${p.id}-par` }, SYS);
+    await db.prepare("UPDATE workpackage SET deleted_at = '2026-10-01T00:00:00Z' WHERE id = ?").bind(`${p.id}-par`).run();
+    const model = await buildReport(db, p.id);
+    expect(model.workpackages.filter((w) => w.title === "Orphan a")).toHaveLength(1);
+    expect(model.workpackages.filter((w) => w.title === "Orphan b")).toHaveLength(1);
   });
 });
 

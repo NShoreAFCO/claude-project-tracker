@@ -115,7 +115,8 @@ export async function buildReport(db: D1Database, projectId: string, today = new
   };
   walk(null, 0);
   // Orphans (parent not in the live set) still appear, at top level.
-  for (const w of wps) if (w.parent_id && !ids.has(w.parent_id)) walk(w.parent_id, 0);
+  const missingParents = new Set(wps.map((w) => w.parent_id).filter((p): p is string => !!p && !ids.has(p)));
+  for (const p of missingParents) walk(p, 0);
 
   return {
     locale: reportLocale(row),

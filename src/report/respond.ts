@@ -27,6 +27,10 @@ const fileName = (title: string, ext: string): string => {
 
 export async function reportResponse(db: D1Database, env: Env, projectId: string, format: string): Promise<Response> {
   if (!FORMATS.includes(format)) throw new ValidationError("format must be md, html or pdf");
+  if (format === "pdf" && POLICY.report?.pdf === false) {
+    console.error("pdf render failed", { message: "PDF reports are switched off (policy.report.pdf)" });
+    return pdfUnavailable();
+  }
   const model = await buildReport(db, projectId);
 
   if (format === "md") {
@@ -58,12 +62,18 @@ export async function reportResponse(db: D1Database, env: Env, projectId: string
       },
     });
   } catch (e) {
-    if (!(e instanceof PdfUnavailableError)) console.error("pdf render failed", e);
-    return new Response(JSON.stringify({ error: "pdf_unavailable", message: serverT("en", "report.pdfUnavailable") }), {
-      status: 503,
-      headers: { ...BASE_HEADERS, "Content-Type": "application/json; charset=utf-8", "Retry-After": "60" },
-    });
+    if (e instanceof PdfUnavailableError) console.error("pdf render failed", { message: e.message, status: e.status, detail: e.detail });
+    else console.error("pdf render failed", e);
+    return pdfUnavailable();
   }
+}
+
+/** 503 body for the client; the cause stays in the server log. */
+function pdfUnavailable(): Response {
+  return new Response(JSON.stringify({ error: "pdf_unavailable", message: serverT("en", "report.pdfUnavailable") }), {
+    status: 503,
+    headers: { ...BASE_HEADERS, "Content-Type": "application/json; charset=utf-8", "Retry-After": "60" },
+  });
 }
 
 export function printCssResponse(): Response {
