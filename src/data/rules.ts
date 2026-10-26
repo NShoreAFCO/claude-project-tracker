@@ -3,6 +3,7 @@
  * and moving open work packages to a follow-up project.
  */
 import type { Caller, ProjectRow, WorkpackageRow } from "../types";
+import { activitySet } from "./activity";
 import { reachStmts } from "./milestones";
 import { recomputeScheduleStmts, scheduleBatch, storeSchedule, storedDependsOn, type ScheduleIssue } from "./schedule";
 import { ConflictError, LIVE, NotFoundError, ValidationError, eventStmtWhere, now, parseJsonArray, type Diff } from "./util";
@@ -287,13 +288,14 @@ export async function moveWorkpackages(
     }`;
   const g = [versions, from.id, ts, to.id, ...(agentLock ? [movedJson] : [])];
 
+  const act = activitySet(by, ts, false);
   const stmts: D1PreparedStatement[] = [];
   for (const [id, deps] of newDeps)
     if (!moved.has(id))
       stmts.push(
         db
-          .prepare(`UPDATE workpackage SET depends_on = ?, version = version + 1, updated_at = ? WHERE id = ? AND ${guard}`)
-          .bind(deps, ts, id, ...g),
+          .prepare(`UPDATE workpackage SET depends_on = ?, version = version + 1, updated_at = ?${act.sql} WHERE id = ? AND ${guard}`)
+          .bind(deps, ts, ...act.params, id, ...g),
       );
   const firstMove = stmts.length;
   for (const id of movedList) {
@@ -301,9 +303,17 @@ export async function moveWorkpackages(
     stmts.push(
       db
         .prepare(
-          `UPDATE workpackage SET project_id = ?, parent_id = ?, depends_on = ?, version = version + 1, updated_at = ? WHERE id = ? AND ${guard}`,
+          `UPDATE workpackage SET project_id = ?, parent_id = ?, depends_on = ?, version = version + 1, updated_at = ?${act.sql} WHERE id = ? AND ${guard}`,
         )
-        .bind(to.id, w.parent_id && moved.has(w.parent_id) ? w.parent_id : null, newDeps.get(id) ?? w.depends_on, ts, id, ...g),
+        .bind(
+          to.id,
+          w.parent_id && moved.has(w.parent_id) ? w.parent_id : null,
+          newDeps.get(id) ?? w.depends_on,
+          ts,
+          ...act.params,
+          id,
+          ...g,
+        ),
     );
   }
   const inMoved = "(SELECT value FROM json_each(?))";
@@ -330,7 +340,7 @@ export async function moveWorkpackages(
         `INSERT OR IGNORE INTO project_link (from_project_id, to_project_id, kind, created_at) SELECT ?, ?, 'follows', ? WHERE ${guard}`,
       )
       .bind(to.id, from.id, ts, ...g),
-    db.prepare(`UPDATE project SET updated_at = ? WHERE id IN (?, ?) AND ${guard}`).bind(ts, from.id, to.id, ...g),
+    db.prepare(`UPDATE project SET updated_at = ?${act.sql} WHERE id IN (?, ?) AND ${guard}`).bind(ts, ...act.params, from.id, to.id, ...g),
   );
   const removed: Diff = {};
   if (removedLinks.length) removed.removed_milestone_links = [removedLinks, null];

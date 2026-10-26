@@ -11,6 +11,7 @@ import {
   now,
   slugify,
 } from "./util";
+import { touchProject } from "./activity";
 import { personOuts, personRefInput, personRefOut } from "./persons";
 
 export type RiskType = "risk" | "issue" | "opportunity" | "nc";
@@ -347,7 +348,7 @@ export async function upsertRisk(
       diff,
     });
 
-    const results = await db.batch([update, event]);
+    const results = await db.batch([update, event, ...touchProject(db, by, projectId, timestamp)]);
     const updateResult = results[0];
     if (!updateResult.meta.changes) {
       const current = await loadRiskRow(db, existing.id);
@@ -472,7 +473,7 @@ export async function upsertRisk(
     diff: diffFields(null, row as unknown as Record<string, unknown>, COLS),
   });
 
-  await db.batch([insert, event]);
+  await db.batch([insert, event, ...touchProject(db, by, projectId, row.created_at)]);
   return riskOut(db, row.id);
 }
 

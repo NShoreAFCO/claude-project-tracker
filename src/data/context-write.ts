@@ -15,6 +15,7 @@ import {
   slugify,
   utf8Bytes,
 } from "./util";
+import { touchProject } from "./activity";
 
 type Source = "upload" | "paste" | "claude" | "sync";
 const SOURCES: readonly Source[] = ["upload", "paste", "claude", "sync"];
@@ -109,6 +110,7 @@ async function replaceContent(
       diff: { version: [existing.version, existing.version + 1], bytes: [existing.bytes, bytes] },
     }),
     pruneStmt(db, existing.id),
+    ...touchProject(db, by, existing.project_id, ts),
   ]);
   if (!res[1].meta.changes) {
     // Lost a race between read and write: report like an expected_version mismatch.
@@ -206,6 +208,7 @@ export async function writeContext(
       summary: label({ ...owner, slug }),
       diff: { bytes: [null, bytes] },
     }),
+    ...touchProject(db, by, owner.project_id, ts),
   ]);
   return getDoc(db, id);
 }
@@ -293,6 +296,7 @@ export async function appendContext(
       )
       .bind(...keyArgs, ...keyArgs, CONTEXT_REVISIONS_KEPT),
   ];
+  stmts.push(...touchProject(db, by, owner.project_id, ts));
   const res = await db.batch(stmts);
   const doc = await db
     .prepare(`SELECT * FROM context_doc WHERE ${keySql}`)

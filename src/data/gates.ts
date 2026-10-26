@@ -8,6 +8,7 @@
  */
 import type { Caller, ProjectRow, Role, WorkpackageRow } from "../types";
 import { POLICY } from "../policy";
+import { activitySet, isSystem, touchProject } from "./activity";
 import { createBaselineStmts } from "./baselines";
 import { isClosedProjectStatus, projectClosedError, TransitionError } from "./rules";
 import { recomputeScheduleStmts, scheduleBatch, snapWp } from "./schedule";
@@ -236,13 +237,14 @@ export async function overrideGateLock(db: D1Database, wpId: string, reason: str
   const notLocked = () => new TransitionError(`workpackage ${wp.id} is not gate-locked`, { code: "GATE_NOT_LOCKED" });
   if (!gates.length) throw notLocked();
   const ts = now();
+  const act = activitySet(by, ts, false);
   const res = await db.batch([
     db
       .prepare(
-        `UPDATE workpackage AS w SET gate_override_by = ?, gate_override_at = ?, gate_override_reason = ?, version = version + 1, updated_at = ?
+        `UPDATE workpackage AS w SET gate_override_by = ?, gate_override_at = ?, gate_override_reason = ?, version = version + 1, updated_at = ?${act.sql}
          WHERE w.id = ? AND w.version = ? AND ${gateLockedSql("w")}`,
       )
-      .bind(by.personId, ts, text, ts, wp.id, wp.version),
+      .bind(by.personId, ts, text, ts, ...act.params, wp.id, wp.version),
     eventStmtIfChanged(db, {
       by,
       project_id: wp.project_id,
@@ -257,6 +259,7 @@ export async function overrideGateLock(db: D1Database, wpId: string, reason: str
         locked_by_gates: [gates.map((g) => g.milestone_id), null],
       },
     }),
+    ...touchProject(db, by, wp.project_id, ts),
   ]);
   const fresh = await db.prepare("SELECT * FROM workpackage WHERE id = ?").bind(wp.id).first<WorkpackageRow>();
   if (!res[0].meta.changes) {
@@ -462,9 +465,9 @@ export async function recordGateDecision(
     stmts.push(
       db
         .prepare(
-          "INSERT INTO workpackage (id, project_id, title, status, progress, weight, sort, version, created_at, updated_at) VALUES (?, ?, ?, 'todo', 0, 1, 0, 1, ?, ?)",
+          "INSERT INTO workpackage (id, project_id, title, status, progress, weight, sort, version, created_at, updated_at, last_progress_at, last_changed_at) VALUES (?, ?, ?, 'todo', 0, 1, 0, 1, ?, ?, ?, ?)",
         )
-        .bind(id, project.id, conditions[i], ts, ts),
+        .bind(id, project.id, conditions[i], ts, ts, isSystem(by) ? null : ts, isSystem(by) ? null : ts),
       eventStmt(db, {
         by,
         project_id: project.id,
@@ -478,10 +481,13 @@ export async function recordGateDecision(
   }
   if (baseline) stmts.push(...baseline.stmts);
   if (decision === "stop") {
+    const stopAct = activitySet(by, ts, true);
     stmts.push(
       db
-        .prepare("UPDATE project SET status = 'on_hold', closure_decision_pending = 1, version = version + 1, updated_at = ? WHERE id = ?")
-        .bind(ts, project.id),
+        .prepare(
+          `UPDATE project SET status = 'on_hold', closure_decision_pending = 1, version = version + 1, updated_at = ?${stopAct.sql} WHERE id = ?`,
+        )
+        .bind(ts, ...stopAct.params, project.id),
       eventStmt(db, {
         by,
         project_id: project.id,
@@ -496,6 +502,8 @@ export async function recordGateDecision(
       }),
     );
   }
+  // A decision is progress on the project (spec F8); the stop branch above already wrote the columns.
+  if (decision !== "stop") stmts.push(...touchProject(db, by, project.id, ts, true));
   if (schedule) stmts.push(...schedule.stmts);
 
   if (beforeDecisionWrite) await beforeDecisionWrite();
