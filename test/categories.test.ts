@@ -27,6 +27,8 @@ const wp = (id: string, o: Partial<WorkpackageRow> = {}): WorkpackageRow => ({
   version: 1,
   created_at: "",
   updated_at: "",
+  last_progress_at: null,
+  last_changed_at: null,
   ...o,
 });
 

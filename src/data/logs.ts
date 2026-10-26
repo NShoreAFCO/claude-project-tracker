@@ -2,6 +2,9 @@ import type { Caller, EventOut, EventRow, ScoreRow, TokenCostRow, WorkpackageRow
 import { reachStmts } from "./milestones";
 import { gateGuardedBatch, gateLockedSql, lockingGates, startGuard } from "./gates";
 import { LIVE, NotFoundError, ValidationError, eventStmt, newId, now, type Diff } from "./util";
+import { activitySet } from "./activity";
+import { signOffGuardStmt, verificationGuardStmt, verificationGuarded, verificationRequiredError } from "./rules";
+import { canDo, requireAction } from "../auth/permissions";
 
 async function requireProject(db: D1Database, id: string): Promise<void> {
   if (!(await db.prepare(`SELECT 1 FROM project WHERE id = ? AND ${LIVE()}`).bind(id).first()))
@@ -101,6 +104,27 @@ export async function logTokenCost(
   return row;
 }
 
+export function parseEffortPd(v: unknown): number | null {
+  if (v === undefined || v === null) {
+    return null;
+  }
+
+  if (typeof v !== "number" || !Number.isFinite(v) || v <= 0 || v > 1000) {
+    throw new ValidationError("effort_pd must be a number of person-days greater than 0 and at most 1000");
+  }
+
+  return v;
+}
+
+export function effortStmt(db: D1Database, wpId: string, pd: number, ts: string, by: Caller): D1PreparedStatement {
+  const act = activitySet(by, ts, true);
+  return db
+    .prepare(
+      `UPDATE workpackage SET effort_actual_pd = COALESCE(effort_actual_pd, 0) + ?, version = version + 1, updated_at = ?${act.sql} WHERE id = ?`,
+    )
+    .bind(pd, ts, ...act.params, wpId);
+}
+
 /** Test seam: runs between the reads of logProgress and its batch. */
 let beforeProgressWrite: (() => Promise<void>) | null = null;
 export function setBeforeProgressWriteForTesting(f: (() => Promise<void>) | null): void {
@@ -110,7 +134,14 @@ export function setBeforeProgressWriteForTesting(f: (() => Promise<void>) | null
 /** Main "log what we did" call: event, optional WP progress, optional session id. */
 export async function logProgress(
   db: D1Database,
-  input: { project_id: string; summary: string; workpackage_id?: string | null; progress?: number | null; session_id?: string | null },
+  input: {
+    project_id: string;
+    summary: string;
+    workpackage_id?: string | null;
+    progress?: number | null;
+    effort_pd?: number | null;
+    session_id?: string | null;
+  },
   by: Caller,
 ): Promise<{ event_id: number; workpackage?: WorkpackageRow }> {
   await requireProject(db, input.project_id);
@@ -118,11 +149,15 @@ export async function logProgress(
   if (!summary || summary.length > 2000) throw new ValidationError("summary must be 1..2000 characters");
   const wp = input.workpackage_id ? await requireWpOf(db, input.project_id, input.workpackage_id) : null;
   const progress = input.progress ?? null;
+  const effort = parseEffortPd(input.effort_pd);
+  if (effort !== null && !wp) throw new ValidationError("effort_pd needs a workpackage_id");
   if (progress !== null && (typeof progress !== "number" || !Number.isFinite(progress) || progress < 0 || progress > 100)) {
     throw new ValidationError("progress must be 0..100");
   }
   const ts = now();
   const stmts: D1PreparedStatement[] = [];
+  // Spec F8: log_progress is progress on the WP and the project; system callers update no activity data.
+  const act = activitySet(by, ts, true);
   // Auto-start (spec F3): any progress log on a todo WP moves it to doing; progress ≥ 100 finishes it.
   // F5: a log without progress does not start a gate-locked WP (any caller); progress on one (agents, and
   // dashboard persons without an override) is refused (pre-check, and a guard statement first in the batch).
@@ -140,36 +175,59 @@ export async function logProgress(
     wp && progress !== null
       ? await startGuard(db, by, wp, { status: nextStatus, progress }, { always: true })
       : { stmts: [] as D1PreparedStatement[], ids: [] as string[] };
+  // F2: progress >= 100 completes the WP; with a verification method the caller's person verifies it
+  // (no person: refused, and re-checked by a guard first in the batch in case a verification appears meanwhile).
+  const completes = !!wp && progress !== null && progress >= 100 && wp.status !== "done";
+  const verifier = by.personId ?? null;
+  const needsVerifier = completes && (wp.verification ?? "none") !== "none";
+  if (needsVerifier && !verifier) throw verificationRequiredError(String(wp.verification));
+  // F11: completing a sign_off WP records the caller as its verifier: decider or above, never a service token.
+  if (completes && wp.verification === "sign_off") requireAction(by, "verify_sign_off");
+  // Guarded whenever the log may complete the WP, also when it was done at read time: it may be reopened
+  // with a verification meanwhile (the guard checks status and verification when the batch runs). A
+  // verifier who may not sign off is guarded against a sign_off appearing meanwhile in the same way.
+  const mayComplete = !!wp && progress !== null && progress >= 100;
+  const signOffGuarded = mayComplete && !!verifier && !canDo(by, "verify_sign_off");
+  const verifyGuard =
+    !wp || !mayComplete ? [] : !verifier ? [verificationGuardStmt(db, wp.id)] : signOffGuarded ? [signOffGuardStmt(db, wp.id)] : [];
   if (wp && progress !== null) {
+    const verify = "? >= 100 AND status != 'done' AND verification != 'none' AND verified_by IS NULL";
     stmts.push(
       db
         .prepare(
           `UPDATE workpackage SET progress = ?, status = CASE WHEN ? >= 100 THEN 'done' WHEN status = 'todo' THEN 'doing' ELSE status END,
             blocked_since = CASE WHEN ? >= 100 THEN NULL ELSE blocked_since END, waiting_reason = CASE WHEN ? >= 100 THEN NULL ELSE waiting_reason END,
-            version = version + 1, updated_at = ? WHERE id = ?`,
+            verified_by = CASE WHEN ${verify} THEN ? ELSE verified_by END, verified_at = CASE WHEN ${verify} THEN ? ELSE verified_at END,
+            version = version + 1, updated_at = ?${act.sql} WHERE id = ?`,
         )
-        .bind(progress, progress, progress, progress, ts, wp.id),
+        .bind(progress, progress, progress, progress, progress, verifier, progress, ts, ts, ...act.params, wp.id),
     );
   } else if (wp && wp.status === "todo" && !autoStartLocked) {
     stmts.push(
       db
         .prepare(
-          `UPDATE workpackage AS w SET status = 'doing', version = version + 1, updated_at = ? WHERE w.id = ? AND w.status = 'todo' AND NOT ${gateLockedSql("w")}`,
+          `UPDATE workpackage AS w SET status = 'doing', version = version + 1, updated_at = ?${act.sql} WHERE w.id = ? AND w.status = 'todo' AND NOT ${gateLockedSql("w")}`,
         )
-        .bind(ts, wp.id),
+        .bind(ts, ...act.params, wp.id),
     );
   }
+  if (wp && effort !== null) stmts.push(effortStmt(db, wp.id, effort, ts, by));
   const diff: Diff = {};
+  if (wp && effort !== null) diff.effort_actual_pd = [wp.effort_actual_pd ?? null, (wp.effort_actual_pd ?? 0) + effort];
   if (wp && progress !== null) diff.progress = [wp.progress, progress];
   if (wp && nextStatus !== wp.status) diff.status = [wp.status, nextStatus];
+  if (needsVerifier) {
+    diff.verified_by = [null, verifier];
+    diff.verified_at = [null, ts];
+  }
   if (input.session_id) {
     stmts.push(
       db
-        .prepare("UPDATE project SET session_id = ?, version = version + 1, updated_at = ? WHERE id = ?")
-        .bind(input.session_id, ts, input.project_id),
+        .prepare(`UPDATE project SET session_id = ?, version = version + 1, updated_at = ?${act.sql} WHERE id = ?`)
+        .bind(input.session_id, ts, ...act.params, input.project_id),
     );
   } else {
-    stmts.push(db.prepare("UPDATE project SET updated_at = ? WHERE id = ?").bind(ts, input.project_id));
+    stmts.push(db.prepare(`UPDATE project SET updated_at = ?${act.sql} WHERE id = ?`).bind(ts, ...act.params, input.project_id));
   }
   stmts.push(
     eventStmt(db, {
@@ -183,10 +241,15 @@ export async function logProgress(
     }),
   );
   const reach = Object.keys(diff).length ? reachStmts(db, input.project_id, by) : [];
-  const batch = [...gateGuard.stmts, ...stmts, ...reach];
+  const batch = [...gateGuard.stmts, ...verifyGuard, ...stmts, ...reach];
   if (beforeProgressWrite) await beforeProgressWrite();
-  const res = await gateGuardedBatch(db, batch, gateGuard.ids, by);
-  const eventId = Number(res[gateGuard.stmts.length + stmts.length - 1].meta.last_row_id);
+  const res = await verificationGuarded(
+    db,
+    wp?.id ?? "",
+    () => gateGuardedBatch(db, batch, gateGuard.ids, by),
+    signOffGuarded ? by : undefined,
+  );
+  const eventId = Number(res[gateGuard.stmts.length + verifyGuard.length + stmts.length - 1].meta.last_row_id);
   if (!wp) return { event_id: eventId };
   return {
     event_id: eventId,

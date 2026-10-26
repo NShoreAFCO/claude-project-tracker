@@ -5,9 +5,12 @@ import { writeContext } from "../data/context-write";
 import { logProgress } from "../data/logs";
 import { eventStmt, utf8Bytes } from "../data/util";
 import { serviceCaller } from "../auth/caller";
+import { REST_ACTIONS, requireAction } from "../auth/permissions";
 import { findProjectByPath, findProjectByRepo, normalisePath, repoFullName } from "./match";
 
 const ACTOR = "hook:claude-code";
+/** Route key of the hook endpoint in the permission table (src/auth/permissions.ts). */
+export const HOOK_ROUTE = "POST /api/hooks/claude-code";
 
 export interface HookBody {
   session_id?: string;
@@ -31,6 +34,7 @@ const str = (v: unknown, max: number): string | null => (typeof v === "string" &
 export async function handleClaudeCodeHook(body: HookBody, env: Env): Promise<Record<string, unknown>> {
   const db = env.DB;
   const by = await serviceCaller(db, ACTOR, typeof body.on_behalf_of === "string" ? body.on_behalf_of : null);
+  requireAction(by, REST_ACTIONS[HOOK_ROUTE]);
   const sessionId = str(body.session_id, 100);
   const cwd = str(body.cwd, 500);
   const repoUrl = str(body.repo_url, 500);

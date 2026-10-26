@@ -2,9 +2,12 @@ import type { Caller, Env } from "../types";
 import { findBranch, linkBranch } from "../data/branches";
 import { eventStmt } from "../data/util";
 import { serviceCaller } from "../auth/caller";
+import { REST_ACTIONS, requireAction } from "../auth/permissions";
 import { findProjectByRepo, repoFullName } from "../api/match";
 
 const ACTOR = "webhook:github";
+/** Route key of this endpoint in the permission table (src/auth/permissions.ts). */
+export const GITHUB_WEBHOOK_ROUTE = "POST /webhooks/github";
 const MAX_BODY = 5 * 1024 * 1024;
 
 const json = (body: unknown, status = 200) =>
@@ -74,6 +77,7 @@ export async function processGithubEvent(db: D1Database, event: string, p: GhPay
   const repo = p.repository?.full_name ?? repoFullName(htmlUrl) ?? "";
   const project = htmlUrl ? await findProjectByRepo(db, htmlUrl) : null;
   const by = await serviceCaller(db, ACTOR);
+  requireAction(by, REST_ACTIONS[GITHUB_WEBHOOK_ROUTE]);
 
   if (!project) {
     await db.batch([

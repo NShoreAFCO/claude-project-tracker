@@ -10,11 +10,12 @@ import type {
   WorkpackageRow,
   WriteWarning,
 } from "../types";
-import { buildWpTree, computeProjectProgress, leafCounts, type WpCounts } from "./progress";
+import { buildWpTree, computeProjectProgress, leafCounts, progressBasis, type ProgressBasis, type WpCounts } from "./progress";
 import { QUALIFIES, listMilestones, lockedWpIds } from "./milestones";
 import { PROJECT_CATEGORIES, checkCategory } from "./categories";
 import { personOuts, personRefInput, personRefOut, refInitials } from "./persons";
 import { withPersonOuts } from "./workpackages";
+import { riskCriterion, riskSummaries, type RiskSummary } from "./risks";
 import { ensureSchedule, snapMs, snapWp } from "./schedule";
 import { criticalPath } from "./critical-path";
 import {
@@ -38,6 +39,10 @@ import {
 } from "./rules";
 import { gateClosedSql, gateLockedWpIds } from "./gates";
 import { isAgent } from "../auth/caller";
+import { requireAction } from "../auth/permissions";
+import { POLICY } from "../policy";
+import { activitySet, isSystem, projectStale } from "./activity";
+import { omitInternal, redactEvents } from "./internal";
 import {
   ConflictError,
   LIVE,
@@ -66,11 +71,17 @@ export const PROJECT_FIELDS = [
   "target_date",
   "progress_mode",
   "progress_manual",
+  "progress_manual_reason",
   "tags",
   "category",
   "closure_note_md",
   "lessons_learned_md",
   "schedule_strict",
+  "objectives_md",
+  "scope_in_md",
+  "scope_out_md",
+  "success_criteria_md",
+  "language",
 ] as const;
 type ProjectField = (typeof PROJECT_FIELDS)[number];
 /** Person-or-text roles of a project; each is stored as <role>_person_id or <role>_text. */
@@ -96,6 +107,8 @@ const ID_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export type ProjectCard = {
+  /** Open risks, highest open score, and open risks scored 15+ without an action (spec F6). */
+  risk_summary: RiskSummary;
   id: string;
   title: string;
   summary: string | null;
@@ -111,6 +124,7 @@ export type ProjectCard = {
   owner_id: string | null;
   /** open = todo, in_progress = doing, waiting_blocked = waiting + blocked; started = in_progress (alias until the UI moves). */
   wp_counts: WpCounts;
+  progress_basis: ProgressBasis;
   stalled_blocked: boolean;
   closure_due: boolean;
   /** Oldest `blocked_since` among blocked WPs (YYYY-MM-DD), for the card's age hint; null when none is blocked. */
@@ -118,7 +132,10 @@ export type ProjectCard = {
   /** Number of waiting WPs (deferrals), for the card's Waiting chip. */
   waiting_count: number;
   next_milestone: { id: string; title: string; due_date: string | null } | null;
+  /** Last progress (log_progress, status change, WP done); not touched by system writes. */
   last_activity: string | null;
+  /** Active project without progress for stale_days (policy, per-category override). */
+  stale: boolean;
   open_branches: number;
   context_docs: number;
   blocked: string[];
@@ -139,6 +156,11 @@ function normalise(input: ProjectInput): Partial<Record<ProjectField, unknown>> 
       // true/false, or null to follow the policy default (spec F4)
       if (v !== null && typeof v !== "boolean") throw new ValidationError("schedule_strict must be true, false or null");
       v = v === null ? null : v ? 1 : 0;
+    } else if (f === "language") {
+      // Report language (spec F2, §4.4): one of the instance's offered locales, null = instance default.
+      if (v === "") v = null;
+      if (v !== null && !POLICY.locales.includes(String(v)))
+        throw new ValidationError(`language must be one of ${POLICY.locales.join("|")} or null`);
     } else if (f === "category") v = checkCategory(v, PROJECT_CATEGORIES);
     else if (f === "progress_manual") {
       if (v !== null && (typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > 100))
@@ -165,6 +187,10 @@ export type ProjectOut = Omit<ProjectRow, "tags"> & {
   stalled_blocked: boolean;
   /** 100 % derived progress, all WPs done (or dropped), project not yet closed. */
   closure_due: boolean;
+  /** Active project without progress for stale_days (spec F8). */
+  stale: boolean;
+  /** What the percentage rests on (spec F7): mode, done/total leaf WPs, derived weighted percent, manual reason. */
+  progress_basis: ProgressBasis;
   /** Projects this one continues / its follow-up projects (project_link kind "follows"). */
   follows: string[];
   followed_by: string[];
@@ -185,10 +211,15 @@ export async function toProjectOut(db: D1Database, row: ProjectRow, wps?: Workpa
     wps ?? (await db.prepare(`SELECT * FROM workpackage WHERE project_id = ? AND ${LIVE()}`).bind(row.id).all<WorkpackageRow>()).results;
   return {
     ...row,
+    stale: projectStale(row),
     tags: parseJsonArray(row.tags),
     owner: personRefOut(row.owner_person_id, row.owner_text, people),
     sponsor: personRefOut(row.sponsor_person_id, row.sponsor_text, people),
     decision_maker: personRefOut(row.decision_maker_person_id, row.decision_maker_text, people),
+    progress_basis: progressBasis(
+      row,
+      list.filter((w) => !(w as { deleted_at?: string | null }).deleted_at),
+    ),
     ...projectFlags(row.status, list, derivedProgress),
     ...(await projectLinks(db, row.id)),
   };
@@ -207,17 +238,54 @@ async function personCols(db: D1Database, input: ProjectInput): Promise<Partial<
 }
 
 /**
- * Fields a project needs before it may be `active` (spec F1; F12 adds the target date for some types).
- * Returned names are API field names, so errors and warnings name what to fill in.
+ * Fields a project needs before it may be `active` (spec F1; F12 adds the target date for the project
+ * types in policy.target_date_required_categories). Returned names are API field names, so errors and
+ * warnings name what to fill in. `activating` = the write makes the project active (or creates it active):
+ * the target date rule bites only then, so legacy active projects without a date stay editable.
  */
-function missingForActive(row: Pick<ProjectRow, "owner_person_id" | "owner_text">): string[] {
+function missingForActive(
+  row: Pick<ProjectRow, "owner_person_id" | "owner_text" | "category" | "target_date">,
+  activating = true,
+): string[] {
   const missing: string[] = [];
   if (!row.owner_person_id && !row.owner_text) missing.push("owner");
+  if (activating && targetDateRequired(row.category) && !row.target_date) missing.push("target_date");
   return missing;
 }
 
+/** Spec F12: whether projects of this type need a target date before they become active. */
+export const targetDateRequired = (category: string | null | undefined): boolean =>
+  !!category && POLICY.target_date_required_categories.includes(category);
+
+/** Spec F7: manual progress needs a reason when a write switches to manual or changes the manual value. */
+export function manualReasonError(
+  current: { progress_mode: string; progress_manual: number | null } | null,
+  next: {
+    progress_mode: string;
+    progress_manual: number | null;
+    progress_manual_reason?: string | null;
+  },
+): string | null {
+  if (next.progress_mode !== "manual") {
+    return null;
+  }
+
+  const reasonRequired =
+    current === null || current.progress_mode !== "manual" || (current.progress_manual ?? null) !== (next.progress_manual ?? null);
+
+  const reasonPresent = typeof next.progress_manual_reason === "string" && next.progress_manual_reason.trim().length > 0;
+
+  return reasonRequired && !reasonPresent
+    ? "progress_manual_reason is required when progress_mode is manual or the manual progress changes"
+    : null;
+}
+
+const MISSING_HINT: Record<string, string> = {
+  owner: "owner (a person id, an email or a name)",
+  target_date: "target_date (YYYY-MM-DD; required for this project category)",
+};
 const activeError = (missing: string[]) =>
-  new ValidationError(`status active requires ${missing.join(", ")} (a person id, an email or a name)`);
+  new ValidationError(`status active requires ${missing.map((f) => MISSING_HINT[f] ?? f).join(", ")}`);
 
 /** Test seam: runs between the open-WP pre-read and the conditional UPDATE when a project is closed as done. */
 let beforeCloseWrite: (() => Promise<void>) | null = null;
@@ -240,15 +308,16 @@ export async function getProjectRow(db: D1Database, id: string): Promise<Project
 export async function listProjects(
   db: D1Database,
   filter: { status?: string; tag?: string; category?: string; owner?: string } = {},
+  /** The reader; viewers get cards without the internal fields (spec F12). Omitted = internal read. */
+  by?: Caller,
 ): Promise<ProjectCard[]> {
-  const [projects, wps, branches, docs, events, ms] = await db.batch([
+  const [projects, wps, branches, docs, ms] = await db.batch([
     filter.status
       ? db.prepare(`SELECT * FROM project WHERE status = ? AND ${LIVE()} ORDER BY updated_at DESC`).bind(filter.status)
       : db.prepare(`SELECT * FROM project WHERE ${LIVE()} ORDER BY updated_at DESC`),
     db.prepare(`SELECT * FROM workpackage WHERE ${LIVE()}`),
     db.prepare("SELECT project_id, COUNT(*) AS n FROM branch WHERE status = 'open' GROUP BY project_id"),
     db.prepare(`SELECT project_id, COUNT(*) AS n FROM context_doc WHERE ${LIVE()} GROUP BY project_id`),
-    db.prepare("SELECT project_id, MAX(ts) AS ts FROM event WHERE project_id IS NOT NULL GROUP BY project_id"),
     db.prepare(
       `SELECT m.project_id, m.id, m.title, m.due_date FROM milestone m WHERE ${LIVE("m")} AND NOT (${QUALIFIES}) ORDER BY m.due_date IS NULL, m.due_date, m.sort, m.title`,
     ),
@@ -261,19 +330,22 @@ export async function listProjects(
   const count = (rows: unknown[]) => new Map((rows as Array<{ project_id: string; n: number }>).map((r) => [r.project_id, r.n]));
   const openBranches = count(branches.results);
   const docCount = count(docs.results);
-  const lastEvent = new Map((events.results as Array<{ project_id: string; ts: string }>).map((r) => [r.project_id, r.ts]));
   const tag = filter.tag?.toLowerCase();
   const rows = (projects.results as ProjectRow[]).filter((p) => !filter.owner || p.owner_person_id === filter.owner);
   const people = await personOuts(
     db,
     rows.map((p) => p.owner_person_id),
   );
+  const risks = await riskSummaries(
+    db,
+    rows.map((p) => p.id),
+  );
 
   return rows
     .map((p) => {
       const list = wpBy.get(p.id) ?? [];
-      const ev = lastEvent.get(p.id) ?? null;
       return {
+        risk_summary: risks.get(p.id)!,
         id: p.id,
         title: p.title,
         summary: p.summary,
@@ -287,6 +359,7 @@ export async function listProjects(
         owner_initials: refInitials(personRefOut(p.owner_person_id, p.owner_text, people)),
         owner_id: p.owner_person_id && people.has(p.owner_person_id) ? p.owner_person_id : null,
         wp_counts: leafCounts(list),
+        progress_basis: progressBasis(p, list),
         ...projectFlags(p.status, list, derivedProgress),
         blocked_since:
           list
@@ -295,7 +368,8 @@ export async function listProjects(
             .sort()[0] ?? null,
         waiting_count: list.filter((w) => !w.deleted_at && w.status === "waiting").length,
         next_milestone: nextMs.get(p.id) ?? null,
-        last_activity: ev && ev > p.updated_at ? ev : p.updated_at,
+        last_activity: p.last_progress_at ?? p.created_at,
+        stale: projectStale(p),
         open_branches: openBranches.get(p.id) ?? 0,
         context_docs: docCount.get(p.id) ?? 0,
         blocked: list
@@ -308,10 +382,12 @@ export async function listProjects(
       };
     })
     .filter((c) => !tag || c.tags.some((t) => t.toLowerCase() === tag))
-    .filter((c) => !filter.category || (filter.category === "none" ? c.category === null : c.category === filter.category));
+    .filter((c) => !filter.category || (filter.category === "none" ? c.category === null : c.category === filter.category))
+    .map((c) => omitInternal(c, by));
 }
 
-export async function getProjectDetail(db: D1Database, id: string) {
+/** Full project view; `by` = the reader (viewers get it without the internal fields, spec F12). */
+export async function getProjectDetail(db: D1Database, id: string, by?: Caller) {
   const project = await getProjectRow(db, id);
   // Rows written before schedule validation (or by an older Worker) are computed once on first read.
   await ensureSchedule(db, id);
@@ -354,11 +430,31 @@ export async function getProjectDetail(db: D1Database, id: string) {
     critical: critical.has(m.id),
   }));
   const totals = cost.results[0] as { claude_tokens: number; copilot_prompts: number };
+  // F6: the risk criterion follows the highest open risk score while open risks exist; the manual value is the fallback.
+  const risk_summary = (await riskSummaries(db, [id])).get(id)!;
+  const derivedRisk = riskCriterion(risk_summary.max_score === null ? [] : [risk_summary.max_score]);
+  const scoreRows = scores.results as Array<ScoreRow & { derived?: boolean }>;
+  const shownScores =
+    derivedRisk === null
+      ? scoreRows
+      : [
+          ...scoreRows.filter((s) => s.criterion !== "risk"),
+          {
+            id: "derived:risk",
+            project_id: id,
+            criterion: "risk",
+            value: derivedRisk,
+            note: `derived from the highest open risk score (${risk_summary.max_score})`,
+            recorded_at: now(),
+            actor: "system",
+            derived: true,
+          },
+        ].sort((a, b) => a.criterion.localeCompare(b.criterion));
   // F5: `locked` = unlocked by a never-reached milestone, or gate-locked (`gate_locked` names the gate).
   const gateLocks = await gateLockedWpIds(db, id);
   const locked = new Set([...lockedWpIds(milestones), ...gateLocks.keys()]);
   return {
-    project: await toProjectOut(db, project, wpRows),
+    project: omitInternal(await toProjectOut(db, project, wpRows), by),
     progress: computeProjectProgress(project, wpRows),
     workpackages: buildWpTree(
       (await withPersonOuts(db, project, wpRows)).map((w) => ({
@@ -372,10 +468,11 @@ export async function getProjectDetail(db: D1Database, id: string) {
     milestones,
     baseline: (baseline.results[0] as BaselineRef | undefined) ?? null,
     branches: branches.results as BranchRow[],
-    scores: scores.results as ScoreRow[],
+    scores: shownScores,
+    risk_summary,
     score_history_count: (scoreCount.results[0] as { n: number }).n,
     token_cost: { ...totals, entries: costEntries.results as TokenCostRow[] },
-    events: events.results as EventOut[],
+    events: redactEvents(events.results as EventOut[], by),
     context_index: ctx.results as Array<Omit<ContextDocRow, "content_md" | "project_id" | "filename" | "created_at" | "created_by">>,
   };
 }
@@ -395,6 +492,13 @@ export async function createProject(db: D1Database, input: ProjectInput, by: Cal
   const title = String(fields.title ?? "").trim();
   if (!title) throw new ValidationError("title is required");
   if (input.id !== undefined && !ID_RE.test(String(input.id))) throw new ValidationError("id must match ^[a-z0-9][a-z0-9-]{0,62}$");
+
+  const createReasonErr = manualReasonError(null, {
+    progress_mode: String(fields.progress_mode ?? "derived"),
+    progress_manual: (fields.progress_manual as number | null | undefined) ?? null,
+    progress_manual_reason: fields.progress_manual_reason as string | null | undefined,
+  });
+  if (createReasonErr) throw new ValidationError(createReasonErr);
 
   const base = input.id ? String(input.id) : slugify(title);
   let id = base;
@@ -416,6 +520,7 @@ export async function createProject(db: D1Database, input: ProjectInput, by: Cal
     target_date: null,
     progress_mode: "derived",
     progress_manual: null,
+    progress_manual_reason: null,
     tags: null,
     category: null,
     owner_person_id: null,
@@ -426,12 +531,21 @@ export async function createProject(db: D1Database, input: ProjectInput, by: Cal
     decision_maker_text: null,
     closure_note_md: null,
     lessons_learned_md: null,
+    objectives_md: null,
+    scope_in_md: null,
+    scope_out_md: null,
+    success_criteria_md: null,
+    language: null,
     ...(fields as Partial<ProjectRow>),
     ...people,
     version: 1,
     created_at: ts,
     updated_at: ts,
+    last_progress_at: isSystem(by) ? null : ts,
+    last_changed_at: isSystem(by) ? null : ts,
   };
+  // F11: creating a project as done/abandoned is closing it (decider or above; never a service token).
+  if (isClosedProjectStatus(row.status)) requireAction(by, "close");
   const closure = closureMissing(row.status, row);
   if (closure.length) throw closureError(row.status, closure);
   const warnings: WriteWarning[] = [];
@@ -445,7 +559,7 @@ export async function createProject(db: D1Database, input: ProjectInput, by: Cal
       fields: missing,
     });
   }
-  const cols = ["id", ...WRITE_COLS, "version", "created_at", "updated_at"] as const;
+  const cols = ["id", ...WRITE_COLS, "version", "created_at", "updated_at", "last_progress_at", "last_changed_at"] as const;
   await db.batch([
     db
       .prepare(`INSERT INTO project (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`)
@@ -478,12 +592,18 @@ export async function updateProject(
   const next = { ...current, ...fields, ...people } as Record<string, unknown>;
   // Checked where status becomes active, or when an active project's owner changes; other edits of a
   // legacy ownerless active project stay possible.
-  const missing = missingForActive(next as unknown as ProjectRow);
-  if (missing.length && next.status === "active" && (current.status !== "active" || "owner_person_id" in people))
-    throw activeError(missing);
+  const reasonErr = manualReasonError(current, next as unknown as ProjectRow);
+  if (reasonErr) throw new ValidationError(reasonErr);
+  const activating = next.status === "active" && current.status !== "active";
+  const missing = missingForActive(next as unknown as ProjectRow, activating);
+  if (missing.length && next.status === "active" && (activating || "owner_person_id" in people)) throw activeError(missing);
   // F3 closure: checked on the merged values when the project becomes done/abandoned, or when a closed
   // project's closure fields are edited.
   const status = String(next.status);
+  // F11: moving a project to done/abandoned (also abandoned → done) is closing it, and reopening a closed
+  // project undoes a closure (Ruling 47): both need "close" (decider or above, never a service token).
+  // Editing a closed project's other fields, closure fields included, stays an ordinary write.
+  if (current.status !== status && (isClosedProjectStatus(status) || isClosedProjectStatus(current.status))) requireAction(by, "close");
   if (isClosedProjectStatus(status) && (current.status !== status || "closure_note_md" in fields || "lessons_learned_md" in fields)) {
     const closure = closureMissing(status, next as unknown as ProjectRow);
     if (closure.length) throw closureError(status, closure);
@@ -523,14 +643,18 @@ export async function updateProject(
   const noOpenWps = toDone ? ` AND NOT EXISTS (SELECT 1 FROM workpackage WHERE project_id = ? AND ${OPEN_WP_SQL})` : "";
   const noGate = clearsDm ? ` AND NOT EXISTS (SELECT 1 FROM milestone WHERE ${GATE_OF_PROJECT})` : "";
   const noUndecided = agentDm ? ` AND NOT EXISTS (SELECT 1 FROM milestone gm WHERE ${undecidedGateOfProject()})` : "";
+  const ts = now();
+  // Spec F8: a status or manual-progress change is progress; other edits only count as a change.
+  const act = activitySet(by, ts, changed.includes("status") || changed.includes("progress_manual"));
   const res = await db.batch([
     db
       .prepare(
-        `UPDATE project SET ${changed.map((f) => `${f} = ?`).join(", ")}, version = version + 1, updated_at = ? WHERE id = ? AND version = ?${noOpenWps}${noGate}${noUndecided}`,
+        `UPDATE project SET ${changed.map((f) => `${f} = ?`).join(", ")}, version = version + 1, updated_at = ?${act.sql} WHERE id = ? AND version = ?${noOpenWps}${noGate}${noUndecided}`,
       )
       .bind(
         ...changed.map((f) => next[f] ?? null),
-        now(),
+        ts,
+        ...act.params,
         id,
         current.version,
         ...(toDone ? [id] : []),

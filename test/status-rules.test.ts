@@ -11,6 +11,7 @@ import { linkBranch } from "../src/data/branches";
 import { OPEN_WP_STATUSES, TransitionError, moveWorkpackages, parseBlockedBy, setBeforeMoveWriteForTesting } from "../src/data/rules";
 import { ConflictError, ValidationError } from "../src/data/util";
 import { mcpApiHandler } from "../src/mcp/server";
+import { ensureUserPerson } from "../src/data/persons";
 import type { Env, WorkpackageRow } from "../src/types";
 
 const db = env.DB;
@@ -62,7 +63,12 @@ async function mcp(name: string, args: Record<string, unknown>) {
   return json.result as { isError?: boolean; content: Array<{ text: string }> };
 }
 
-beforeAll(installTestKeys);
+beforeAll(async () => {
+  await installTestKeys();
+  // Closing a project needs the decider role (F11, R5); the REST/MCP login of this file closes projects.
+  const me = await ensureUserPerson(db, "user@example.com");
+  await db.prepare("UPDATE person SET access_role = 'decider' WHERE id = ?").bind(me.id).run();
+});
 afterEach(() => setBeforeCloseWriteForTesting(null));
 
 describe("project closure", () => {

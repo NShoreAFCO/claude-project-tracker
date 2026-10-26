@@ -164,7 +164,12 @@ describe("soft delete", () => {
     const diff = JSON.parse(ev.diff_json!);
     expect(diff.title).toEqual(["Alpha needle", null]);
     expect(diff.id).toEqual([a.id, null]);
-    expect(diff.deleted_children[0]).toEqual({ workpackages: [a1.id], milestones: [m.id], context_docs: [da.id, da1.id].sort() });
+    expect(diff.deleted_children[0]).toEqual({
+      workpackages: [a1.id],
+      milestones: [m.id],
+      context_docs: [da.id, da1.id].sort(),
+      risks: [],
+    });
     // a context doc delete keeps its content
     const d = await writeContext(db, { owner_kind: "project", owner_id: p.id, title: "keep", content_md: "keep me" }, A);
     await deleteContext(db, d.id, A);

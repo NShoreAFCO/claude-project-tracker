@@ -9,13 +9,17 @@ import { listContext, readContext, getContextBundle } from "../data/context-read
 import { writeContext, appendContext, deleteContext, setContextMeta } from "../data/context-write";
 import { search } from "../data/search";
 import { upsertMilestone } from "../data/milestones";
+import { listRisks, upsertRisk } from "../data/risks";
 import { createBaseline } from "../data/baselines";
 import { recordGateDecision, type DecisionInput } from "../data/gates";
 import { moveWorkpackages } from "../data/rules";
 import { HUMAN_DEFAULT, PROJECT_CATEGORIES, WP_CATEGORIES } from "../data/categories";
 import { ConflictError, ValidationError } from "../data/util";
 import { listPersons, upsertPerson } from "../data/persons";
+import { summary as portfolioSummary } from "../data/portfolio";
 import type { PersonRow } from "../types";
+import { POLICY } from "../policy";
+import { VERIFICATIONS } from "../data/rules";
 
 const projectStatusSchema = z.enum(["idea", "active", "on_hold", "done", "abandoned"]);
 
@@ -29,8 +33,8 @@ const branchKindSchema = z.enum(["branch", "fork", "worktree"]);
 
 const branchStatusSchema = z.enum(["open", "merged", "closed", "abandoned", "stale"]);
 
-const entityKindSchema = z.enum(["project", "workpackage", "branch", "milestone", "context_doc", "person"]);
-const trashKindSchema = z.enum(["project", "workpackage", "milestone", "context_doc", "person"]);
+const entityKindSchema = z.enum(["project", "workpackage", "branch", "milestone", "context_doc", "person", "risk"]);
+const trashKindSchema = z.enum(["project", "workpackage", "milestone", "context_doc", "person", "risk"]);
 const docStatusSchema = z.enum(["draft", "released", "obsolete"]);
 const projectCategorySchema = z.enum(PROJECT_CATEGORIES);
 const wpCategorySchema = z.enum(WP_CATEGORIES);
@@ -61,6 +65,21 @@ function personRef(description: string) {
     .describe(
       `${description} Give a person id or email (see list_persons); an exact name also matches, other text is stored as free text. null clears.`,
     );
+}
+
+/** Objectives, scope and report language of a project (spec F2). */
+function projectScopeFields() {
+  return {
+    objectives_md: optionalText("Set the objectives (Markdown): what the project is meant to achieve."),
+    scope_in_md: optionalText("Set what is in scope (Markdown)."),
+    scope_out_md: optionalText("Set what is explicitly out of scope (Markdown)."),
+    success_criteria_md: optionalText("Set the success criteria (Markdown): how the project's success is judged."),
+    language: z
+      .enum(POLICY.locales as [string, ...string[]])
+      .nullable()
+      .optional()
+      .describe("Set the language of the project's reports (null = instance default)."),
+  };
 }
 
 /**
@@ -113,12 +132,16 @@ export function registerTools(reg: Reg): void {
       readOnly: true,
     },
     async (args, tc) => {
-      const projects = await listProjects(tc.db, {
-        status: args.status,
-        tag: args.tag,
-        category: args.category,
-        owner: args.owner,
-      });
+      const projects = await listProjects(
+        tc.db,
+        {
+          status: args.status,
+          tag: args.tag,
+          category: args.category,
+          owner: args.owner,
+        },
+        tc.by,
+      );
 
       return projects.map((project) => ({
         id: project.id,
@@ -147,7 +170,7 @@ export function registerTools(reg: Reg): void {
       }),
       readOnly: true,
     },
-    async (args, tc) => getProjectDetail(tc.db, args.id),
+    async (args, tc) => getProjectDetail(tc.db, args.id, tc.by),
   );
 
   reg(
@@ -155,7 +178,7 @@ export function registerTools(reg: Reg): void {
     {
       title: "Create project",
       description:
-        "Create a project. Fill owner (defaults to you, the logged-in person), and sponsor / decision_maker when known. Status active requires an owner: with status omitted and no owner the project starts as idea and the result carries a warning; an explicit status active without owner fails.",
+        "Create a project. Fill owner (defaults to you, the logged-in person), and sponsor / decision_maker when known. Fill objectives_md, scope_in_md, scope_out_md and success_criteria_md when the user has stated them (ask if unclear; do not invent them). Status active requires an owner: with status omitted and no owner the project starts as idea and the result carries a warning; an explicit status active without owner fails.",
       inputSchema: z.object({
         title: z.string().min(1).describe("Set the project title."),
         id: z.string().optional().describe("Set an optional project identifier (slug)."),
@@ -177,6 +200,7 @@ export function registerTools(reg: Reg): void {
         decision_maker: personRef("Set the decision maker (decides at gates)."),
         closure_note_md: optionalText("Set the closure note (required for status done or abandoned)."),
         lessons_learned_md: optionalText('Set lessons learned (required for status done; may be "none").'),
+        ...projectScopeFields(),
         on_behalf_of: onBehalfOf,
       }),
     },
@@ -205,6 +229,11 @@ export function registerTools(reg: Reg): void {
           decision_maker: args.decision_maker,
           closure_note_md: args.closure_note_md,
           lessons_learned_md: args.lessons_learned_md,
+          objectives_md: args.objectives_md,
+          scope_in_md: args.scope_in_md,
+          scope_out_md: args.scope_out_md,
+          success_criteria_md: args.success_criteria_md,
+          language: args.language,
         },
         tc.by,
       ),
@@ -215,7 +244,7 @@ export function registerTools(reg: Reg): void {
     {
       title: "Update project",
       description:
-        'Update project fields. Setting status active requires an owner (set owner in the same patch if missing). Closing: status abandoned requires closure_note_md; status done requires closure_note_md and lessons_learned_md (may be "none") and no open work packages (todo|doing|blocked|waiting) — otherwise the call fails with a conflict listing them; finish or drop them, or move them to a follow-up project with move_workpackages.',
+        'Update project fields. Setting status active requires an owner (set owner in the same patch if missing), and a target_date for the project categories the instance policy names. Closing: status abandoned requires closure_note_md; status done requires closure_note_md and lessons_learned_md (may be "none") and no open work packages (todo|doing|blocked|waiting) — otherwise the call fails with a conflict listing them; finish or drop them, or move them to a follow-up project with move_workpackages.',
       inputSchema: z.object({
         id: z.string().describe("Identify the project."),
         patch: z
@@ -233,6 +262,9 @@ export function registerTools(reg: Reg): void {
             target_date: optionalDate("Set the target date as YYYY-MM-DD."),
             progress_mode: progressModeSchema.optional().describe("Set the progress calculation mode."),
             progress_manual: z.number().min(0).max(100).nullable().optional().describe("Set manual progress from 0 to 100."),
+            progress_manual_reason: optionalText(
+              "Explain why progress is set by hand. Required when switching to manual mode or changing the manual progress.",
+            ),
             tags: z.array(z.string()).optional().describe("Set the project tags."),
             category: projectCategorySchema.nullable().optional().describe("Set the project category."),
             owner: personRef("Set the project owner."),
@@ -245,6 +277,7 @@ export function registerTools(reg: Reg): void {
               .nullable()
               .optional()
               .describe("Refuse writes that add schedule issues (true), only warn (false), or follow the instance default (null)."),
+            ...projectScopeFields(),
           })
           .describe("Provide the fields to update."),
         expected_version: z.number().int().optional().describe("Require the expected project version."),
@@ -258,7 +291,7 @@ export function registerTools(reg: Reg): void {
     "upsert_workpackage",
     {
       title: "Upsert work package",
-      description: `Create or update a work package. category: ${WP_CATEGORIES.join("|")} (null = inherit from the parent). WPs with human=true${HUMAN_DEFAULT.length ? ` (default for ${HUMAN_DEFAULT.join(", ")})` : ""} are done off the computer: log progress the user reports, and set them to done only when the user says so. Set owner when someone other than the project owner is responsible (effective_owner falls back to the project owner); priority_stakeholders lists persons to keep informed. Status: use blocked only for a real blocker (blocked_by wp:<id>, ms:<id> or ext:<text>; blocked_since defaults to today) and waiting for a deliberate deferral (optional waiting_reason). dropped requires drop_reason. A todo WP whose progress rises above 0 becomes doing unless you set status in the same call. The result lists schedule issues in warnings (start before a predecessor ends or before an unlocking milestone is due, child outside its parent); fix them or tell the user. In a schedule_strict project a write that adds issues fails with a conflict listing them. A WP behind an undecided gate milestone is gate-locked: setting it to doing or done, or setting its progress, fails with 409 GATE_LOCKED naming the gate; tell the user (the decision maker decides, or a person overrides in the dashboard).`,
+      description: `Create or update a work package. category: ${WP_CATEGORIES.join("|")} (null = inherit from the parent). WPs with human=true${HUMAN_DEFAULT.length ? ` (default for ${HUMAN_DEFAULT.join(", ")})` : ""} are done off the computer: log progress the user reports, and set them to done only when the user says so. When you create a WP, fill deliverable and acceptance_criteria_md (how to tell it is done) and choose verification (${VERIFICATIONS.join("|")}). Verification: setting a WP with verification other than none to done records your OAuth login's person as verified_by (verified_at now), so do it only when the user confirms they verified it; never mark human=true WPs verified yourself, and never set verified_by to an agent, free text or anyone but your login (refused). Set owner when someone other than the project owner is responsible (effective_owner falls back to the project owner); priority_stakeholders lists persons to keep informed. Status: use blocked only for a real blocker (blocked_by wp:<id>, ms:<id> or ext:<text>; blocked_since defaults to today) and waiting for a deliberate deferral (optional waiting_reason). dropped requires drop_reason. A todo WP whose progress rises above 0 becomes doing unless you set status in the same call. The result lists schedule issues in warnings (start before a predecessor ends or before an unlocking milestone is due, child outside its parent); fix them or tell the user. In a schedule_strict project a write that adds issues fails with a conflict listing them. A WP behind an undecided gate milestone is gate-locked: setting it to doing or done, or setting its progress, fails with 409 GATE_LOCKED naming the gate; tell the user (the decision maker decides, or a person overrides in the dashboard).`,
       inputSchema: z.object({
         project_id: z.string().describe("Identify the owning project."),
         id: z.string().optional().describe("Identify an existing work package (omit to create)."),
@@ -271,7 +304,14 @@ export function registerTools(reg: Reg): void {
         waiting_reason: optionalText("Set why the WP is deferred (status waiting)."),
         drop_reason: optionalText("Set why the WP is dropped (required for status dropped)."),
         progress: z.number().min(0).max(100).optional().describe("Set progress from 0 to 100."),
-        weight: z.number().positive().optional().describe("Set a positive progress weight."),
+        weight: z.number().positive().optional().describe("Set the effort in person-days (PD); it also weights progress."),
+        effort_planned_pd: z.number().min(0).nullable().optional().describe("Set the planned effort in person-days."),
+        effort_actual_pd: z
+          .number()
+          .min(0)
+          .nullable()
+          .optional()
+          .describe("Set the actual effort in person-days (log_progress effort_pd adds to it)."),
         start_date: optionalDate("Set the start date as YYYY-MM-DD."),
         end_date: optionalDate("Set the end date as YYYY-MM-DD."),
         depends_on: z
@@ -281,6 +321,25 @@ export function registerTools(reg: Reg): void {
         sort: z.number().int().optional().describe("Set the sort order."),
         category: wpCategorySchema.nullable().optional().describe("Set the work category (null = inherit)."),
         human: z.boolean().nullable().optional().describe("Mark as human (off-computer) work; null = default from category."),
+        deliverable: z.string().max(500).nullable().optional().describe("Set the deliverable (short text: what the WP produces)."),
+        acceptance_criteria_md: optionalText("Set the acceptance criteria (Markdown): how to tell the WP is done. Fill on creation."),
+        verification: z
+          .enum(VERIFICATIONS)
+          .optional()
+          .describe("Set how completion is verified (default none). Other than none, status done needs a person as verified_by."),
+        verified_by: z
+          .string()
+          .max(200)
+          .nullable()
+          .optional()
+          .describe(
+            "Omit: done records your OAuth login's person. Only your own login's person id or email is accepted; never an agent or free text.",
+          ),
+        verified_at: z
+          .string()
+          .nullable()
+          .optional()
+          .describe("Set when it was verified (YYYY-MM-DD or ISO timestamp, not in the future; default now)."),
         owner: personRef("Set the work package owner (empty = project owner)."),
         priority_stakeholders: z
           .array(z.string())
@@ -389,6 +448,57 @@ export function registerTools(reg: Reg): void {
   );
 
   reg(
+    "upsert_risk",
+    {
+      title: "Upsert risk",
+      description:
+        "Create or update an entry of the risk and nonconformity log. type: risk|issue|opportunity|nc. Rate probability and impact 1 to 5; the score (probability x impact) is derived. Always name an owner, a response (avoid|reduce|transfer|accept|exploit) and an action: a risk scored 15 or higher without an action is a portfolio warning. status: open|monitoring|closed. For type nc you may set nc_detected_in_wp, nc_cause, nc_correction, nc_corrective_action and nc_effectiveness_check_date (refused for other types). The scorecard criterion risk is derived from the highest open score while open risks exist.",
+      inputSchema: z.object({
+        project_id: z.string().describe("Identify the owning project."),
+        id: z.string().optional().describe("Identify an existing entry (omit to create)."),
+        type: z.enum(["risk", "issue", "opportunity", "nc"]).optional().describe("Set the entry type."),
+        title: optionalText("Set the title."),
+        description_md: optionalText("Set the Markdown description."),
+        probability: z.number().int().min(1).max(5).optional().describe("Set the probability from 1 to 5."),
+        impact: z.number().int().min(1).max(5).optional().describe("Set the impact from 1 to 5."),
+        owner: personRef("Set the owner."),
+        response: z.enum(["avoid", "reduce", "transfer", "accept", "exploit"]).nullable().optional().describe("Set the response."),
+        action: optionalText("Set the action."),
+        due_date: optionalDate("Set the due date as YYYY-MM-DD."),
+        status: z.enum(["open", "monitoring", "closed"]).optional().describe("Set the status."),
+        workpackage_id: optionalText("Link a work package."),
+        milestone_id: optionalText("Link a milestone."),
+        nc_detected_in_wp: optionalText("Set the work package where the nonconformity was detected (type nc)."),
+        nc_cause: optionalText("Set the cause (type nc)."),
+        nc_correction: optionalText("Set the correction (type nc)."),
+        nc_corrective_action: optionalText("Set the corrective action (type nc)."),
+        nc_effectiveness_check_date: optionalDate("Set the effectiveness check date as YYYY-MM-DD (type nc)."),
+        expected_version: z.number().int().optional().describe("Require the expected entry version."),
+        on_behalf_of: onBehalfOf,
+      }),
+    },
+    async (args, tc) => {
+      const { project_id, expected_version, ...input } = args;
+      return upsertRisk(tc.db, project_id, omitUndefined(input), tc.by, expected_version);
+    },
+  );
+
+  reg(
+    "list_risks",
+    {
+      title: "List risks",
+      description: "List risk log entries, highest score first, optionally filtered by project, status and type.",
+      inputSchema: z.object({
+        project_id: optionalText("Filter by project."),
+        status: z.enum(["open", "monitoring", "closed"]).optional().describe("Filter by status."),
+        type: z.enum(["risk", "issue", "opportunity", "nc"]).optional().describe("Filter by type."),
+      }),
+      readOnly: true,
+    },
+    async (args, tc) => listRisks(tc.db, { ...omitUndefined(args), project_id: args.project_id ?? undefined }),
+  );
+
+  reg(
     "delete_entity",
     {
       title: "Delete entity",
@@ -431,12 +541,18 @@ export function registerTools(reg: Reg): void {
     {
       title: "Log progress",
       description:
-        "Log what was done in this session. Main logging tool. With workpackage_id, a todo work package moves to doing; progress 100 marks it done. A gate-locked work package (behind an undecided gate) is not started, and setting its progress is refused (409 GATE_LOCKED).",
+        "Log what was done in this session. Main logging tool. With workpackage_id, a todo work package moves to doing; progress 100 marks it done (for a WP with verification other than none this records your OAuth login's person as verified_by, so log 100 only when the user confirms the verification; never for human=true WPs on your own). A gate-locked work package (behind an undecided gate) is not started, and setting its progress is refused (409 GATE_LOCKED).",
       inputSchema: z.object({
         project_id: z.string().describe("Identify the project."),
         summary: z.string().min(1).describe("Summarize the completed work."),
         workpackage_id: optionalText("Link a work package."),
         progress: z.number().min(0).max(100).optional().describe("Set progress from 0 to 100."),
+        effort_pd: z
+          .number()
+          .positive()
+          .max(1000)
+          .optional()
+          .describe("Add person-days of effort spent to the work package's actual effort (needs workpackage_id)."),
         session_id: optionalText("Link the session identifier."),
         on_behalf_of: onBehalfOf,
       }),
@@ -740,6 +856,18 @@ export function registerTools(reg: Reg): void {
       );
       return result;
     },
+  );
+
+  reg(
+    "get_portfolio_summary",
+    {
+      title: "Get portfolio summary",
+      description:
+        "Read-only portfolio overview: project counts per status, and for open projects the ids with overdue milestones, gates awaiting a decision, blocked work packages, stale activity, missing target date or owner, schedule issues, and open risks scored 15 or more.",
+      inputSchema: z.object({}),
+      readOnly: true,
+    },
+    async (_args, tc) => portfolioSummary(tc.db, new Date().toISOString().slice(0, 10)),
   );
 
   reg(

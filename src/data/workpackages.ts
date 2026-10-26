@@ -1,19 +1,25 @@
 import type { Caller, PersonOut, PersonRefOut, ProjectRow, WorkpackageRow } from "../types";
 import { ConflictError, LIVE, NotFoundError, ValidationError, diffFields, eventStmt, eventStmtIfChanged, now, slugify } from "./util";
+import { activitySet, isSystem, projectActivityStmt } from "./activity";
 import { dependsOnInput, issuesOf, recomputeScheduleStmts, scheduleBatch, storeSchedule, snapWp, type ScheduleIssue } from "./schedule";
 import { WP_CATEGORIES, checkCategory, checkHuman } from "./categories";
 import { reachStmts } from "./milestones";
 import { gateGuardedBatch, startGuard } from "./gates";
 import { personOuts, personRefInput, personRefOut, resolvePersonRef } from "./persons";
 import {
+  VERIFICATIONS,
+  applyVerificationRules,
   applyWpRules,
   checkBlockedRef,
   isClosedProjectStatus,
   isOpenWpStatus,
   parseBlockedBy,
   projectClosedError,
+  verificationNotAboveSql,
+  verifierInput,
   type BlockedRef,
 } from "./rules";
+import { isAgent } from "../auth/caller";
 
 export const WP_FIELDS = [
   "parent_id",
@@ -23,6 +29,8 @@ export const WP_FIELDS = [
   "blocked_by",
   "progress",
   "weight",
+  "effort_planned_pd",
+  "effort_actual_pd",
   "start_date",
   "end_date",
   "depends_on",
@@ -32,10 +40,14 @@ export const WP_FIELDS = [
   "drop_reason",
   "blocked_since",
   "waiting_reason",
+  "deliverable",
+  "acceptance_criteria_md",
+  "verification",
+  "verified_at",
 ] as const;
 type WpField = (typeof WP_FIELDS)[number];
-/** Columns written by create/update and diffed into events (WP fields plus the owner columns). */
-const WRITE_COLS = [...WP_FIELDS, "owner_person_id", "owner_text"] as const;
+/** Columns written by create/update and diffed into events (WP fields plus the owner and verifier columns). */
+const WRITE_COLS = [...WP_FIELDS, "owner_person_id", "owner_text", "verified_by"] as const;
 
 /**
  * Client shape of a work package: owner as chip or text, effective owner (WP owner, else project owner),
@@ -54,6 +66,20 @@ export type WpWriteOut = WpOut & { warnings: ScheduleIssue[] };
 const STATUSES = ["todo", "doing", "blocked", "waiting", "done", "dropped"];
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/;
+const DELIVERABLE_MAX = 500;
+
+/** verified_at: YYYY-MM-DD or an ISO timestamp with offset (stored as UTC), not in the future; "" or null clears. */
+function verifiedAtInput(v: unknown): string | null {
+  if (v === null || v === "") return null;
+  const s = typeof v === "string" ? v.trim() : "";
+  const valid = DATE_RE.test(s) ? Number.isFinite(Date.parse(`${s}T00:00:00Z`)) : TIMESTAMP_RE.test(s) && Number.isFinite(Date.parse(s));
+  if (!valid) throw new ValidationError("verified_at must be YYYY-MM-DD or an ISO timestamp");
+  const out = DATE_RE.test(s) ? s : new Date(Date.parse(s)).toISOString();
+  const future = DATE_RE.test(out) ? out > new Date().toISOString().slice(0, 10) : Date.parse(out) > Date.now() + 5 * 60_000;
+  if (future) throw new ValidationError("verified_at cannot be in the future");
+  return out;
+}
 
 export async function listWorkpackages(db: D1Database, projectId: string): Promise<WorkpackageRow[]> {
   const { results } = await db
@@ -179,6 +205,12 @@ function normalise(input: Record<string, unknown>): Partial<Record<WpField, unkn
       case "weight":
         if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) throw new ValidationError("weight must be greater than 0");
         break;
+      case "effort_planned_pd":
+      case "effort_actual_pd":
+        if (v === "") v = null;
+        if (v !== null && (typeof v !== "number" || !Number.isFinite(v) || v < 0))
+          throw new ValidationError(`${f} must be a number of person-days >= 0 or null`);
+        break;
       case "sort":
         if (typeof v !== "number" || !Number.isFinite(v)) throw new ValidationError("sort must be a number");
         v = Math.trunc(v);
@@ -191,6 +223,19 @@ function normalise(input: Record<string, unknown>): Partial<Record<WpField, unkn
         break;
       case "human":
         v = checkHuman(v);
+        break;
+      case "verification":
+        if (!(VERIFICATIONS as readonly string[]).includes(String(v)))
+          throw new ValidationError(`verification must be one of ${VERIFICATIONS.join("|")}`);
+        break;
+      case "verified_at":
+        v = verifiedAtInput(v);
+        break;
+      case "deliverable":
+        if (v !== null && typeof v !== "string") throw new ValidationError("deliverable must be a string");
+        if (typeof v === "string") v = v.trim() || null;
+        if (typeof v === "string" && v.length > DELIVERABLE_MAX)
+          throw new ValidationError(`deliverable must be at most ${DELIVERABLE_MAX} characters (put details in acceptance_criteria_md)`);
         break;
       case "start_date":
       case "end_date":
@@ -244,6 +289,9 @@ export async function upsertWorkpackage(
     fields.owner_text = owner.text;
   }
   const stakeholders = await stakeholderInput(db, input.priority_stakeholders);
+  // F2: verified_by is a person (agents: only their own); the rule itself runs after applyWpRules.
+  const verifier = await verifierInput(db, input.verified_by, by);
+  if (verifier !== undefined) fields.verified_by = verifier;
   if (fields.blocked_by !== undefined) await checkBlockedRef(db, fields.blocked_by);
 
   const existing = input.id ? await getWpAny(db, String(input.id)) : null;
@@ -253,6 +301,7 @@ export async function upsertWorkpackage(
       throw new ValidationError(`workpackage ${existing.id} belongs to project ${existing.project_id}`);
     if (typeof expectedVersion === "number" && expectedVersion !== existing.version) throw new ConflictError("version conflict", existing);
     applyWpRules(existing, fields);
+    applyVerificationRules(existing, fields, by);
     // F5: a gate-locked WP (or sub-WP) is not started without an override (pre-check here, guard in the batch).
     const gateGuard = await startGuard(db, by, existing, fields);
     // A done/abandoned project gets no open work back (edits that keep the status stay possible).
@@ -278,6 +327,14 @@ export async function upsertWorkpackage(
       wps: [snapWp(next as unknown as WorkpackageRow)],
       checkDependsOn: "depends_on" in diff ? existing.id : undefined,
     });
+    // Spec F8: status or progress changes are progress; other edits only count as a change.
+    const ts = now();
+    const progressWrite = changed.includes("status") || changed.includes("progress");
+    const act = activitySet(by, ts, progressWrite);
+    const projectAct = projectActivityStmt(db, by, projectId, ts, progressWrite, true);
+    // F2: agents never lower the verification; re-checked on the stored row when the batch runs (the
+    // version condition alone already rules out a change since the read; this states the rule in SQL).
+    const agentVerify = isAgent(by) && "verification" in diff ? ` AND verification IN ${verificationNotAboveSql(next.verification)}` : "";
     const res = await gateGuardedBatch(
       db,
       [
@@ -285,9 +342,9 @@ export async function upsertWorkpackage(
         ...stakeStmts,
         db
           .prepare(
-            `UPDATE workpackage SET ${changed.map((f) => `${f} = ?, `).join("")}version = version + 1, updated_at = ? WHERE id = ? AND version = ?`,
+            `UPDATE workpackage SET ${changed.map((f) => `${f} = ?, `).join("")}version = version + 1, updated_at = ?${act.sql} WHERE id = ? AND version = ?${agentVerify}`,
           )
-          .bind(...changed.map((f) => next[f] ?? null), now(), existing.id, existing.version),
+          .bind(...changed.map((f) => next[f] ?? null), ts, ...act.params, existing.id, existing.version),
         eventStmtIfChanged(db, {
           by,
           project_id: projectId,
@@ -297,6 +354,7 @@ export async function upsertWorkpackage(
           summary: `${String(next.title)}: ${Object.keys(diff).join(", ")}`,
           diff,
         }),
+        ...(projectAct ? [projectAct] : []),
         ...reachStmts(db, projectId, by),
         ...schedule.stmts,
       ],
@@ -317,6 +375,7 @@ export async function upsertWorkpackage(
   if (input.id !== undefined && !ID_RE.test(String(input.id))) throw new ValidationError("id must match ^[a-z0-9][a-z0-9-]{0,62}$");
   await checkParent(db, projectId, null, fields.parent_id);
   applyWpRules(null, fields);
+  applyVerificationRules(null, fields, by);
   // F5: no started WP below a gate-locked one (pre-check here, guard on the parent in the batch).
   const gateGuard = await startGuard(db, by, null, fields);
 
@@ -335,6 +394,8 @@ export async function upsertWorkpackage(
     blocked_by: null,
     progress: 0,
     weight: 1,
+    effort_planned_pd: null,
+    effort_actual_pd: null,
     start_date: null,
     end_date: null,
     depends_on: null,
@@ -346,16 +407,24 @@ export async function upsertWorkpackage(
     drop_reason: null,
     blocked_since: null,
     waiting_reason: null,
+    deliverable: null,
+    acceptance_criteria_md: null,
+    verification: "none",
+    verified_by: null,
+    verified_at: null,
     ...(fields as Partial<WorkpackageRow>),
     version: 1,
     created_at: ts,
     updated_at: ts,
+    last_progress_at: isSystem(by) ? null : ts,
+    last_changed_at: isSystem(by) ? null : ts,
   };
+  const projectAct = projectActivityStmt(db, by, projectId, ts, false);
   const schedule = await recomputeScheduleStmts(db, projectId, {
     wps: [snapWp(row)],
     checkDependsOn: fields.depends_on !== undefined ? id : undefined,
   });
-  const cols = ["id", "project_id", ...WRITE_COLS, "version", "created_at", "updated_at"] as const;
+  const cols = ["id", "project_id", ...WRITE_COLS, "version", "created_at", "updated_at", "last_progress_at", "last_changed_at"] as const;
   await gateGuardedBatch(
     db,
     [
@@ -376,6 +445,7 @@ export async function upsertWorkpackage(
         },
       }),
       ...(stakeholders?.length ? stakeholderStmts(db, id, 1, stakeholders) : []),
+      ...(projectAct ? [projectAct] : []),
       ...reachStmts(db, projectId, by),
       ...schedule.stmts,
     ],

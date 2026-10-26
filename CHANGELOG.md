@@ -1,5 +1,97 @@
 # Changelog
 
+## R5
+
+### Added
+
+- Role enforcement: every REST route and MCP tool maps to one action (`read | write | decide | close | verify_sign_off | manage_roles | purge`) with a minimum role (viewer < editor < decider < admin); an unmapped route or tool answers 403. Service tokens act as editor and never decide, close, verify a `sign_off`, manage roles or purge, even with `on_behalf_of`. MCP logins act with the person's role but never manage roles or purge. Roles are read on every request. The full matrix is in `docs/SPEC.md` section 24.
+- Closing a project (`done`, `abandoned`) and reopening it need a decider. Recording, changing or lowering a `sign_off` verification needs a decider; `review`, `test` and `demo` verification need a person. Restore from the trash is an editor action, purge an admin action. Viewers may edit only their own language, display name and phone (`PATCH /api/persons/me`). The Claude Code hook checks the user's role.
+- Hygiene: a project in a `policy.target_date_required_categories` category needs a target date to become `active` (400); `create_project` without status then gives `idea` plus a warning. Project `language` is checked against `policy.locales`.
+- The OAuth consent and error pages use the instance default language and the instance string overrides.
+- Setup, backup and deploy scripts fall back to wrangler's own login (`wrangler login`) with the account from the instance config when no saved token file exists.
+
+### Changed
+
+- Viewers no longer see `local_path`, `session_id` or `repo_url` (REST and MCP); branch `repo` and `pr_url` stay visible.
+- `GET /api/whoami` accepts GET only.
+
+### Breaking
+
+- Viewers lose write access everywhere (403).
+- Reopening a closed project needs a decider.
+- Viewers no longer see the internal fields above.
+
+### Migration
+
+- None. Update, run `npm test` and `npm run check`, then deploy. Review the People view before deploying: everyone who should close projects or verify sign-offs needs the `decider` role, and the default role is still `editor`.
+
+## R4
+
+### Added
+
+- Acceptance: project `objectives_md`, `scope_in_md`, `scope_out_md`, `success_criteria_md` and `language`; work package `deliverable`, `acceptance_criteria_md`, `verification` (`none | review | test | demo | sign_off`), `verified_by` and `verified_at`.
+- Verification: completing a work package with a verification method (status `done`, or `log_progress` reaching 100) needs a person as verifier. Dashboard users and MCP logins verify as themselves, service tokens need `on_behalf_of`; otherwise 409 `VERIFICATION_REQUIRED`. Agents may name only their own person, cannot change another person's verification (403) and can raise but never lower the method (403). Reopening clears the verification.
+- Portfolio overview: `GET /api/portfolio/summary` (`by_status`, overdue milestones, gates awaiting decision, blocked, stale, missing target date, missing owner, schedule issues, open high risks, each with count and project ids), `GET /api/workpackages/upcoming` and `GET /api/workpackages/mine`.
+- Reports: `GET /api/projects/:id/report?format=md|html|pdf` in the project's language (else the instance default), names only, no contact data. PDF is rendered by the Cloudflare Browser Rendering binding `BROWSER`; `policy.report.pdf: false` leaves the binding out, and the PDF route then answers 503. `policy.report.paper` (`a4` | `letter`) sets the paper size.
+- Server-side texts (reports) can be overridden per language in `instance/strings.<locale>.json`.
+- MCP tool: `get_portfolio_summary`, read-only (28 tools in total). `create_project`, `update_project` and `upsert_workpackage` take the new fields.
+
+### Changed
+
+- `log_progress` reaching 100 on a work package with a verification method records the verifier like a status change to done.
+
+### Migration
+
+- `0006_r4_acceptance.sql`, additive only; the previous Worker version keeps running on it, but until the new Worker is deployed it can set work packages done without a verifier. Run `npm run db:migrate:remote`, then deploy straight away.
+- PDF reports: no setup step, the binding is part of the generated `wrangler.jsonc`. On the Workers Free plan Browser Rendering allows 10 minutes a day and one PDF every 10 seconds (503 with `Retry-After` beyond that). The real PDF render is not verified yet: open one report as PDF after the first deploy. To switch PDF off, set `policy.report.pdf` to `false` and deploy.
+
+## R3
+
+### Added
+
+- Risk and nonconformity log: `type` `risk | issue | opportunity | nc`, probability and impact (1–5), derived score 1–25, owner, response, action, status; `nc_*` fields for type `nc` only (400 otherwise; changing the type away from `nc` clears them). MCP `upsert_risk` and `list_risks`, REST `/api/risks`. Risks go to the trash with their project. The context bundle has an "Open risks" section.
+- Derived `risk` score: while open risks exist (not closed, not opportunities) it is round((highest score − 1) / 24 × 10) and marked `derived`; the manual score is the fallback. Cards add `risk_summary` {open, max_score, high_without_action}; scores of 15 or more without an action are a portfolio warning.
+- Progress transparency: `progress_basis` {mode, done, total, weighted_percent, reason} on projects. Manual progress needs `progress_manual_reason` when switching to manual or changing the value. Work package `effort_planned_pd` and `effort_actual_pd` (person-days); `log_progress` takes `effort_pd`, which adds to the actual effort.
+- Activity: `last_progress_at` and `last_changed_at` on projects and work packages, and a derived `stale` flag (active project, last progress more than `stale_days` UTC calendar days ago; `policy.stale_days`, overridable per project type).
+- MCP tools: `upsert_risk`, `list_risks` (27 tools in total).
+
+### Breaking
+
+- The card field `last_activity` now means the last progress (`last_progress_at`), not the latest event.
+- A project with open risks shows a derived `risk` score; the manual score applies again once none are open.
+
+### Migration
+
+- `0005_r3_risk_progress_activity.sql`, additive only; the previous Worker version keeps running on it. Existing rows are backfilled from `updated_at`. Run `npm run db:migrate:remote`, then deploy.
+- Legacy manual-progress projects without a reason stay editable; a reason is asked for at the next change of the manual value.
+
+## R2
+
+### Added
+
+- Schedule validation: write results carry `warnings` for `DEP_START_BEFORE_PRED_END`, `START_BEFORE_GATE`, `CHILD_OUTSIDE_PARENT`, `MILESTONE_BEFORE_REQUIRED_END` and `DEP_UNKNOWN` (unknown or legacy free-text `depends_on`). Equal dates are no conflict. New `depends_on` ids must be work packages of the project, and cycles are refused (400). Per-project `schedule_strict` (policy `schedule_strict_default`): a write that adds an issue fails with 409 `SCHEDULE_STRICT`; existing issues never block unrelated edits; racing schedule writes get 409 `SCHEDULE_CONFLICT`.
+- Baselines: `create_baseline` (MCP) and `POST /api/projects/:id/baselines`. Project detail adds `baseline`, `baseline_start`, `baseline_end`, `slip_days` and `critical` (longest calendar-day path over `depends_on` and milestone requires/unlocks; none when the plan has a cycle).
+- Gates: milestone `gate`, decisions `go | go_with_conditions | hold | stop` via `record_gate_decision` and `POST /api/milestones/:id/decisions`. The decider is always the calling person (service tokens are refused); a named decision maker decides alone (admins on their behalf, with a note), a free-text one needs a note. `go` and `go_with_conditions` take a baseline, each condition becomes a work package, `stop` puts the project on hold with a pending closure decision.
+- Gate lock: work packages an undecided gate unlocks (and their sub-WPs) cannot be started, progressed or finished (409 `GATE_LOCKED`). A person overrides with a reason (`POST /api/workpackages/:id/gate-override`); agents never can.
+- Dashboard: Gantt schedule issues, baseline bars and slip, critical path, gate decision dialog and override dialog.
+- MCP tools: `create_baseline`, `record_gate_decision` (25 tools in total). `update_project` takes `schedule_strict`.
+
+### Changed
+
+- `log_progress` no longer auto-starts a gate-locked work package.
+- Agents cannot clear a gate flag, drop work packages from an undecided gate, delete the gate, move a locked work package, or change the project's decision maker while a gate is undecided (409 `DECISION_MAKER_LOCKED` for the last).
+
+### Breaking
+
+- Gate decisions need a project decision maker (409 `DECISION_MAKER_MISSING`); once a gate exists the decision maker can be changed but not cleared (409 `DECISION_MAKER_REQUIRED`).
+- Writes with unknown `depends_on` ids and dependency cycles are refused (400). Stored legacy values are kept and reported as `DEP_UNKNOWN`.
+
+### Migration
+
+- `0004_r2_schedule_gates.sql`, additive only; the previous Worker version keeps running on it. Run `npm run db:migrate:remote`, then deploy.
+- Schedule issues are computed lazily: rows hold NULL until a project is first read (project detail or context bundle) after the deploy, which stores them.
+- Optional: set `policy.schedule_strict_default` and `policy.gates.require_decision` in `instance/instance.config.json`.
+
 ## R1
 
 ### Added

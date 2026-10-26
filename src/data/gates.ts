@@ -6,8 +6,10 @@
  * decision maker) is evaluated inside the write's own batch, not only read before it: a failing guard
  * aborts the whole batch (a NOT NULL violation, as with schedule_rev), so nothing is half-written.
  */
-import type { Caller, ProjectRow, Role, WorkpackageRow } from "../types";
+import type { Caller, ProjectRow, WorkpackageRow } from "../types";
+import { hasRole, requireAction } from "../auth/permissions";
 import { POLICY } from "../policy";
+import { activitySet, isSystem, touchProject } from "./activity";
 import { createBaselineStmts } from "./baselines";
 import { isClosedProjectStatus, projectClosedError, TransitionError } from "./rules";
 import { recomputeScheduleStmts, scheduleBatch, snapWp } from "./schedule";
@@ -38,8 +40,6 @@ export type DecisionInput = {
   on_behalf_of_decision_maker?: boolean;
 };
 
-const DECIDER_ROLES: readonly Role[] = ["decider", "admin"];
-const OVERRIDE_ROLES: readonly Role[] = ["editor", "decider", "admin"];
 const NOTE_MAX = 20000;
 const REASON_MAX = 2000;
 const EVIDENCE_MAX = 50;
@@ -226,7 +226,8 @@ export const agentGateRemovalError = (title: string): ForbiddenError =>
 export async function overrideGateLock(db: D1Database, wpId: string, reason: string, by: Caller): Promise<WorkpackageRow> {
   if (by.channel !== "dashboard" || !by.personId)
     throw new ForbiddenError("a gate lock can only be overridden by a person in the dashboard, not by an agent");
-  if (!by.role || !OVERRIDE_ROLES.includes(by.role)) throw new ForbiddenError("overriding a gate lock needs the editor role or above");
+  // The route maps to "write" (editor or above); checked here too for direct callers.
+  requireAction(by, "write");
   const text = typeof reason === "string" ? reason.trim() : "";
   if (!text) throw new ValidationError("reason is required");
   if (text.length > REASON_MAX) throw new ValidationError(`reason must be at most ${REASON_MAX} characters`);
@@ -236,13 +237,14 @@ export async function overrideGateLock(db: D1Database, wpId: string, reason: str
   const notLocked = () => new TransitionError(`workpackage ${wp.id} is not gate-locked`, { code: "GATE_NOT_LOCKED" });
   if (!gates.length) throw notLocked();
   const ts = now();
+  const act = activitySet(by, ts, false);
   const res = await db.batch([
     db
       .prepare(
-        `UPDATE workpackage AS w SET gate_override_by = ?, gate_override_at = ?, gate_override_reason = ?, version = version + 1, updated_at = ?
+        `UPDATE workpackage AS w SET gate_override_by = ?, gate_override_at = ?, gate_override_reason = ?, version = version + 1, updated_at = ?${act.sql}
          WHERE w.id = ? AND w.version = ? AND ${gateLockedSql("w")}`,
       )
-      .bind(by.personId, ts, text, ts, wp.id, wp.version),
+      .bind(by.personId, ts, text, ts, ...act.params, wp.id, wp.version),
     eventStmtIfChanged(db, {
       by,
       project_id: wp.project_id,
@@ -257,6 +259,7 @@ export async function overrideGateLock(db: D1Database, wpId: string, reason: str
         locked_by_gates: [gates.map((g) => g.milestone_id), null],
       },
     }),
+    ...touchProject(db, by, wp.project_id, ts, false, true),
   ]);
   const fresh = await db.prepare("SELECT * FROM workpackage WHERE id = ?").bind(wp.id).first<WorkpackageRow>();
   if (!res[0].meta.changes) {
@@ -344,9 +347,10 @@ export async function recordGateDecision(
   input: DecisionInput,
   by: Caller,
 ): Promise<{ decision_id: string; baseline_id?: string; created_wps?: string[] }> {
-  if (by.channel === "service") throw new ForbiddenError("service tokens cannot record gate decisions; a person records them");
+  // F11: decider or above; service tokens never decide (also with on_behalf_of). A person records it:
+  // decided_by is the caller's person (the OAuth login for MCP), never an agent or the system.
+  requireAction(by, "decide");
   if (!by.personId) throw new ForbiddenError("gate decisions are recorded by a person (the logged-in user)");
-  if (!by.role || !DECIDER_ROLES.includes(by.role)) throw new ForbiddenError("recording a gate decision needs the decider role");
 
   const raw = (input ?? {}) as Record<string, unknown>;
   const decision = raw.decision as Decision;
@@ -377,7 +381,7 @@ export async function recordGateDecision(
       "the project has no decision maker; set decision_maker (a person, or a body such as a steering board) before deciding a gate",
       { code: "DECISION_MAKER_MISSING", missing: ["decision_maker"] },
     );
-  if (onBehalfFlag === true && by.role !== "admin" && by.personId !== dmPerson)
+  if (onBehalfFlag === true && !hasRole(by, "admin") && by.personId !== dmPerson)
     throw new ForbiddenError("only admins may record a decision on behalf of the decision maker");
   let onBehalf = false;
   if (dmPerson) {
@@ -462,9 +466,9 @@ export async function recordGateDecision(
     stmts.push(
       db
         .prepare(
-          "INSERT INTO workpackage (id, project_id, title, status, progress, weight, sort, version, created_at, updated_at) VALUES (?, ?, ?, 'todo', 0, 1, 0, 1, ?, ?)",
+          "INSERT INTO workpackage (id, project_id, title, status, progress, weight, sort, version, created_at, updated_at, last_progress_at, last_changed_at) VALUES (?, ?, ?, 'todo', 0, 1, 0, 1, ?, ?, ?, ?)",
         )
-        .bind(id, project.id, conditions[i], ts, ts),
+        .bind(id, project.id, conditions[i], ts, ts, isSystem(by) ? null : ts, isSystem(by) ? null : ts),
       eventStmt(db, {
         by,
         project_id: project.id,
@@ -478,10 +482,13 @@ export async function recordGateDecision(
   }
   if (baseline) stmts.push(...baseline.stmts);
   if (decision === "stop") {
+    const stopAct = activitySet(by, ts, true);
     stmts.push(
       db
-        .prepare("UPDATE project SET status = 'on_hold', closure_decision_pending = 1, version = version + 1, updated_at = ? WHERE id = ?")
-        .bind(ts, project.id),
+        .prepare(
+          `UPDATE project SET status = 'on_hold', closure_decision_pending = 1, version = version + 1, updated_at = ?${stopAct.sql} WHERE id = ?`,
+        )
+        .bind(ts, ...stopAct.params, project.id),
       eventStmt(db, {
         by,
         project_id: project.id,
@@ -496,6 +503,8 @@ export async function recordGateDecision(
       }),
     );
   }
+  // A decision is progress on the project (spec F8); the stop branch above already wrote the columns.
+  if (decision !== "stop") stmts.push(...touchProject(db, by, project.id, ts, true));
   if (schedule) stmts.push(...schedule.stmts);
 
   if (beforeDecisionWrite) await beforeDecisionWrite();

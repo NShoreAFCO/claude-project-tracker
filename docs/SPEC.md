@@ -186,7 +186,7 @@ CREATE INDEX ctx_owner ON context_doc(owner_kind, owner_id);
 
 ## 5. MCP tools
 
-R1 adds owner, closure and trash fields and tools (§15–§17); the 23-tool total is counted there. R2 adds `create_baseline` (§18) and `record_gate_decision` (§19), 25 tools.
+R1 adds owner, closure and trash fields and tools (§15–§17); the 23-tool total is counted there. R2 adds `create_baseline` (§18) and `record_gate_decision` (§19), 25 tools. R3 adds `upsert_risk` and `list_risks` (§21), 27 tools. R4 adds `get_portfolio_summary` (§22), 28 tools.
 
 zod schemas, short imperative descriptions, compact JSON output.
 
@@ -198,6 +198,7 @@ zod schemas, short imperative descriptions, compact JSON output.
 | `update_project(id, patch, expected_version?)` | Partial update |
 | `upsert_workpackage(project_id, id?, ...)` | Supports `parent_id`, `blocked_by` |
 | `move_workpackages(project_id, to_project_id, ids)` | Move open WPs with their sub-WPs to a follow-up project (§16) |
+| `get_portfolio_summary()` | Read-only portfolio counters (§22) |
 | `list_persons(users_only?)`, `upsert_person(id?, name, …)` | People and stakeholders (§15) |
 | `delete_entity(kind, id, confirm)` | `confirm: true` required; moves to the trash (§17) |
 | `restore_entity(kind, id)` | Take an item out of the trash (§17) |
@@ -229,6 +230,7 @@ Each doc is also exposed as an MCP resource `tracker://context/{doc_id}`.
 
 - CRUD mirroring the MCP tools under:
   - `/api/projects`, `/api/workpackages`, `/api/branches`, `/api/scores`, `/api/token-cost`
+  - `/api/portfolio/summary`, `/api/workpackages/upcoming`, `/api/workpackages/mine` (§22), `GET /api/projects/:id/report` (§23)
   - `/api/persons`, `/api/trash`, `/api/delete-preview` (§15, §17), `POST /api/projects/:id/move-workpackages` (§16)
   - `/api/context`: list, get, create, update, append, delete, revisions, restore, plus bundle as markdown download (`GET /api/context/bundle?project_id=&workpackage_id=&format=md`)
 - `GET /api/events`.
@@ -276,6 +278,7 @@ Optional. It runs only when both `AUDIT_REPO` and `AUDIT_GITHUB_TOKEN` are set. 
 - **Forms** for every entity, plus an inline progress slider. Send `expected_version`; show a conflict dialog on 409.
 - **Inbox** of unassigned hook and webhook events, with an "assign to project" action.
 - **R1 additions.** People view (`#/people`: list, add, edit; admins set the access role) and Trash (`#/trash`: restore, admin purge). Cards show owner initials, a red Blocked chip with its age, an amber Waiting chip with the count of waiting work packages, and a "Closure due" hint. Done is disabled with a tooltip and a visible hint while open work packages block it; closing a project opens a dialog for closure note, lessons learned and moving open work packages to a new or existing project. Rows have a ⋯ menu with Delete, which asks for confirmation naming the number of children. Context documents show a status badge and a release action.
+- **R2 additions.** Gantt: schedule issues marked on the affected bars and in the work package form, baseline bars with slip days against the latest baseline, critical-path highlighting, and a button to take a baseline. Milestones flagged as gates show their decision state; the decision dialog (go, go with conditions, hold, stop; note, evidence, conditions) is for deciders. Locked work packages show a lock; the override dialog asks for a reason before a person may work on one (§19).
 - **Layout.** Responsive down to 375 px.
 
 ### 9.1 Theme
@@ -400,3 +403,68 @@ Optional. It runs only when both `AUDIT_REPO` and `AUDIT_GITHUB_TOKEN` are set. 
 - **Override.** `POST /api/workpackages/:id/gate-override` `{reason}` (dashboard only, editor or above; `200`) sets `gate_override_by` (person), `gate_override_at`, `gate_override_reason` and logs a `gate_override` event; agents and dashboard users may then work on the WP (and its sub-WPs). MCP and service tokens are refused (`403`); a WP that is not locked gives `409` `GATE_NOT_LOCKED`.
 - **Decisions.** `record_gate_decision(milestone_id, decision, note_md?, evidence?, conditions?, on_behalf_of_decision_maker?)` (MCP, 25 tools in total) and `POST /api/milestones/:id/decisions` (REST, `201`) → `{decision_id, baseline_id?, created_wps?}`. `decided_by` is always the caller's person (for MCP the OAuth login); service tokens and callers without a person are refused, and the caller needs the `decider` or `admin` role. The project needs a decision maker (`409` `DECISION_MAKER_MISSING`; once a gate exists it can be changed but not cleared, `409` `DECISION_MAKER_REQUIRED`). A person decision maker: only that person, or an admin with `on_behalf_of_decision_maker` and a note. A free-text decision maker: any decider, `note_md` required. `evidence`: http(s) links or context doc ids of the project. Closed projects refuse decisions (`PROJECT_CLOSED`).
 - **Effects** (one batch with the decision; the batch re-checks the gate, the project status and the decision maker, else `409` `DECISION_CONFLICT`): `go` / `go_with_conditions` take a baseline; each condition becomes a `todo` WP (not linked as requires or unlocks; listed in the decision's `conditions`); `stop` sets the project `on_hold` with `closure_decision_pending = 1`, which clears when the project leaves `on_hold`.
+
+## 20. R2 additions: schedule validation
+
+- **Migration `0004_r2_schedule_gates.sql`** (additive only): `workpackage.schedule_issues` and `milestone.schedule_issues` (JSON text), `project.schedule_strict` (1 strict, 0 lenient, NULL = policy `schedule_strict_default`), `project.schedule_rev` (guards concurrent schedule writes), tables `baseline` and `baseline_item`, the gate-decision tables and the override columns of §19. The previous Worker version keeps running on it but does not maintain `schedule_issues`.
+- **Issues.** `{code, entity, entity_id, related_id, message}`, computed from WP and milestone dates, `depends_on`, parents and milestone links; a missing date on either side gives no issue and equal dates are no conflict. Codes: `DEP_START_BEFORE_PRED_END` (a WP starts before a predecessor ends), `START_BEFORE_GATE` (a WP starts before the due date of a milestone that unlocks it), `CHILD_OUTSIDE_PARENT`, `MILESTONE_BEFORE_REQUIRED_END`, `DEP_UNKNOWN` (a `depends_on` entry is not a WP of the project: legacy free text or a dangling id; reported, not rejected).
+- **Storage.** Recomputed inside the batch of every write that can change the schedule and stored per WP and milestone (`schedule_issues`; `"[]"` = computed, none; NULL = not computed yet). The first read of a project after the deploy (`get_project`, `GET /api/projects/:id`, the context bundle) computes the missing values once. The columns are exposed raw (JSON text), like `depends_on`.
+- **Warnings.** Write results of `upsert_workpackage`, `upsert_milestone` and their REST routes carry `warnings: ScheduleIssue[]` (the issues of the written entity). Writes are not refused for them.
+- **Input checks.** A new write with an unknown (or own) id in `depends_on` is refused (`400`), as is one that makes `depends_on` cyclic. Stored values are never checked.
+- **Strict projects.** `update_project` / `PATCH /api/projects/:id` take `schedule_strict` (true | false | null). In a strict project a write that adds an issue is refused with `409` `SCHEDULE_STRICT` (`current.issues` lists the added ones); issues that already exist never block an unrelated edit. Two schedule writes racing on one project: the loser gets `409` `SCHEDULE_CONFLICT`; reload and retry.
+- **409 codes** (R2): `SCHEDULE_STRICT`, `SCHEDULE_CONFLICT`, `GATE_LOCKED`, `GATE_NOT_LOCKED`, `DECISION_MAKER_MISSING`, `DECISION_MAKER_REQUIRED`, `DECISION_MAKER_LOCKED`, `DECISION_CONFLICT` (§19), plus `PROJECT_CLOSED` for decisions on closed projects. The code is in `current.code` of the error body.
+
+## 21. R3 additions: risks, progress transparency, activity
+
+- **Migration `0005_r3_risk_progress_activity.sql`** (additive only): table `risk`, `workpackage.effort_planned_pd` / `effort_actual_pd`, `project.progress_manual_reason`, and `last_progress_at` / `last_changed_at` on project and work package (backfilled from `updated_at`). The previous Worker version keeps running on it.
+- **Risk log.** One table for `type` `risk | issue | opportunity | nc` (nonconformity). `probability` and `impact` are 1–5; `score` = probability × impact (1–25) is derived and stored. Further fields: owner (person or text), `response` (`avoid | reduce | transfer | accept | exploit`), `action`, `due_date`, `status` (`open | monitoring | closed`), optional `workpackage_id` and `milestone_id`. The `nc_*` fields (`nc_detected_in_wp`, `nc_cause`, `nc_correction`, `nc_corrective_action`, `nc_effectiveness_check_date`) belong to type `nc` only: other types get `400`, and changing the type away from `nc` clears them. Optimistic locking with `expected_version` as for work packages.
+- **Open risks.** "Open" means not closed and not an opportunity. A risk is a trash child of its project: it is trashed, restored and purged with it (§17); `delete_entity` and `restore_entity` take kind `risk`.
+- **Derived risk criterion.** While a project has open risks, its `risk` score is derived: `round((max_open_score − 1) / 24 × 10)`, returned with `derived: true`. Without open risks the manually set score applies. Cards and `list_projects` add `risk_summary` `{open, max_score, high_without_action}`; open risks scored 15 or more without an `action` are a portfolio warning. The context bundle has an "Open risks" section.
+- **Interfaces.** MCP `upsert_risk(project_id, id?, …)` and `list_risks(project_id?, status?, type?)` (highest score first), 27 tools in total. REST `GET /api/risks?project_id=&status=&type=`, `POST /api/risks`, `PATCH /api/risks/:id` (body `project_id`, `expected_version?`), `DELETE /api/risks/:id` (to the trash).
+- **Progress basis.** Projects add `progress_basis` `{mode, done, total, weighted_percent, reason}`; `done` and `total` count live, non-dropped leaf WPs, `weighted_percent` is the derived value, `reason` the manual reason. Switching to `manual`, or changing the manual value, needs `progress_manual_reason` (`400` otherwise; a stored reason counts). Legacy manual projects without a reason stay editable.
+- **Effort.** Work packages take `effort_planned_pd` and `effort_actual_pd` (person-days); `log_progress` takes `effort_pd`, which is added to the actual effort. `weight` is read as person-days.
+- **Activity.** `last_progress_at` is set by progress-type writes (`log_progress`, status or progress changes, effort logs, gate decisions), `last_changed_at` by any write. Refused writes and system-channel writes change neither.
+- **Staleness.** `stale` is true for an active project whose last progress is more than `stale_days` UTC calendar days ago (`policy.stale_days`; a project type may override it in the instance categories). Project detail and cards carry `last_progress_at`, `last_changed_at` and `stale`.
+- **Breaking.** The card field `last_activity` is now `last_progress_at` (falling back to `created_at`); it was the latest event.
+
+## 22. R4 additions: acceptance, verification, portfolio overview
+
+- **Migration `0006_r4_acceptance.sql`** (additive only): project `objectives_md`, `scope_in_md`, `scope_out_md`, `success_criteria_md`, `language`; work package `deliverable` (at most 500 characters), `acceptance_criteria_md`, `verification` (`none | review | test | demo | sign_off`, default `none`), `verified_by` (person), `verified_at`. `language` must be one of `policy.locales` (null = instance default). `create_project`, `update_project` and `upsert_workpackage` take the new fields. Between running the migration and deploying, the previous Worker can still set a work package done without a verifier.
+- **Verification.** Completing a WP with `verification` other than `none` (status `done`, or `log_progress` reaching 100) needs a person as verifier, else `409` `VERIFICATION_REQUIRED` (`missing: ["verified_by"]`). `verified_by` defaults to the caller's person: the dashboard user, the MCP login, or a service token's `on_behalf_of`; a service token without `on_behalf_of` is refused. It must be a live person (free text, agent names and trashed persons: `400`). `verified_at` defaults to now whenever the verifier is new; an explicit value may not lie in the future. Reopening a WP clears `verified_by` and `verified_at`; the event history keeps them. The rule bites only on a transition to done or a change of the verification fields, so editing other fields of a done legacy WP without a verifier still works.
+- **Agents.** Agents (MCP, service tokens) may name only their own person as verifier, may not change or re-date a verification another person recorded (`403`), and may raise `verification` but never lower it (`403`; ranks none < review < test = demo < sign_off, so test and demo are interchangeable). Dashboard users may lower it. Role checks for `sign_off` verification are in §24.
+- **Portfolio summary.** `GET /api/portfolio/summary` and MCP `get_portfolio_summary` (read-only, 28 tools in total) return `by_status` and the counters `overdue_milestones`, `gates_awaiting_decision`, `blocked`, `stale`, `missing_target_date`, `missing_owner`, `schedule_issues`, `open_high_risks`, each `{count, project_ids}`. All counters except `by_status` cover open projects only (not done or abandoned); trashed projects and children of trashed projects never count. An overdue milestone is live, due before today (UTC) and not reached; a gate awaits a decision when it is reached and has none; a high risk is open with a score of 15 or more.
+- **Lists.** `GET /api/workpackages/upcoming?project_id=&limit=` lists WPs with an end date, nearest first, without done or dropped (limit 1–200, default 50). `GET /api/workpackages/mine?assigned_only=&sort=project|in_progress|start|end` lists the caller's open WPs: owned by the person, or without own owner in a project the person owns, unless `assigned_only`; an unknown `sort` gives `400`. Both are for dashboard users, not service tokens.
+
+## 23. R4 additions: reports
+
+- **Route.** `GET /api/projects/:id/report?format=md|html|pdf` (dashboard users, read-only). Language: the project's `language`, else the instance default. The report shows names only, no contact data and no internal fields. Texts come from the server-side string table (`src/i18n/server.ts`); `instance/strings.<locale>.json` overrides single keys.
+- **HTML.** No script and no inline style; one `<link>` to the same-origin `GET /api/report/print.css`, which sets the paper size from `policy.report.paper`. The Markdown renderer escapes first and emits no links or images.
+- **PDF.** Rendered by the Cloudflare Browser Rendering quick action through the Worker binding `browser: {binding: "BROWSER"}`; the Worker passes the report HTML and the print CSS inline (the page is behind Access). `build:instance` leaves the binding out of `wrangler.jsonc` when `policy.report.pdf` is false. Without the binding, or when Cloudflare refuses or fails (including the free-plan limits in `VERIFIED.md`), the route answers `503` `pdf_unavailable` with `Retry-After`. A real render is not verified yet: check it on the first deploy.
+
+## 24. R5 additions: role enforcement and hygiene
+
+- **No migration.** R5 changes behaviour only.
+- **Roles and actions.** Roles rank viewer < editor < decider < admin. Every REST route and MCP tool maps to exactly one action (`src/auth/permissions.ts`, central tables `REST_ACTIONS` and `TOOL_ACTIONS`): `read`, `write`, `decide`, `close`, `verify_sign_off`, `manage_roles`, `purge`. The dispatchers check the action before the handler; an unmapped route or tool is refused (`403`, fail closed). Content-dependent actions are checked again in the data layer. Roles are read on every request (no cache, no session), so a change applies on the next request.
+- **Minimum role.** `read` viewer; `write` editor; `decide`, `close` and `verify_sign_off` decider; `manage_roles` and `purge` admin. Service tokens act as editor and never get `decide`, `close`, `verify_sign_off`, `manage_roles` or `purge`, even with `on_behalf_of` or a raised role. MCP callers (claude.ai OAuth) act with the person's role but never get `manage_roles` or `purge`. The system caller is not restricted.
+
+| Caller | read | write | decide | close | verify_sign_off | manage_roles | purge |
+|---|---|---|---|---|---|---|---|
+| dashboard viewer | yes | no | no | no | no | no | no |
+| dashboard editor | yes | yes | no | no | no | no | no |
+| dashboard decider | yes | yes | yes | yes | yes | no | no |
+| dashboard admin | yes | yes | yes | yes | yes | yes | yes |
+| MCP viewer | yes | no | no | no | no | no | no |
+| MCP editor | yes | yes | no | no | no | no | no |
+| MCP decider | yes | yes | yes (as the OAuth person) | yes | yes (own person) | no | no |
+| MCP admin | yes | yes | yes (as the OAuth person) | yes | yes (own person) | no (agent) | no (agent) |
+| service token, with or without `on_behalf_of` | yes | yes (as editor) | no | no | no | no | no |
+| system | yes | yes | yes (still needs a person) | yes | yes | yes | yes |
+| no role | no | no | no | no | no | no | no |
+
+- **Content-dependent actions.** `close`: moving a project into `done` or `abandoned` (at creation or later) and moving it out again (reopening) both need a decider; editing other fields of a closed project is a `write`. `verify_sign_off`: recording, changing or re-dating a `sign_off` verification, completing a `sign_off` WP (also via `log_progress` reaching 100) and lowering `verification` away from `sign_off` need a decider; `log_progress` carries an in-batch guard against a WP that became `sign_off` after the read. `review`, `test` and `demo` verification need a person only (service tokens via `on_behalf_of`, §22). The role of the person named in `verified_by` is not checked; the caller's is.
+- **Other mappings.** Restore from the trash is `write` (editor), except users (`manage_roles`); purge is `purge` (admin). `PATCH /api/persons/me` is `read`: viewers may change only their own `locale`, `display_name` and `phone`. `POST /api/audit/run` is `write` (it exports to the configured audit repo). `POST /api/workpackages/:id/gate-override` is `write`, still dashboard only. `GET /api/whoami` accepts GET only. `POST /api/hooks/claude-code` needs `write` for a logged-in user, so a viewer cannot write through the hook.
+- **Admins.** `policy.admins` gives the admin role at a person's first login only; there is no later promotion. Only admins change `access_role` or a user's email and delete or restore user persons. Clearing `access_role` does not revoke access (the default role is applied again at the next login): to revoke, remove the email from the Cloudflare Access allow-list or delete the person (`403 person deactivated` until restored).
+- **F12 hygiene.** A project in a `policy.target_date_required_categories` category needs a `target_date` when it becomes `active` (`400` naming the field); `create_project` without status then gives `idea` plus a `warnings` entry; projects already active stay editable. A project `language` is validated against `policy.locales`. Viewers do not see `local_path`, `session_id` or `repo_url` (lists, detail, events, inbox; REST and MCP); branch `repo` and `pr_url` stay visible.
+- **OAuth pages.** The consent and error pages render in the instance default locale; instance string overrides apply.
+- **Setup scripts.** Without a saved token file, the scripts use wrangler's own login (checked with `wrangler whoami`) and `CLOUDFLARE_ACCOUNT_ID` from the instance config. Without either, the old "run npm run setup first" message appears.
+- **Breaking.** Viewers lose write access everywhere; reopening a closed project needs a decider; viewers no longer see the internal fields above.

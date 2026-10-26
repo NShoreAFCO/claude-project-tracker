@@ -1,7 +1,9 @@
 import type { Caller, Env, Identity, OwnerKind } from "../types";
 import { createProject, getProjectDetail, listProjects, updateProject } from "../data/projects";
 import { listWorkpackagesOut, upsertWorkpackage } from "../data/workpackages";
+import { mineWorkpackages, summary, upcomingWorkpackages } from "../data/portfolio";
 import { listMilestones, upsertMilestone } from "../data/milestones";
+import { listRisks, upsertRisk, type RiskType } from "../data/risks";
 import { createBaseline } from "../data/baselines";
 import { overrideGateLock, recordGateDecision, type DecisionInput } from "../data/gates";
 import { linkBranch } from "../data/branches";
@@ -18,12 +20,16 @@ import {
   writeContext,
 } from "../data/context-write";
 import { search } from "../data/search";
+import { redactEvents } from "../data/internal";
 import { moveWorkpackages } from "../data/rules";
-import { ConflictError, ValidationError } from "../data/util";
+import { ConflictError, ForbiddenError, ValidationError } from "../data/util";
 import { handleUpload } from "./upload";
 import { userCaller } from "../auth/caller";
-import { ensureUserPerson, getPerson, listPersons, upsertPerson } from "../data/persons";
-import { handleClaudeCodeHook, type HookBody } from "./hooks";
+import { REST_ACTIONS, requireAction, restAction, type Action } from "../auth/permissions";
+import { GITHUB_WEBHOOK_ROUTE } from "../webhook/github";
+import { getPerson, listPersons, upsertPerson } from "../data/persons";
+import { HOOK_ROUTE, handleClaudeCodeHook, type HookBody } from "./hooks";
+import { printCssResponse, reportResponse } from "../report/respond";
 import { isAuditConfigured, runAuditExport } from "../audit/export";
 
 const MAX_JSON = 1024 * 1024;
@@ -74,22 +80,39 @@ const reqStr = (v: unknown, name: string): string => {
   return v;
 };
 
-type Ctx = { req: Request; url: URL; env: Env; db: D1Database; by: Caller; params: string[] };
+type Ctx = { req: Request; url: URL; env: Env; db: D1Database; by: Caller; identity: Identity; params: string[] };
 type Handler = (c: Ctx) => Promise<unknown>;
-const routes: Array<[string, RegExp, Handler]> = [];
-const route = (method: string, pattern: string, h: Handler) =>
-  routes.push([method, new RegExp(`^${pattern.replace(/:[a-z]+/g, "([^/]+)")}$`), h]);
+/** [method, path regex, handler, route key "METHOD pattern", action (undefined = unmapped → refused)]. */
+const routes: Array<[string, RegExp, Handler, string, Action | undefined]> = [];
+/** Registers a route; its Action comes from the central table (src/auth/permissions.ts), checked before the handler. */
+const route = (method: string, pattern: string, h: Handler) => {
+  const key = `${method} ${pattern}`;
+  routes.push([method, new RegExp(`^${pattern.replace(/:[a-z]+/g, "([^/]+)")}$`), h, key, restAction(key)]);
+};
+
+// ---- session (registered first: these paths would otherwise match /api/context/:id)
+route("GET", "/api/whoami", async ({ db, by, identity }) => ({ identity, person: by.personId ? await getPerson(db, by.personId) : null }));
+route("GET", "/api/context/bundle", async ({ db, url }) => bundle(url, db));
 
 // ---- projects
-route("GET", "/api/projects", async ({ db, url }) =>
-  listProjects(db, {
-    status: url.searchParams.get("status") ?? undefined,
-    tag: url.searchParams.get("tag") ?? undefined,
-    owner: url.searchParams.get("owner") ?? undefined,
-  }),
+route("GET", "/api/projects", async ({ db, url, by }) =>
+  listProjects(
+    db,
+    {
+      status: url.searchParams.get("status") ?? undefined,
+      tag: url.searchParams.get("tag") ?? undefined,
+      owner: url.searchParams.get("owner") ?? undefined,
+    },
+    by,
+  ),
 );
 route("POST", "/api/projects", async ({ db, req, by }) => createProject(db, await readJson(req), by));
-route("GET", "/api/projects/:id", async ({ db, params }) => getProjectDetail(db, params[0]));
+route("GET", "/api/projects/:id", async ({ db, params, by }) => getProjectDetail(db, params[0], by));
+/** F9: read-only project report; format=md|html|pdf. Returns a ready Response (not JSON). */
+route("GET", "/api/projects/:id/report", async ({ db, env, url, params }) =>
+  reportResponse(db, env, params[0], url.searchParams.get("format") ?? "html"),
+);
+route("GET", "/api/report/print.css", async () => printCssResponse());
 route("PATCH", "/api/projects/:id", async ({ db, req, by, params }) => {
   const { expected_version, ...patch } = await readJson(req);
   return updateProject(db, params[0], patch, by, optNum(expected_version));
@@ -106,6 +129,39 @@ route("POST", "/api/projects/:id/baselines", async ({ db, req, by, params }) => 
   const { label } = await readJson(req);
   return createBaseline(db, params[0], reqStr(label, "label"), by);
 });
+
+// ---- risk and nonconformity log (F6)
+route("GET", "/api/risks", async ({ db, url }) =>
+  listRisks(db, {
+    project_id: url.searchParams.get("project_id") ?? undefined,
+    status: url.searchParams.get("status") ?? undefined,
+    type: (url.searchParams.get("type") ?? undefined) as RiskType | undefined,
+  }),
+);
+route("POST", "/api/risks", async ({ db, req, by }) => {
+  const { project_id, expected_version, ...input } = await readJson(req);
+  return upsertRisk(db, reqStr(project_id, "project_id"), input, by, optNum(expected_version));
+});
+route("PATCH", "/api/risks/:id", async ({ db, req, by, params }) => {
+  const { project_id, expected_version, ...input } = await readJson(req);
+  return upsertRisk(db, reqStr(project_id, "project_id"), { ...input, id: params[0] }, by, optNum(expected_version));
+});
+route("DELETE", "/api/risks/:id", async ({ db, by, params }) => deleteEntity(db, "risk", params[0], by));
+
+// ---- portfolio overview (F9), read-only
+route("GET", "/api/portfolio/summary", async ({ db }) => summary(db, new Date().toISOString().slice(0, 10)));
+route("GET", "/api/workpackages/upcoming", async ({ db, url }) =>
+  upcomingWorkpackages(db, {
+    project_id: url.searchParams.get("project_id") ?? undefined,
+    limit: optNum(url.searchParams.get("limit")),
+  }),
+);
+route("GET", "/api/workpackages/mine", async ({ db, url, by }) =>
+  mineWorkpackages(db, by.personId, {
+    assigned_only: ["1", "true"].includes(url.searchParams.get("assigned_only") ?? ""),
+    sort: (url.searchParams.get("sort") ?? undefined) as "project" | "in_progress" | "start" | "end" | undefined,
+  }),
+);
 
 // ---- work packages
 route("GET", "/api/workpackages", async ({ db, url }) => listWorkpackagesOut(db, reqStr(url.searchParams.get("project_id"), "project_id")));
@@ -198,14 +254,17 @@ route("POST", "/api/token-cost", async ({ db, req, by }) => {
 route("POST", "/api/progress", async ({ db, req, by }) => logProgress(db, (await readJson(req)) as never, by));
 
 // ---- events, inbox, search
-route("GET", "/api/events", async ({ db, url }) =>
-  listEvents(db, {
-    project_id: url.searchParams.get("project_id") ?? undefined,
-    limit: optNum(url.searchParams.get("limit")),
-    before_id: optNum(url.searchParams.get("before_id")),
-  }),
+route("GET", "/api/events", async ({ db, url, by }) =>
+  redactEvents(
+    await listEvents(db, {
+      project_id: url.searchParams.get("project_id") ?? undefined,
+      limit: optNum(url.searchParams.get("limit")),
+      before_id: optNum(url.searchParams.get("before_id")),
+    }),
+    by,
+  ),
 );
-route("GET", "/api/inbox", async ({ db }) => listInbox(db));
+route("GET", "/api/inbox", async ({ db, by }) => redactEvents(await listInbox(db), by));
 route("POST", "/api/inbox/:id/assign", async ({ db, req, by, params }) => {
   const { project_id } = await readJson(req);
   await assignInboxEvent(db, Number(params[0]), reqStr(project_id, "project_id"), by);
@@ -313,15 +372,17 @@ export async function handleApi(request: Request, env: Env, identity: Identity &
   const path = url.pathname.replace(/\/+$/, "");
   const db = env.DB;
   try {
-    // Person resolution happens once per request (creates the person on first login).
+    // Person resolution happens once per request (creates the person on first login); the role is read
+    // from the person row here, so a role change applies from the next request on (nothing is cached).
     const by = await userCaller(db, identity.email);
-    if (path === "/api/whoami") return json({ identity, person: by.personId ? await getPerson(db, by.personId) : null });
-    if (path === "/api/context/bundle" && request.method === "GET") return await bundle(url, db);
-    for (const [method, re, h] of routes) {
+    for (const [method, re, h, , action] of routes) {
       const m = re.exec(path);
       if (m && method === request.method) {
+        // F11: one Action per route, checked before the handler runs; an unmapped route is refused.
+        if (!action) throw new ForbiddenError(`no permission is defined for ${method} ${path}`);
+        requireAction(by, action);
         const params = m.slice(1).map(decodeURIComponent);
-        const out = await h({ req: request, url, env, db, by, params });
+        const out = await h({ req: request, url, env, db, by, identity, params });
         const created =
           request.method === "POST" &&
           path !== "/api/context/upload" &&
@@ -329,6 +390,7 @@ export async function handleApi(request: Request, env: Env, identity: Identity &
           !path.endsWith("/move-workpackages") &&
           !path.endsWith("/gate-override") &&
           !path.startsWith("/api/trash/");
+        if (out instanceof Response) return out;
         return json(out, created ? 201 : 200);
       }
     }
@@ -342,10 +404,16 @@ export async function handleApi(request: Request, env: Env, identity: Identity &
 export async function handleHooks(request: Request, env: Env, identity?: Identity): Promise<Response> {
   const path = new URL(request.url).pathname;
   try {
-    if (path === "/api/hooks/claude-code" && request.method === "POST") {
+    if (`${request.method} ${path}` === HOOK_ROUTE) {
       const body = (await readJson(request, true)) as HookBody;
-      // on_behalf_of is for service tokens; a logged-in user posting here acts for themselves only.
-      if (identity?.kind === "user") body.on_behalf_of = (await ensureUserPerson(env.DB, identity.email)).id;
+      // on_behalf_of is for service tokens; a logged-in user posting here acts for themselves only, and
+      // needs the route's role (a viewer must not write through the hook's service caller). Service
+      // tokens are checked in handleClaudeCodeHook (they act as editor).
+      if (identity?.kind === "user") {
+        const user = await userCaller(env.DB, identity.email);
+        requireAction(user, REST_ACTIONS[HOOK_ROUTE]);
+        body.on_behalf_of = user.personId;
+      }
       return json(await handleClaudeCodeHook(body, env));
     }
     return json({ error: "not_found" }, 404);
@@ -353,3 +421,6 @@ export async function handleHooks(request: Request, env: Env, identity?: Identit
     return errorResponse(e);
   }
 }
+
+/** Every REST route key ("METHOD pattern"), for the permission coverage test. */
+export const restRouteKeys = (): string[] => [...routes.map(([, , , key]) => key), HOOK_ROUTE, GITHUB_WEBHOOK_ROUTE];

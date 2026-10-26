@@ -3,6 +3,7 @@ import { jwtVerify } from "jose";
 import type { Env } from "../types";
 import { INSTANCE } from "../generated/instance";
 import { configured, isAllowedEmail, remoteJwks } from "./access";
+import { defaultLocale, escapeHtml as esc, serverT, serverTHtml } from "../i18n/server";
 
 /**
  * MCP client login (SPEC §3): /authorize → consent → Access for SaaS (OIDC, App C) → /callback.
@@ -16,7 +17,7 @@ interface UpstreamData {
 }
 
 export async function handleAuthorize(request: Request, env: Env): Promise<Response> {
-  if (!oidcConfigured(env)) return text("OIDC ist nicht konfiguriert.", 503);
+  if (!oidcConfigured(env)) return text(t("oauth.notConfigured"), 503);
   const helpers = env.OAUTH_PROVIDER;
 
   if (request.method === "GET") {
@@ -24,7 +25,7 @@ export async function handleAuthorize(request: Request, env: Env): Promise<Respo
     try {
       authReq = await helpers.parseAuthRequest(request);
     } catch (e) {
-      return text(`Invalid authorization request: ${(e as Error).message}`, 400);
+      return text(t("oauth.invalidRequest", { detail: (e as Error).message }), 400);
     }
     if (await helpers.isConsentRemembered(request, authReq, { secret: env.COOKIE_ENCRYPTION_KEY })) {
       return redirectUpstream(request, env, authReq, new Headers());
@@ -51,11 +52,11 @@ export async function handleAuthorize(request: Request, env: Env): Promise<Respo
       });
       return redirectUpstream(request, env, approved.request, new Headers(approved.headers));
     } catch (e) {
-      return text(`Consent invalid or expired: ${(e as Error).message}`, 400);
+      return text(t("oauth.consentInvalid", { detail: (e as Error).message }), 400);
     }
   }
 
-  return text("Method Not Allowed", 405);
+  return text(t("oauth.methodNotAllowed"), 405);
 }
 
 async function redirectUpstream(request: Request, env: Env, authReq: AuthRequest, headers: Headers): Promise<Response> {
@@ -79,19 +80,19 @@ async function redirectUpstream(request: Request, env: Env, authReq: AuthRequest
 }
 
 export async function handleCallback(request: Request, env: Env): Promise<Response> {
-  if (!oidcConfigured(env)) return text("OIDC ist nicht konfiguriert.", 503);
+  if (!oidcConfigured(env)) return text(t("oauth.notConfigured"), 503);
   const helpers = env.OAUTH_PROVIDER;
 
   let resumed: { request: AuthRequest; data: UpstreamData; headers: Headers };
   try {
     resumed = await helpers.finishUpstream<UpstreamData>(request);
   } catch (e) {
-    return text(`Sign-in invalid or expired: ${(e as Error).message}`, 400);
+    return text(t("oauth.signInInvalid", { detail: (e as Error).message }), 400);
   }
 
   const params = new URL(request.url).searchParams;
   const code = params.get("code");
-  if (!code) return text(`Anmeldung abgebrochen: ${params.get("error") ?? "kein Code"}`, 400);
+  if (!code) return text(t("oauth.signInCancelled", { detail: params.get("error") ?? t("oauth.noCode") }), 400);
 
   // Exchange the code at Access (App C).
   const tokenRes = await fetch(env.ACCESS_TOKEN_URL, {
@@ -106,13 +107,13 @@ export async function handleCallback(request: Request, env: Env): Promise<Respon
       code_verifier: resumed.data.verifier,
     }),
   });
-  if (!tokenRes.ok) return text(`Token-Austausch fehlgeschlagen (${tokenRes.status}).`, 502);
+  if (!tokenRes.ok) return text(t("oauth.tokenExchangeFailed", { status: tokenRes.status }), 502);
   const tokens = (await tokenRes.json()) as { id_token?: string };
-  if (!tokens.id_token) return text("Kein id_token erhalten.", 502);
+  if (!tokens.id_token) return text(t("oauth.noIdToken"), 502);
 
   const email = await verifyIdToken(tokens.id_token, env);
-  if (!email) return text("Invalid id_token.", 401);
-  if (!isAllowedEmail(env, email)) return text("Access denied.", 403); // no grant issued
+  if (!email) return text(t("oauth.invalidIdToken"), 401);
+  if (!isAllowedEmail(env, email)) return text(t("oauth.accessDenied"), 403); // no grant issued
 
   const client = await helpers.lookupClient(resumed.request.clientId);
   const clientName = client?.clientName || resumed.request.clientId;
@@ -182,20 +183,20 @@ function base64Url(bytes: Uint8Array): string {
   return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-function esc(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
-}
+/** Spec §4.4: the consent and error pages a person reads use the instance default locale (core strings + overrides). */
+const t = (key: string, vars?: Record<string, string | number>): string => serverT(defaultLocale(), key, vars);
 
 function consentPage(
   c: { clientName: string; clientDomain?: string; redirectHost: string; redirectIsLoopback: boolean },
   handle: string,
 ): string {
+  const locale = defaultLocale();
+  const h = (key: string, vars?: Record<string, string>) => serverTHtml(locale, key, vars);
   const app = esc(INSTANCE.app.name);
-  const loopback = c.redirectIsLoopback
-    ? `<p class="warn">The redirect goes to a local application. Any program on this computer could receive it.</p>`
-    : "";
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Allow access – ${app}</title>
+  const client = `<strong>${esc(c.clientName)}</strong>${c.clientDomain ? ` (${esc(c.clientDomain)})` : ""}`;
+  const loopback = c.redirectIsLoopback ? `<p class="warn">${h("consent.loopback")}</p>` : "";
+  return `<!doctype html><html lang="${esc(locale)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${h("consent.title", { app })}</title>
 <style>
 body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#1e293b;background:#fff;margin:0;padding:2rem 1rem;font-size:16px}
 main{max-width:32rem;margin:0 auto;border-top:2px solid #0f4c5c;padding-top:1rem}
@@ -205,13 +206,13 @@ h1{font-weight:700;font-size:1.4rem}
 button{font:inherit;font-weight:600;border-radius:6px;padding:.6rem 1.2rem;margin-right:.5rem;cursor:pointer}
 .primary{background:#0f4c5c;color:#fff;border:2px solid #0f4c5c}.ghost{background:#fff;color:#0f4c5c;border:2px solid #0f4c5c}
 </style></head><body><main>
-<h1>Allow access?</h1>
-<div class="box"><p><strong>${esc(c.clientName)}</strong>${c.clientDomain ? ` (${esc(c.clientDomain)})` : ""} wants to access ${app} (read and write projects).</p>
-<p>Redirect to: <strong>${esc(c.redirectHost)}</strong></p></div>
+<h1>${h("consent.heading")}</h1>
+<div class="box"><p>${h("consent.wants", { client, app })}</p>
+<p>${h("consent.redirect", { host: `<strong>${esc(c.redirectHost)}</strong>` })}</p></div>
 ${loopback}
 <form method="post" action="/authorize">
 <input type="hidden" name="handle" value="${esc(handle)}">
-<button class="primary" name="action" value="approve" type="submit">Allow</button>
-<button class="ghost" name="action" value="deny" type="submit">Deny</button>
+<button class="primary" name="action" value="approve" type="submit">${h("consent.allow")}</button>
+<button class="ghost" name="action" value="deny" type="submit">${h("consent.deny")}</button>
 </form></main></body></html>`;
 }

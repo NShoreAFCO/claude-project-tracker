@@ -33,16 +33,16 @@ After any change: `npm run check`, then `npm run deploy` (it rebuilds the genera
 
 | Field | Default | Meaning |
 |---|---|---|
-| `admins` | the admin email(s) you gave in setup | these people get the `admin` role when they first sign in |
-| `default_role` | `editor` | role of everyone else on first sign-in: `viewer`, `editor`, `decider` or `admin` |
-| `locales` | `app.locale` first, then the other language | languages people may choose in the dashboard |
+| `admins` | the admin email(s) you gave in setup | these people get the `admin` role when they first sign in; no later promotion, an admin changes roles in the People view |
+| `default_role` | `editor` | role of everyone else on first sign-in: `viewer` (read only), `editor`, `decider` (also closes projects, decides gates, verifies sign-offs) or `admin` (also roles and purge) |
+| `locales` | `app.locale` first, then the other language | languages people may choose in the dashboard; a project's report `language` must be one of them. The OAuth sign-in pages use the instance default language |
 | `stale_days` | `14` | days without activity before a project counts as stale; a project type may set its own `stale_days` |
 | `schedule_strict_default` | `false` | default for a project's strict schedule mode (schedule warnings become errors) |
-| `target_date_required_categories` | `research`, `product-development`, `product-launch`, `quality-regulatory` (those that exist) | project types that need a target date before they can become active |
+| `target_date_required_categories` | `research`, `product-development`, `product-launch`, `quality-regulatory` (those that exist) | project types that need a target date before they can become active (400 otherwise; a new project without status then starts as `idea`) |
 | `gates.require_decision` | `true` | gate milestones need a recorded decision |
 | `retention_days` | `30` | deleted items can be purged by an admin after this many days (never automatically) |
 | `hide_empty_categories` | `collapse` | `hide` or `collapse` empty type groups on the dashboard |
-| `report.paper`, `report.pdf` | `a4`, `true` | paper size and PDF button of project reports |
+| `report.paper`, `report.pdf` | `a4`, `true` | paper size (`a4` or `letter`) and PDF of project reports; `false` leaves the Browser Rendering binding out of the deployment and the PDF route answers 503 |
 | `score_scales` | short texts for `value`, `quality`, `risk`, `effort`, `token_efficiency` | per criterion: what `0`, `5` and `10` mean, one text per language (`en`, `de`) |
 
 `npm run build:instance` and `npm run setup:check` report a field with a wrong value by name.
@@ -58,6 +58,8 @@ To change single texts without touching core, create `instance/strings.en.json` 
   "status": { "on_hold": "Paused" }
 }
 ```
+
+Texts that the server writes itself, such as project reports, are overridden the same way. Use the key with dots as nested objects, for example `{ "report": { "status": "State" } }`. The keys are in `src/i18n/server.ts`; a key without an override falls back to the built-in text.
 
 A new language means a new locale file in core: contribute it upstream (`docs/UPDATING.md`) so everyone gets it.
 
