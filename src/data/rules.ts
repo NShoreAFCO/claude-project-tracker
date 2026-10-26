@@ -196,6 +196,24 @@ export function applyWpRules(before: WpRuleState | null, fields: Record<string, 
 export const VERIFICATIONS = ["review", "test", "demo", "sign_off", "none"] as const;
 export type Verification = (typeof VERIFICATIONS)[number];
 
+/** Strength of a verification method; agents may raise it but never lower it (test and demo are equal). */
+const VERIFICATION_RANK: Record<string, number> = { none: 0, review: 1, test: 2, demo: 2, sign_off: 3 };
+export const verificationRank = (v: unknown): number => VERIFICATION_RANK[String(v ?? "none")] ?? 0;
+
+/**
+ * SQL list of the stored verification values an agent may change from when writing `to` (rank not above
+ * `to`'s): the in-batch re-check of the no-lowering rule. Values come from VERIFICATIONS, never from input.
+ */
+export const verificationNotAboveSql = (to: unknown): string =>
+  `(${VERIFICATIONS.filter((v) => verificationRank(v) <= verificationRank(to))
+    .map((v) => `'${v}'`)
+    .join(", ")})`;
+
+export const verificationLoweredError = (from: string, to: string): ForbiddenError =>
+  new ForbiddenError(
+    `agents may raise a work package's verification but not lower it (${from} -> ${to}); a person lowers it in the dashboard`,
+  );
+
 export const verificationRequiredError = (verification: string): TransitionError =>
   new TransitionError(
     `status done with verification ${verification} requires verified_by: a person (the logged-in user by default; a service token needs on_behalf_of)`,
@@ -237,6 +255,14 @@ type VerifyState = Pick<WorkpackageRow, "status" | "verification" | "verified_by
  * - verified_at defaults to now whenever verified_by gets a new value.
  */
 export function applyVerificationRules(before: VerifyState | null, fields: Record<string, unknown>, by: Caller, ts = now()): void {
+  // Agents (mcp, service) never lower the verification a person set, in any status (the UPDATE re-checks).
+  if (
+    isAgent(by) &&
+    before &&
+    fields.verification !== undefined &&
+    verificationRank(fields.verification) < verificationRank(before.verification)
+  )
+    throw verificationLoweredError(String(before.verification ?? "none"), String(fields.verification));
   const next = String(fields.status ?? before?.status ?? "todo");
   if (next !== "done") {
     fields.verified_by = null;

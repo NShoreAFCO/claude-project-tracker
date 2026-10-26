@@ -15,9 +15,11 @@ import {
   isOpenWpStatus,
   parseBlockedBy,
   projectClosedError,
+  verificationNotAboveSql,
   verifierInput,
   type BlockedRef,
 } from "./rules";
+import { isAgent } from "../auth/caller";
 
 export const WP_FIELDS = [
   "parent_id",
@@ -330,6 +332,9 @@ export async function upsertWorkpackage(
     const progressWrite = changed.includes("status") || changed.includes("progress");
     const act = activitySet(by, ts, progressWrite);
     const projectAct = projectActivityStmt(db, by, projectId, ts, progressWrite, true);
+    // F2: agents never lower the verification; re-checked on the stored row when the batch runs (the
+    // version condition alone already rules out a change since the read; this states the rule in SQL).
+    const agentVerify = isAgent(by) && "verification" in diff ? ` AND verification IN ${verificationNotAboveSql(next.verification)}` : "";
     const res = await gateGuardedBatch(
       db,
       [
@@ -337,7 +342,7 @@ export async function upsertWorkpackage(
         ...stakeStmts,
         db
           .prepare(
-            `UPDATE workpackage SET ${changed.map((f) => `${f} = ?, `).join("")}version = version + 1, updated_at = ?${act.sql} WHERE id = ? AND version = ?`,
+            `UPDATE workpackage SET ${changed.map((f) => `${f} = ?, `).join("")}version = version + 1, updated_at = ?${act.sql} WHERE id = ? AND version = ?${agentVerify}`,
           )
           .bind(...changed.map((f) => next[f] ?? null), ts, ...act.params, existing.id, existing.version),
         eventStmtIfChanged(db, {

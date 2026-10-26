@@ -180,7 +180,9 @@ export async function logProgress(
   const verifier = by.personId ?? null;
   const needsVerifier = completes && (wp.verification ?? "none") !== "none";
   if (needsVerifier && !verifier) throw verificationRequiredError(String(wp.verification));
-  const verifyGuard = completes && !verifier ? [verificationGuardStmt(db, wp.id)] : [];
+  // Guarded whenever the log may complete the WP, also when it was done at read time: it may be reopened
+  // with a verification meanwhile (the guard checks status and verification when the batch runs).
+  const verifyGuard = wp && progress !== null && progress >= 100 && !verifier ? [verificationGuardStmt(db, wp.id)] : [];
   if (wp && progress !== null) {
     const verify = "? >= 100 AND status != 'done' AND verification != 'none' AND verified_by IS NULL";
     stmts.push(

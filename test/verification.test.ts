@@ -182,6 +182,61 @@ describe("verification of work packages (F2)", () => {
     expect((await upsertWorkpackage(db, p.id, { id: wp.id, status: "doing" }, bot)).verified_by).toBe(null);
   });
 
+  it("log_progress refuses a completion after a reopen with sign_off between read and write", async () => {
+    const { p, wp } = await setup("none");
+    await upsertWorkpackage(db, p.id, { id: wp.id, status: "done" }, SYS);
+    const bare = await svc();
+    const { setBeforeProgressWriteForTesting } = await import("../src/data/logs");
+    setBeforeProgressWriteForTesting(async () => {
+      await upsertWorkpackage(db, p.id, { id: wp.id, status: "doing", progress: 50, verification: "sign_off" }, await dash());
+    });
+    try {
+      await expect(
+        logProgress(db, { project_id: p.id, workpackage_id: wp.id, summary: "done", progress: 100 }, bare),
+      ).rejects.toMatchObject(conflict("VERIFICATION_REQUIRED"));
+    } finally {
+      setBeforeProgressWriteForTesting(null);
+    }
+    const row = await wpRow(wp.id);
+    expect([row.status, row.verification, row.verified_by]).toEqual(["doing", "sign_off", null]);
+  });
+
+  it("agent cannot lower verification", async () => {
+    const { p, wp } = await setup("sign_off");
+    for (const by of [await svc(), await agent(), await svc((await ensureUserPerson(db, "jane@example.com")).id)]) {
+      for (const lower of ["none", "test", "review"])
+        await expect(upsertWorkpackage(db, p.id, { id: wp.id, verification: lower }, by)).rejects.toMatchObject({ status: 403 });
+    }
+    expect((await wpRow(wp.id)).verification).toBe("sign_off");
+    // raising stays possible for agents; lowering is for dashboard persons
+    const { p: p2, wp: w2 } = await setup("none");
+    const bot = await agent();
+    for (const up of ["review", "test", "sign_off"])
+      expect((await upsertWorkpackage(db, p2.id, { id: w2.id, verification: up }, bot)).verification).toBe(up);
+    expect((await upsertWorkpackage(db, p2.id, { id: w2.id, verification: "none" }, await dash())).verification).toBe("none");
+  });
+
+  it("agent cannot lower and complete in one write", async () => {
+    const { p, wp } = await setup("sign_off");
+    await expect(upsertWorkpackage(db, p.id, { id: wp.id, verification: "none", status: "done" }, await svc())).rejects.toMatchObject({
+      status: 403,
+    });
+    const r = await mcp("upsert_workpackage", { project_id: p.id, id: wp.id, verification: "none", status: "done" });
+    expect([r.isError, body(r).error]).toEqual([true, "forbidden"]);
+    expect((await wpRow(wp.id)).status).toBe("todo");
+  });
+
+  it("service caller with on_behalf_of cannot change another person's verification", async () => {
+    const { p, wp } = await setup("review");
+    const reviewer = await dash("reviewer2@example.com");
+    await upsertWorkpackage(db, p.id, { id: wp.id, status: "done" }, reviewer);
+    const jane = await ensureUserPerson(db, "jane@example.com");
+    const asJane = await svc(jane.id);
+    for (const patch of [{ verified_by: jane.id }, { verified_at: "2026-10-02" }, { verification: "sign_off" }])
+      await expect(upsertWorkpackage(db, p.id, { id: wp.id, ...patch }, asJane)).rejects.toMatchObject({ status: 403 });
+    expect((await wpRow(wp.id)).verified_by).toBe(reviewer.personId);
+  });
+
   it("verified_by must reference a person", async () => {
     const { p, wp } = await setup("demo");
     const me = await dash();
