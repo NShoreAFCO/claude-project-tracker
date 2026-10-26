@@ -240,6 +240,8 @@ You can delete the demo project from its row menu (⋯ → Delete) whenever you 
 
 Your own entry appears in the **People** view after your first sign-in, with the admin role if you named yourself as admin in the setup. Admins give other people a role there (viewer, editor, decider, admin); someone who signs in for the first time gets the default role (`editor`). Stakeholders without a login can be added there too.
 
+What each role may do: a **viewer** reads (and edits only their own language, name and phone); an **editor** also writes projects, work packages and the rest, and restores from the Trash; a **decider** also closes and reopens projects, records gate decisions and verifies sign-offs; an **admin** also changes roles and email addresses, deletes users and purges the Trash. Claude (through the connector) acts with your role, but never decides gates, manages roles or purges. The admin role is given from the setup list at first sign-in only; later changes are made in the People view. A role change applies on the person's next request.
+
 ## 9. Connect Claude
 
 ### claude.ai, Claude Desktop and the Claude mobile app
@@ -315,6 +317,8 @@ git push
 3. Commit the change (step 12).
 
 People you remove can no longer sign in, and their Claude connections stop working as soon as the new list is deployed. Their entry in the tracker's people list stays, so history still shows who did what. To lock out a person at once, an admin can also delete them in the People view; they are refused with "person deactivated" until an admin restores them from the Trash.
+
+Clearing a person's role in the People view does not lock them out (the default role is applied again at their next sign-in). To revoke access, remove the email as above or delete the person.
 
 ## 14. Updates
 

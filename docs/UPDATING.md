@@ -42,6 +42,8 @@ git push
 - `npm run db:migrate:remote` applies new database migrations, if any. It is safe to run when there are none.
 - The package runs the same `typecheck`, `test` and `check` steps in GitHub Actions (`.github/workflows/ci.yml`) on every pull request and on `main`. `.github/` is core: do not edit it in a deployment, and the denylist in `npm run check` applies to it.
 - Read `CHANGELOG.md` for anything else to do. Release R1 needs `policy.admins` in `instance/instance.config.json` (the admin email address or addresses, which must be among `deploy.allowedEmails`); until then `npm run setup:check` fails. Running `npm run setup` again asks for it.
+- Release R5 enforces roles: viewers cannot write, and closing or reopening a project and verifying a `sign_off` need the `decider` role. Check the People view before you deploy and give the right people `decider`.
+- Without a saved token file (`secrets/`), the scripts that call Cloudflare (`db:migrate:remote`, `deploy`, backup) use wrangler's own login: run `npx wrangler login` once (`npx wrangler whoami` shows the state). The account comes from the instance config. If neither a token nor a login exists, the message "run npm run setup first" appears.
 
 ## Sending a fix to the package
 
