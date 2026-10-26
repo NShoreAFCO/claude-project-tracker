@@ -3,6 +3,7 @@ import { McpServer, ResourceTemplate } from "@modelcontextprotocol/server";
 import type { z } from "zod";
 import type { Caller, Env } from "../types";
 import { readContext } from "../data/context-read";
+import { ForbiddenError } from "../data/util";
 import { registerTools } from "./tools";
 import { mcpActor, mcpCaller } from "../auth/caller";
 import { isAllowedEmail } from "../auth/access";
@@ -58,7 +59,7 @@ function buildServer(env: Env, props: GrantProps, by: Caller): McpServer {
 
   const reg: Reg = (name, config, handler) => {
     // F11: one Action per tool from the central table; an unmapped tool is refused (fail closed).
-    const action = toolAction(name);
+    const action: Action | undefined = toolAction(name);
     server.registerTool(
       name,
       {
@@ -70,7 +71,8 @@ function buildServer(env: Env, props: GrantProps, by: Caller): McpServer {
       // The SDK infers args from the schema; the helper keeps one generic signature for all tools.
       (async (args: unknown) => {
         try {
-          requireAction(tc.by, action as Action);
+          if (!action) throw new ForbiddenError(`no permission is defined for tool ${name}`);
+          requireAction(tc.by, action);
           // on_behalf_of is accepted for parity with REST but never honoured: MCP writes belong to the OAuth login's person.
           const { on_behalf_of: _ignored, ...rest } = (args ?? {}) as Record<string, unknown>;
           const out = await handler(rest as never, tc);

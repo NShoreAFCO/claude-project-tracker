@@ -581,9 +581,10 @@ export async function updateProject(
   // F3 closure: checked on the merged values when the project becomes done/abandoned, or when a closed
   // project's closure fields are edited.
   const status = String(next.status);
-  // F11: moving a project to done/abandoned (also abandoned → done) is closing it: decider or above, never
-  // a service token. Reopening and editing a closed project's closure fields stay ordinary writes.
-  if (isClosedProjectStatus(status) && current.status !== status) requireAction(by, "close");
+  // F11: moving a project to done/abandoned (also abandoned → done) is closing it, and reopening a closed
+  // project undoes a closure (Ruling 47): both need "close" (decider or above, never a service token).
+  // Editing a closed project's other fields, closure fields included, stays an ordinary write.
+  if (current.status !== status && (isClosedProjectStatus(status) || isClosedProjectStatus(current.status))) requireAction(by, "close");
   if (isClosedProjectStatus(status) && (current.status !== status || "closure_note_md" in fields || "lessons_learned_md" in fields)) {
     const closure = closureMissing(status, next as unknown as ProjectRow);
     if (closure.length) throw closureError(status, closure);

@@ -398,6 +398,53 @@ describe("data-layer checks for content-dependent actions", () => {
   });
 });
 
+describe("reopening a closed project (Ruling 47)", () => {
+  /** A project closed by the system: one abandoned, one done. */
+  async function closedProjects() {
+    const k = ++n;
+    const abandoned = await createProject(db, { title: `R51 reopen a ${k}`, owner: "Owner" }, SYS);
+    await updateProject(db, abandoned.id, { status: "abandoned", closure_note_md: "stopped" }, SYS);
+    const done = await createProject(db, { title: `R51 reopen d ${k}`, owner: "Owner" }, SYS);
+    await updateProject(db, done.id, { status: "done", closure_note_md: "shipped", lessons_learned_md: "none" }, SYS);
+    return [abandoned.id, done.id];
+  }
+  const statusOf = async (id: string) =>
+    (await db.prepare("SELECT status FROM project WHERE id = ?").bind(id).first<{ status: string }>())!.status;
+
+  it("editor cannot reopen a closed project", async () => {
+    const editor = await userCaller(db, email("editor"));
+    for (const id of await closedProjects()) {
+      const before = await statusOf(id);
+      for (const status of ["idea", "active", "on_hold"])
+        await expect(updateProject(db, id, { status }, editor)).rejects.toBeInstanceOf(ForbiddenError);
+      // over REST and MCP as well
+      expect((await rest(email("editor"), "PATCH", `/api/projects/${id}`, { status: "idea" })).status).toBe(403);
+      expect(toolError(await tool(email("editor"), "update_project", { id, patch: { status: "idea" } }))).toBe("forbidden");
+      expect(await statusOf(id)).toBe(before);
+      // other edits of a closed project stay ordinary writes
+      expect((await updateProject(db, id, { summary: "edited while closed" }, editor)).status).toBe(before);
+    }
+  });
+
+  it("decider can reopen", async () => {
+    const [abandoned, done] = await closedProjects();
+    const decider = await userCaller(db, email("decider"));
+    expect((await updateProject(db, abandoned, { status: "idea" }, decider)).status).toBe("idea");
+    expect((await rest(email("decider"), "PATCH", `/api/projects/${done}`, { status: "on_hold" })).status).toBe(200);
+    expect(await statusOf(done)).toBe("on_hold");
+  });
+
+  it("service caller cannot reopen", async () => {
+    const decider = await ensureUserPerson(db, email("decider"));
+    for (const svc of [await serviceCaller(db, "hook:claude-code"), await serviceCaller(db, "hook:claude-code", decider.id)])
+      for (const id of await closedProjects()) {
+        const before = await statusOf(id);
+        await expect(updateProject(db, id, { status: "idea" }, svc)).rejects.toBeInstanceOf(ForbiddenError);
+        expect(await statusOf(id)).toBe(before);
+      }
+  });
+});
+
 describe("role change takes effect on next request", () => {
   it("REST: the next request uses the new role", async () => {
     const addr = "r51-switch@example.com";

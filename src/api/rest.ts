@@ -21,7 +21,7 @@ import {
 } from "../data/context-write";
 import { search } from "../data/search";
 import { moveWorkpackages } from "../data/rules";
-import { ConflictError, ValidationError } from "../data/util";
+import { ConflictError, ForbiddenError, ValidationError } from "../data/util";
 import { handleUpload } from "./upload";
 import { userCaller } from "../auth/caller";
 import { REST_ACTIONS, requireAction, restAction, type Action } from "../auth/permissions";
@@ -371,7 +371,8 @@ export async function handleApi(request: Request, env: Env, identity: Identity &
       const m = re.exec(path);
       if (m && method === request.method) {
         // F11: one Action per route, checked before the handler runs; an unmapped route is refused.
-        requireAction(by, action as Action);
+        if (!action) throw new ForbiddenError(`no permission is defined for ${method} ${path}`);
+        requireAction(by, action);
         const params = m.slice(1).map(decodeURIComponent);
         const out = await h({ req: request, url, env, db, by, identity, params });
         const created =
