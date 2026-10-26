@@ -47,6 +47,10 @@ Coloured stripes and outlines on status chips. Marks, never text: each ≥ 3:1 a
 
 Card chips for the status rules: `--status-blocked` (the red "Blocked" chip of a project with a blocked top-level work package) and `--status-waiting` (the amber "Waiting" chip). The chip text stays `--color-text-strong`; the tokens only colour the bar and outline, so they are marks like the others (≥ 3:1 on `--color-surface`). Existing instance themes must add both tokens (`npm run check` reports them as missing).
 
+### Risk marks
+
+Fills for the risk heat map, the score chips and the risk type chips: `--risk-low`, `--risk-medium`, `--risk-high`, `--risk-critical` (score bands 1–4, 5–9, 10–14, 15–25) and `--risk-nc` (nonconformity) and `--risk-opportunity`. Text sits on these fills, so `--color-text-strong` on each must reach ≥ 7:1 (light to mid tones). Existing instance themes must add all six tokens (`npm run check` reports them as missing).
+
 ### Type and shape
 
 | Token | Example | Notes |
@@ -97,6 +101,12 @@ Example Corp's style guide says: navy `#14213d`, signal orange `#e4572e` as acce
   --status-dropped: #6f7a84;
   --status-blocked: #a4262c;
   --status-waiting: #b45f06;
+  --risk-low: #a8dbb5;
+  --risk-medium: #f2dc8c;
+  --risk-high: #f5a96b;
+  --risk-critical: #ef8f8f;
+  --risk-nc: #c7b6e8;
+  --risk-opportunity: #9cd0ec;
   --font: "Source Sans 3", system-ui, sans-serif;
   --font-heading: var(--font);
   --font-size-base: 16px;

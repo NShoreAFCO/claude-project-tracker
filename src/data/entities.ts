@@ -558,7 +558,12 @@ export async function deletePreview(
   db: D1Database,
   kind: EntityKind,
   id: string,
-): Promise<{ kind: EntityKind; id: string; title: string; children: { workpackages: number; milestones: number; context_docs: number } }> {
+): Promise<{
+  kind: EntityKind;
+  id: string;
+  title: string;
+  children: { workpackages: number; milestones: number; context_docs: number; risks: number };
+}> {
   checkKind(kind);
   const row = kind === "branch" ? await loadRow(db, kind, id) : await liveRow(db, kind, id);
   if (!row) throw new NotFoundError(`${kind} ${id} not found`);
@@ -567,7 +572,12 @@ export async function deletePreview(
     kind,
     id,
     title: titleOf(kind, row),
-    children: { workpackages: c.workpackages.length, milestones: c.milestones.length, context_docs: c.context_docs.length },
+    children: {
+      workpackages: c.workpackages.length,
+      milestones: c.milestones.length,
+      context_docs: c.context_docs.length,
+      risks: c.risks.length,
+    },
   };
 }
 

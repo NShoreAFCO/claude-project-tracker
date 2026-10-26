@@ -128,7 +128,7 @@ export const toastError = (e) => toast(errorText(e), true);
 export function deleteText(kind, name, children) {
   const c = children || {};
   const part = (key) => (c[key] ? t(`deleteKids.${key}${c[key] === 1 ? "_one" : ""}`, { n: c[key] }) : null);
-  const parts = [part("workpackages"), part("milestones"), part("context_docs")].filter(Boolean);
+  const parts = [part("workpackages"), part("milestones"), part("context_docs"), part("risks")].filter(Boolean);
   const kids = parts.length ? t("deleteWith", { items: parts.join(", ") }) : "";
   return t("confirmDeleteTrash", { kind: t(`entityKind.${kind}`), name, kids });
 }

@@ -216,7 +216,7 @@ describe("soft delete", () => {
       kind: "workpackage",
       id: a.id,
       title: "Alpha needle",
-      children: { workpackages: 1, milestones: 1, context_docs: 2 },
+      children: { workpackages: 1, milestones: 1, context_docs: 2, risks: 0 },
     });
     await deleteEntity(db, "workpackage", a.id, A);
     const trash = (await listTrash(db)).filter((t) => t.project_id === p.id);

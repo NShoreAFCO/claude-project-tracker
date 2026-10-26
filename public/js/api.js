@@ -75,6 +75,11 @@ export const api = {
   gateOverride: (wp_id, reason) => request("POST", `/api/workpackages/${encodeURIComponent(wp_id)}/gate-override`, { reason }),
   createBaseline: (project_id, label) => request("POST", `/api/projects/${encodeURIComponent(project_id)}/baselines`, { label }),
 
+  risks: (filter = {}) => request("GET", `/api/risks${q(filter)}`),
+  createRisk: (body) => request("POST", "/api/risks", body),
+  updateRisk: (id, body, expected_version) => request("PATCH", `/api/risks/${encodeURIComponent(id)}`, { ...body, expected_version }),
+  deleteRisk: (id) => request("DELETE", `/api/risks/${encodeURIComponent(id)}`),
+
   linkBranch: (body) => request("POST", "/api/branches", body),
   deleteBranch: (id) => request("DELETE", `/api/branches/${encodeURIComponent(id)}`),
   setScores: (project_id, scores) => request("POST", "/api/scores", { project_id, scores }),

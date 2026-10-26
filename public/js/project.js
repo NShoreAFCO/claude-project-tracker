@@ -1,5 +1,7 @@
 // Project popup: Overview (description, WP tree, branches, scorecard, token cost, timeline, copy buttons) and Kontext.
 import { t, fmtDate, fmtDateTime, fmtNum, fmtPct, STRINGS } from "./i18n.js";
+import { renderRisks } from "./risks.js";
+import { basisLabel, riskChip, staleChip, lastActivity } from "./progress-view.js";
 import { api } from "./api.js";
 import { h, clear, openModal, statusChip, progressBar, copyText, toastError, menuButton, personBadge, ageDays } from "./dom.js";
 import { closureDialog } from "./closure.js";
@@ -13,7 +15,9 @@ import {
   tokenCostForm,
   logProgressForm,
   milestoneForm,
-  saveWpProgress,
+  adjustProgressDialog,
+  adjustProjectProgressForm,
+  markCompleteDialog,
   deleteEntity,
 } from "./forms.js";
 import { renderContextPanel, openDocViewer } from "./context.js";
@@ -46,7 +50,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         history.replaceState(null, "", "#/");
     },
   });
-  history.replaceState(null, "", `#/p/${encodeURIComponent(id)}${tab === "context" ? "/kontext" : ""}`);
+  history.replaceState(null, "", `#/p/${encodeURIComponent(id)}${tab === "context" ? "/kontext" : tab === "risks" ? "/risks" : ""}`);
 
   const cblock = (key, title, actions, ...content) => {
     const open = fold.blocks[key];
@@ -96,20 +100,22 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
 
   function setTab(name, owner) {
     current = { tab: name, owner: owner ?? (name === "context" ? current.owner : null) };
-    history.replaceState(null, "", `#/p/${encodeURIComponent(id)}${name === "context" ? "/kontext" : ""}`);
+    history.replaceState(null, "", `#/p/${encodeURIComponent(id)}${name === "context" ? "/kontext" : name === "risks" ? "/risks" : ""}`);
     render();
   }
 
+  let renderSeq = 0;
   function render() {
+    const seq = ++renderSeq;
     const p = detail.project;
     m.heading.replaceChildren(p.title, " ", statusChip(p.status));
     clear(
       tabs,
-      ["overview", "context"].map((name) =>
+      ["overview", "risks", "context"].map((name) =>
         h(
           "button",
           { type: "button", role: "tab", "aria-selected": String(current.tab === name), on: { click: () => setTab(name) } },
-          name === "overview" ? t("tabOverview") : t("tabContext"),
+          name === "overview" ? t("tabOverview") : name === "risks" ? t("tabRisks") : t("tabContext"),
         ),
       ),
     );
@@ -118,6 +124,8 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       const own = current.owner || { owner_kind: "project", owner_id: p.id };
       clear(m.body);
       renderContextPanel(m.body, { detail, owner: own, onOwner: (o) => setTab("context", o) });
+    } else if (current.tab === "risks") {
+      renderRisks(m.body, { detail, projectId: id, isCurrent: () => seq === renderSeq && current.tab === "risks" });
     } else {
       clear(m.body, overview(detail));
       m.foot.append(
@@ -186,26 +194,33 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
     const open = !leaf && (fold.open.has(w.id) || (shown && fold.issuesOnly));
     let slider = null;
     if (leaf) {
-      const out = h("output", fmtPct(w.progress));
+      // read-only: changes go through "Adjust progress" (spec F7)
       const input = h("input", {
         type: "range",
         min: 0,
         max: 100,
         step: 5,
         value: String(w.progress),
+        disabled: true,
         "aria-label": `${t("progress")}: ${w.title}`,
-        on: {
-          input: (e) => (out.textContent = fmtPct(e.target.value)),
-          change: (e) => saveWpProgress(id, w, Number(e.target.value)),
-        },
       });
-      slider = h("div.slider", input, out);
+      slider = h("div.slider", input, h("output", fmtPct(w.progress)));
     } else slider = progressBar(w.effective_progress);
 
     const dates = w.start_date || w.end_date ? h("span.meta", `${fmtDate(w.start_date)} – ${fmtDate(w.end_date)}`) : null;
     const lockingMilestone = w.locked ? detail.milestones.find((ms) => ms.unlocks?.includes(w.id) && ms.reached_at === null) : null;
     const name = lockingMilestone?.title || "";
     const schedMeta = scheduleMeta(w).filter((n) => !n.classList.contains("critical"));
+    if (w.effort_planned_pd != null || w.effort_actual_pd != null)
+      schedMeta.push(
+        h(
+          "span",
+          t("effortLabel"),
+          ": ",
+          h("b", t("effortValue", { actual: fmtNum(w.effort_actual_pd ?? 0), planned: fmtNum(w.effort_planned_pd) })),
+        ),
+      );
+    if (leaf && w.last_progress_at) schedMeta.push(lastActivity(w.last_progress_at));
 
     return h(
       "li",
@@ -246,6 +261,10 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         slider,
         h(
           "div.actions",
+          leaf && w.status !== "done" && w.status !== "dropped" ? smallBtn(t("adjustProgress"), () => adjustProgressDialog(id, w)) : null,
+          leaf && w.progress >= 100 && w.status !== "done" && w.status !== "dropped"
+            ? smallBtn(t("markComplete"), () => markCompleteDialog(id, w), "secondary")
+            : null,
           smallBtn(t("edit"), () => wpForm(id, w, detail.workpackages, null, detail.milestones)),
           smallBtn(`+ ${t("addSubWorkpackage")}`, () => wpForm(id, null, detail.workpackages, w.id, detail.milestones)),
           menuButton(t("moreActions"), [
@@ -431,6 +450,14 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
     return h(
       "div",
       progressBar(d.progress),
+      h(
+        "div.meta",
+        basisLabel(p.progress_basis),
+        smallBtn(t("adjustProgress"), () => adjustProjectProgressForm(p)),
+        riskChip(d.risk_summary),
+        staleChip(p.stale),
+        lastActivity(p.last_progress_at ?? p.created_at),
+      ),
       h("div", { style: { margin: "0.8rem 0" } }, facts, personLine),
       followLinks.length
         ? h(

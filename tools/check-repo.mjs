@@ -45,6 +45,7 @@ const CONTRACT = [
   "color-surface", "color-tint", "color-border", "color-text", "color-text-strong", "color-text-muted",
   "color-link", "color-danger",
   "status-active", "status-doing", "status-idea", "status-hold", "status-done", "status-dropped", "status-blocked", "status-waiting",
+  "risk-low", "risk-medium", "risk-high", "risk-critical", "risk-nc", "risk-opportunity",
   "font", "font-heading", "font-size-base", "weight-heading", "heading-transform", "button-transform",
   "button-letter-spacing", "radius", "header-rule",
 ];
@@ -95,6 +96,7 @@ pairCheck("text tokens ≥ 7:1 on surface", TEXT.map((t) => [t, "color-surface",
 pairCheck("text tokens ≥ 7:1 on tint", ["color-text", "color-text-strong", "color-primary-strong"].map((t) => [t, "color-tint", 7]));
 pairCheck("on-primary ≥ 7:1 on its fills", ["color-primary", "color-primary-strong", "color-danger", "color-text-strong"].map((b) => ["color-on-primary", b, 7]));
 pairCheck("status marks ≥ 3:1 on surface", CONTRACT.filter((k) => k.startsWith("status-")).map((k) => [k, "color-surface", 3]));
+pairCheck("risk fills carry text-strong ≥ 7:1", CONTRACT.filter((k) => k.startsWith("risk-")).map((k) => ["color-text-strong", k, 7]));
 const surface = hexOf("color-surface");
 const weakCat = [...inst.categories.project, ...inst.categories.workpackage].filter((c) => surface && contrast(c.color.toLowerCase(), surface) < 3);
 check("category colours ≥ 3:1 on surface", weakCat.length === 0, weakCat.map((c) => `${c.key} ${c.color}`).join(", "));

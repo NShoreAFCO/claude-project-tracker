@@ -1399,3 +1399,97 @@ a.btn.small {
   display: inline-flex;
   align-items: center;
 }
+
+/* ---- R3: risks and deviations, progress basis, stale (tokens only; fills carry --color-text-strong) */
+.band-low {
+  --b: var(--risk-low);
+}
+.band-medium {
+  --b: var(--risk-medium);
+}
+.band-high {
+  --b: var(--risk-high);
+}
+.band-critical {
+  --b: var(--risk-critical);
+}
+.rt-risk,
+.rt-issue {
+  --b: var(--color-tint);
+}
+.rt-nc {
+  --b: var(--risk-nc);
+}
+.rt-opportunity {
+  --b: var(--risk-opportunity);
+}
+.chip.risk-type,
+.chip.risk-score,
+.chip.risk-chip {
+  background: var(--b);
+  border-left-color: var(--color-text-strong);
+}
+.chip.risk-score {
+  font-weight: 700;
+  min-width: 2rem;
+  justify-content: center;
+}
+.chip.flag-stale {
+  --c: var(--status-hold);
+}
+.heat-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 1rem 2rem;
+}
+svg.heatmap {
+  width: min(100%, 22rem);
+  height: auto;
+}
+.heat-cell {
+  fill: var(--b);
+  stroke: var(--color-text-muted);
+  stroke-width: 1;
+}
+.heat-count {
+  fill: var(--color-text-strong);
+  font-weight: 700;
+  font-size: 18px;
+}
+.heat-axis {
+  fill: var(--color-text);
+  font-size: 12px;
+}
+.heat-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+.heat-legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.heat-legend .swatch {
+  width: 1.1rem;
+  height: 1.1rem;
+  background: var(--b);
+  border: 1px solid var(--color-text-muted);
+}
+tr.closed td {
+  color: var(--color-text-muted);
+}
+.basis {
+  display: inline-flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.basis > :first-child {
+  font-weight: 600;
+}
+.slider input[type="range"]:disabled {
+  cursor: default;
+}
