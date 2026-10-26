@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { testCaller } from "./helpers";
 import { createProject, getProjectDetail, listProjects } from "../src/data/projects";
 import { getContextBundle } from "../src/data/context-read";
-import { deleteEntity, restoreEntity } from "../src/data/entities";
+import { deleteEntity, deletePreview, restoreEntity } from "../src/data/entities";
 import { setScores } from "../src/data/logs";
 import { listRisks, riskCriterion, upsertRisk } from "../src/data/risks";
 import { ConflictError, ValidationError } from "../src/data/util";
@@ -373,5 +373,14 @@ describe("risk log trash", () => {
 
     expect((await listRisks(db, {})).some((r) => r.id === risk.id)).toBe(true);
     expect((await listRisks(db, {})).some((r) => r.id === own.id)).toBe(false);
+  });
+});
+
+describe("delete preview", () => {
+  it("counts the risks a project delete takes along", async () => {
+    const project = await proj();
+    await upsertRisk(db, project.id, { title: "One", probability: 2, impact: 2 }, A);
+    await upsertRisk(db, project.id, { title: "Two", probability: 3, impact: 3 }, A);
+    expect((await deletePreview(db, "project", project.id)).children).toMatchObject({ risks: 2 });
   });
 });
