@@ -369,3 +369,9 @@ It lists everything it will delete and asks you to type `delete <name>` to confi
 ## 17. Limits
 
 The Cloudflare free plan allows 100,000 Worker requests per day, a 5 GB D1 database and up to 50 Zero Trust users. That is far more than a team's tracker needs. Current limits: <https://developers.cloudflare.com/workers/platform/pricing/> and <https://www.cloudflare.com/plans/zero-trust-services/>.
+
+### PDF reports
+
+Project reports can be downloaded as PDF. The PDF is rendered by Cloudflare Browser Rendering through a binding (`BROWSER`) that setup puts into the generated `wrangler.jsonc`; no extra token or step is needed. On the free plan Browser Rendering allows 10 browser minutes a day and one PDF every 10 seconds: beyond that the PDF button answers "try again later" (503), while the Markdown and HTML reports keep working. Limits: <https://developers.cloudflare.com/browser-rendering/limits/>. The first PDF render has not been checked against a live account yet, so open one report as PDF after your first deploy.
+
+To switch PDF off, set `"report": { "pdf": false }` in `policy` in `instance/instance.config.json`, run `npm run build:instance` and `npm run deploy`. The binding is then left out and the PDF route answers 503.

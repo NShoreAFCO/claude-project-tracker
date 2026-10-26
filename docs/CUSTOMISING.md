@@ -42,7 +42,7 @@ After any change: `npm run check`, then `npm run deploy` (it rebuilds the genera
 | `gates.require_decision` | `true` | gate milestones need a recorded decision |
 | `retention_days` | `30` | deleted items can be purged by an admin after this many days (never automatically) |
 | `hide_empty_categories` | `collapse` | `hide` or `collapse` empty type groups on the dashboard |
-| `report.paper`, `report.pdf` | `a4`, `true` | paper size and PDF button of project reports |
+| `report.paper`, `report.pdf` | `a4`, `true` | paper size (`a4` or `letter`) and PDF of project reports; `false` leaves the Browser Rendering binding out of the deployment and the PDF route answers 503 |
 | `score_scales` | short texts for `value`, `quality`, `risk`, `effort`, `token_efficiency` | per criterion: what `0`, `5` and `10` mean, one text per language (`en`, `de`) |
 
 `npm run build:instance` and `npm run setup:check` report a field with a wrong value by name.
@@ -58,6 +58,8 @@ To change single texts without touching core, create `instance/strings.en.json` 
   "status": { "on_hold": "Paused" }
 }
 ```
+
+Texts that the server writes itself, such as project reports, are overridden the same way. Use the key with dots as nested objects, for example `{ "report": { "status": "State" } }`. The keys are in `src/i18n/server.ts`; a key without an override falls back to the built-in text.
 
 A new language means a new locale file in core: contribute it upstream (`docs/UPDATING.md`) so everyone gets it.
 
