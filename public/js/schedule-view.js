@@ -22,13 +22,13 @@ export function scheduleMeta(entity) {
   const nodes = [];
 
   if (entity.baseline_end != null) {
+    // milestones have only a baseline due date (no start)
     nodes.push(
       h(
         "span",
-        t("baselineRange", {
-          start: fmtDate(entity.baseline_start),
-          end: fmtDate(entity.baseline_end),
-        }),
+        entity.baseline_start
+          ? t("baselineRange", { start: fmtDate(entity.baseline_start), end: fmtDate(entity.baseline_end) })
+          : t("baselineDue", { date: fmtDate(entity.baseline_end) }),
       ),
     );
   }

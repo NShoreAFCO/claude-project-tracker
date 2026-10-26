@@ -80,10 +80,9 @@ export function barTooltip(base, entity, titleOf) {
 
   if (entity.baseline_end != null) {
     lines.push(
-      t("baselineRange", {
-        start: fmtDate(entity.baseline_start),
-        end: fmtDate(entity.baseline_end),
-      }),
+      entity.baseline_start
+        ? t("baselineRange", { start: fmtDate(entity.baseline_start), end: fmtDate(entity.baseline_end) })
+        : t("baselineDue", { date: fmtDate(entity.baseline_end) }),
     );
   }
 

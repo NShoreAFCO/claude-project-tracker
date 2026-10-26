@@ -18,6 +18,7 @@ export async function decisionDialog({ project, milestone }) {
   return formDialog({
     title: t("decisionTitle", { name: milestone.title }),
     intro,
+    submitLabel: t("recordDecision"),
     fields: [
       {
         name: "decision",

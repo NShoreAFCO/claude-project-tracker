@@ -457,6 +457,7 @@ export default {
   setBaseline: "Baseline setzen",
   fBaselineLabel: "Bezeichnung der Baseline",
   baselineSaved: "Baseline gespeichert.",
+  baselineDue: "Baseline fällig: {date}",
   baselineInfo: "Baseline: {label} ({date})",
   fGate: "Gate (braucht eine Entscheidung)",
   gateMark: "Gate",

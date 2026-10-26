@@ -1320,6 +1320,7 @@ details.inherited > summary {
   stroke-width: 2.5;
 }
 .ms-diamond.gate {
+  margin: 0 0.35rem 0 0.25rem;
   box-shadow:
     0 0 0 2px var(--color-surface),
     0 0 0 4px var(--color-text-strong);
