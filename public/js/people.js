@@ -1,11 +1,10 @@
 // People view (spec 4.1): list, add and edit persons. Editors manage stakeholders; only admins change access
 // roles or the email of a user.
-import { t } from "./i18n.js";
+import { t, AVAILABLE, setLocale, rememberLocale } from "./i18n.js";
 import { api } from "./api.js";
+import { can, getMe, loadMe, ROLES, POLICY } from "./access.js";
 import { h, clear, formDialog, saveWithConflict, toast, menuButton, personBadge } from "./dom.js";
 import { changed, deleteEntity } from "./forms.js";
-
-const ROLES = ["viewer", "editor", "decider", "admin"];
 
 /** Create (existing = null) or edit a person. canAdmin: may set access role and a user's email. */
 export function personForm(existing, canAdmin) {
@@ -70,8 +69,7 @@ function profileForm(me) {
         type: "select",
         options: [
           ["", t("localeDefault")],
-          ["en", "English"],
-          ["de", "Deutsch"],
+          ...POLICY.locales.filter((code) => AVAILABLE.includes(code)).map((code) => [code, t(`localeName.${code}`)]),
         ],
         value: me.locale ?? "",
       },
@@ -83,8 +81,14 @@ function profileForm(me) {
         (cur) => h("p", `${cur.name} · v${cur.version}`),
       );
       if (res?.cancelled) return undefined;
-      toast(t("saved"));
+      if (v.locale && AVAILABLE.includes(v.locale)) {
+        setLocale(v.locale);
+        rememberLocale(v.locale);
+      }
+      await loadMe();
       changed(null);
+      toast(t("saved"));
+      window.dispatchEvent(new CustomEvent("tracker:locale"));
       return res;
     },
   });
@@ -104,17 +108,17 @@ function initialsOf(p) {
 
 export async function renderPeople(main) {
   clear(main, h("h2", t("peopleTitle")), h("p", t("loading")));
-  const [persons, me] = await Promise.all([
-    api.persons(),
-    api
-      .whoami()
-      .then((w) => w.person || null)
-      .catch(() => null),
-  ]);
-  const canAdmin = me?.access_role === "admin";
+  const persons = await api.persons();
+  const me = getMe();
+  const canAdmin = can("manage_roles");
+  const canWrite = can("write");
 
-  const rows = persons.map((p) =>
-    h(
+  const rows = persons.map((p) => {
+    const menuItems = [];
+    if (p.access_role === null || canAdmin)
+      menuItems.push({ label: t("delete"), danger: true, onClick: () => deleteEntity("person", p.id, p.name, null) });
+
+    return h(
       "tr",
       h(
         "td.p-name",
@@ -141,14 +145,16 @@ export async function renderPeople(main) {
       ),
       h(
         "td.row-actions",
-        h(
-          "div.actions",
-          h("button.btn.small.ghost", { type: "button", on: { click: () => personForm(p, canAdmin) } }, t("edit")),
-          menuButton(t("moreActions"), [{ label: t("delete"), danger: true, onClick: () => deleteEntity("person", p.id, p.name, null) }]),
-        ),
+        canWrite
+          ? h(
+              "div.actions",
+              h("button.btn.small.ghost", { type: "button", on: { click: () => personForm(p, canAdmin) } }, t("edit")),
+              menuItems.length ? menuButton(t("moreActions"), menuItems) : null,
+            )
+          : null,
       ),
-    ),
-  );
+    );
+  });
 
   clear(
     main,
@@ -157,7 +163,7 @@ export async function renderPeople(main) {
       h("h2", t("peopleTitle")),
       h("span.spacer"),
       me ? h("button.btn.secondary", { type: "button", on: { click: () => profileForm(me) } }, t("myProfile")) : null,
-      h("button.btn", { type: "button", on: { click: () => personForm(null, canAdmin) } }, `+ ${t("newPerson")}`),
+      canWrite ? h("button.btn", { type: "button", on: { click: () => personForm(null, canAdmin) } }, `+ ${t("newPerson")}`) : null,
     ),
     h("p.meta", t("peopleHint")),
     persons.length

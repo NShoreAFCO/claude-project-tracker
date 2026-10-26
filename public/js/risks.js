@@ -1,6 +1,7 @@
 // Risks & deviations tab: 5x5 heat map, list and form (spec F6). heatMapCells/heatMapSvg/riskForm drafted by Copilot.
 import { t, fmtDate } from "./i18n.js";
 import { api } from "./api.js";
+import { can, gate as roleGate } from "./access.js";
 import { h, clear, formDialog, saveWithConflict, toast, toastError, errorText, personBadge, menuButton } from "./dom.js";
 import { riskBand } from "./risk-band.js";
 import { changed, personOptions, wpOptions, deleteEntity } from "./forms.js";
@@ -208,10 +209,13 @@ export async function renderRisks(body, { detail, projectId, isCurrent = () => t
         "td",
         h(
           "div.actions",
-          h("button.btn.small.ghost", { type: "button", on: { click: () => open(r) } }, t("edit")),
-          menuButton(t("moreActions"), [
-            { label: t("delete"), danger: true, onClick: () => deleteEntity("risk", r.id, r.title, projectId) },
-          ]),
+          roleGate(h("button.btn.small.ghost", { type: "button", on: { click: () => open(r) } }, t("edit")), "write"),
+          roleGate(
+            menuButton(t("moreActions"), [
+              { label: t("delete"), danger: true, onClick: () => deleteEntity("risk", r.id, r.title, projectId) },
+            ]),
+            "write",
+          ),
         ),
       ),
     ),
@@ -220,7 +224,10 @@ export async function renderRisks(body, { detail, projectId, isCurrent = () => t
     "ul.heat-legend",
     ["low", "medium", "high", "critical"].map((b) => h("li", h(`span.swatch.band-${b}`), t(`riskBand.${b}`))),
   );
-  const addBtn = h("button.btn.small.secondary", { type: "button", on: { click: () => open(null) } }, `+ ${t("addRisk")}`);
+  const addBtn = roleGate(
+    h("button.btn.small.secondary", { type: "button", on: { click: () => open(null) } }, `+ ${t("addRisk")}`),
+    "write",
+  );
   clear(
     body,
     h(

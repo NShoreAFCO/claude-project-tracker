@@ -338,6 +338,20 @@ export function formDialog({ title, fields, onSubmit, submitLabel = t("save"), n
       for (const f of fields) if (f.showWhen && wraps[f.name]) wraps[f.name].hidden = !visible(f);
     };
     for (const f of fields) if (f.showWhen) inputs[f.showWhen.field]?.addEventListener?.("change", syncShown);
+    // fields with dependsOn: { field, update(sourceValue, targetInput) } follow another field live
+    for (const f of fields) {
+      if (f.dependsOn) {
+        const syncDependency = () => {
+          const sourceInput = inputs[f.dependsOn.field];
+          const targetInput = inputs[f.name];
+          if (sourceInput && targetInput) {
+            f.dependsOn.update(sourceInput.value, targetInput);
+          }
+        };
+        syncDependency();
+        inputs[f.dependsOn.field]?.addEventListener?.("change", syncDependency);
+      }
+    }
     syncShown();
     const submit = h("button.btn", { type: "submit" }, submitLabel);
     m.foot.append(h("button.btn.ghost", { type: "button", on: { click: () => m.close() } }, t("cancel")), submit);

@@ -239,5 +239,12 @@ export function enabledCategories(config) {
 
 /** What the dashboard may see: never the deploy section. */
 export function publicConfig(config, overrides = {}) {
-  return { app: config.app, categories: enabledCategories(config), strings: overrides };
+  const { locales, hide_empty_categories, target_date_required_categories } = resolvePolicy(config);
+  // only the policy keys the dashboard needs (role-independent display rules); never admins or emails
+  return {
+    app: config.app,
+    categories: enabledCategories(config),
+    policy: { locales, hide_empty_categories, target_date_required_categories },
+    strings: overrides,
+  };
 }

@@ -85,7 +85,7 @@ describe("list and detail enrichment", () => {
     await upsertWorkpackage(db, p.id, { title: "leaf", status: "waiting" }, A);
     const card = (await listProjects(db, { category: "research" })).find((c) => c.id === p.id)!;
     expect(card.category).toBe("research");
-    expect(card.wp_counts).toEqual({ open: 0, in_progress: 1, waiting_blocked: 1, done: 1, started: 1 });
+    expect(card.wp_counts).toEqual({ open: 0, in_progress: 1, waiting_blocked: 1, done: 1 });
     expect((await listProjects(db, { category: "other" })).some((c) => c.id === p.id)).toBe(false);
     expect((await listProjects(db, { category: "none" })).some((c) => c.id === p.id)).toBe(false);
   });

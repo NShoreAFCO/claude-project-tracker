@@ -122,7 +122,7 @@ export type ProjectCard = {
   owner_initials: string | null;
   /** Person id of the owner (for the Owner filter); null for a free-text or missing owner. */
   owner_id: string | null;
-  /** open = todo, in_progress = doing, waiting_blocked = waiting + blocked; started = in_progress (alias until the UI moves). */
+  /** open = todo, in_progress = doing, waiting_blocked = waiting + blocked. */
   wp_counts: WpCounts;
   progress_basis: ProgressBasis;
   stalled_blocked: boolean;

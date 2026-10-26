@@ -1,4 +1,5 @@
 // Grid view: one card per project (SPEC §9).
+import { can, POLICY } from "./access.js";
 import { t, fmtDate, fmtDateTime, STRINGS } from "./i18n.js";
 import { h, clear, statusChip, progressBar, personBadge, ageDays } from "./dom.js";
 import { openProject } from "./project.js";
@@ -18,7 +19,7 @@ function flagChips(p) {
   }
   if (p.waiting_count) chips.push(h("span.chip.flag-waiting", t("chipWaiting", { n: p.waiting_count })));
   if (p.closure_due) chips.push(h("span.chip.flag-closure", { title: t("closureDueHint") }, t("closureDue")));
-  chips.push(riskChip(p.risk_summary), staleChip(p.stale));
+  chips.push(noTargetChip(p), riskChip(p.risk_summary), staleChip(p.stale));
   const shown = chips.filter(Boolean);
   return shown.length ? h("div.flags", shown) : null;
 }
@@ -90,6 +91,49 @@ function card(p, persons) {
   );
 }
 
+function noTargetChip(p) {
+  if (p.status !== "active" || p.target_date || !POLICY.target_date_required_categories.includes(p.category)) {
+    return null;
+  }
+
+  return h("span.chip.flag-waiting.flag-no-target", { title: t("noTargetDateHint") }, t("noTargetDate"));
+}
+
+/** `all` = the unfiltered project list: a category is empty only when it has no projects at all. */
+function categoryBlocks(shown, persons, filter, all = shown) {
+  return [...PROJECT_CATEGORIES, null]
+    .map((key) => {
+      const projects = shown.filter((p) => knownCategory("p", p.category) === key);
+      const label = catLabel("p", key);
+
+      if (projects.length) {
+        return h(
+          "section.cat-block",
+          { "aria-label": label },
+          h("header.cat-head", catDot("p", key), h("h2", label), h("span.count", String(projects.length))),
+          h(
+            "div.cards",
+            projects.map((p) => card(p, persons)),
+          ),
+        );
+      }
+
+      // a category that has projects, hidden only by a filter, is never shown as empty
+      if (all.some((p) => knownCategory("p", p.category) === key)) return null;
+      if (filter.category || POLICY.hide_empty_categories === "hide" || key === null) {
+        return null;
+      }
+
+      return h(
+        "details.cat-block.cat-empty",
+        { "aria-label": label },
+        h("summary.cat-head", catDot("p", key), h("h2", label), h("span.count", "0")),
+        h("p.meta", t("categoryEmpty")),
+      );
+    })
+    .filter((block) => block !== null);
+}
+
 export function renderGrid(main, state) {
   const { filter } = state;
   const category = filter.category || "";
@@ -155,24 +199,6 @@ export function renderGrid(main, state) {
       (!category || (category === "none" ? p.category === null : p.category === category)),
   );
 
-  const categoryBlocks = [...PROJECT_CATEGORIES, null]
-    .map((key) => {
-      const projects = shown.filter((p) => knownCategory("p", p.category) === key);
-      if (!projects.length) return null;
-
-      const label = catLabel("p", key);
-      return h(
-        "section.cat-block",
-        { "aria-label": label },
-        h("header.cat-head", catDot("p", key), h("h2", label), h("span.count", String(projects.length))),
-        h(
-          "div.cards",
-          projects.map((p) => card(p, persons)),
-        ),
-      );
-    })
-    .filter(Boolean);
-
   clear(
     main,
     summaryBar(state.summary || null, kpi, (key) => ((filter.kpi = key), renderGrid(main, state))),
@@ -184,8 +210,8 @@ export function renderGrid(main, state) {
       h("div", { style: { "min-width": "160px" } }, ownerSel),
       h("div", { style: { "min-width": "200px" } }, attentionSel),
       h("span.spacer"),
-      h("button.btn", { type: "button", on: { click: () => projectForm(null) } }, `+ ${t("newProject")}`),
+      can("write") ? h("button.btn", { type: "button", on: { click: () => projectForm(null) } }, `+ ${t("newProject")}`) : null,
     ),
-    shown.length ? categoryBlocks : h("p.empty", t("noProjects")),
+    shown.length ? categoryBlocks(shown, persons, filter, state.projects) : h("p.empty", t("noProjects")),
   );
 }

@@ -4,6 +4,7 @@
 
 ### Added
 
+- Dashboard by role: one client helper (`public/js/access.js`, mirrors the server's minimum roles) hides or disables write, close, decide, sign_off and purge controls; the header shows your name, role and a language switch (`policy.locales`, saved to your profile, applied without a reload). Empty project categories hide or collapse per `policy.hide_empty_categories`; active projects without a target date in a `policy.target_date_required_categories` category get an amber hint. The public instance config now carries `policy.locales`, `hide_empty_categories` and `target_date_required_categories`.
 - Role enforcement: every REST route and MCP tool maps to one action (`read | write | decide | close | verify_sign_off | manage_roles | purge`) with a minimum role (viewer < editor < decider < admin); an unmapped route or tool answers 403. Service tokens act as editor and never decide, close, verify a `sign_off`, manage roles or purge, even with `on_behalf_of`. MCP logins act with the person's role but never manage roles or purge. Roles are read on every request. The full matrix is in `docs/SPEC.md` section 24.
 - Closing a project (`done`, `abandoned`) and reopening it need a decider. Recording, changing or lowering a `sign_off` verification needs a decider; `review`, `test` and `demo` verification need a person. Restore from the trash is an editor action, purge an admin action. Viewers may edit only their own language, display name and phone (`PATCH /api/persons/me`). The Claude Code hook checks the user's role.
 - Hygiene: a project in a `policy.target_date_required_categories` category needs a target date to become `active` (400); `create_project` without status then gives `idea` plus a warning. Project `language` is checked against `policy.locales`.
@@ -113,7 +114,7 @@
 
 ### Breaking
 
-- `wp_counts` on project cards and `list_projects` now has `open` (todo only), `in_progress`, `waiting_blocked`, `done` (`started` repeats `in_progress` for now). Code that read `open` as "not done" must change.
+- `wp_counts` on project cards and `list_projects` now has `open` (todo only), `in_progress`, `waiting_blocked`, `done` (the old `started` alias is removed). Code that read `open` as "not done" must change.
 - Closed (`done`/`abandoned`) projects refuse new open work packages (409 `PROJECT_CLOSED`); reopen the project first.
 - `npm run setup:check` fails until `policy.admins` is set.
 

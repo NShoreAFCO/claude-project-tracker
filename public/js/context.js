@@ -3,6 +3,7 @@
 import { t, fmtBytes, fmtDateTime, STRINGS } from "./i18n.js";
 import { api } from "./api.js";
 import { h, clear, openModal, toast, toastError, copyText, confirmDialog, saveWithConflict, menuButton } from "./dom.js";
+import { can, gate as roleGate } from "./access.js";
 import { renderMarkdown } from "./markdown.js";
 import { lineDiff } from "./diff.js";
 import { changed, wpOptions, deleteEntity } from "./forms.js";
@@ -81,7 +82,7 @@ export async function renderContextPanel(container, { detail, owner, onOwner }) 
     ),
     h("div.callout", t("ctxReferenceNote")),
     listHost,
-    addSection(detail, owner),
+    can("write") ? addSection(detail, owner) : null,
   );
 
   let docs;
@@ -174,7 +175,7 @@ function docList(docs, detail) {
     const li = h(
       "li.ctx-item",
       {
-        draggable: "true",
+        draggable: can("write") ? "true" : false,
         dataset: { id: d.id },
         on: {
           dragstart: (e) => {
@@ -218,26 +219,35 @@ function docList(docs, detail) {
       ),
       h(
         "div.actions",
-        smallBtn("↑", () => move(d.id, -1), "ghost", { "aria-label": t("ctxMoveUp") }),
-        smallBtn("↓", () => move(d.id, 1), "ghost", { "aria-label": t("ctxMoveDown") }),
-        smallBtn(d.pinned ? t("ctxUnpin") : t("ctxPin"), async () => {
-          try {
-            await api.contextMeta(d.id, { pinned: !d.pinned });
-          } catch (e) {
-            toastError(e);
-          }
-          changed(projectId);
-        }),
+        ...(can("write")
+          ? [
+              smallBtn("↑", () => move(d.id, -1), "ghost", { "aria-label": t("ctxMoveUp") }),
+              smallBtn("↓", () => move(d.id, 1), "ghost", { "aria-label": t("ctxMoveDown") }),
+              smallBtn(d.pinned ? t("ctxUnpin") : t("ctxPin"), async () => {
+                try {
+                  await api.contextMeta(d.id, { pinned: !d.pinned });
+                } catch (e) {
+                  toastError(e);
+                }
+                changed(projectId);
+              }),
+            ]
+          : []),
         smallBtn(t("ctxOpen"), () => openDocViewer(d.id)),
-        smallBtn(t("ctxEdit"), () => openEditor(d.id)),
-        smallBtn(t("ctxAppend"), () => openAppend(d.id, d.title, projectId)),
+        can("write") ? smallBtn(t("ctxEdit"), () => openEditor(d.id)) : null,
+        can("write") ? smallBtn(t("ctxAppend"), () => openAppend(d.id, d.title, projectId)) : null,
         smallBtn(t("ctxHistory"), () => openHistory(d.id)),
-        d.status === "released" ? null : smallBtn(t("ctxRelease"), () => setDocStatus(d, "released", projectId), "secondary"),
-        menuButton(t("moreActions"), [
-          ...(d.status === "obsolete" ? [] : [{ label: t("ctxMarkObsolete"), onClick: () => setDocStatus(d, "obsolete", projectId) }]),
-          ...(d.status === "draft" ? [] : [{ label: t("ctxBackToDraft"), onClick: () => setDocStatus(d, "draft", projectId) }]),
-          { label: t("delete"), danger: true, onClick: () => deleteEntity("context_doc", d.id, d.title, projectId) },
-        ]),
+        d.status === "released" || !can("write")
+          ? null
+          : smallBtn(t("ctxRelease"), () => setDocStatus(d, "released", projectId), "secondary"),
+        roleGate(
+          menuButton(t("moreActions"), [
+            ...(d.status === "obsolete" ? [] : [{ label: t("ctxMarkObsolete"), onClick: () => setDocStatus(d, "obsolete", projectId) }]),
+            ...(d.status === "draft" ? [] : [{ label: t("ctxBackToDraft"), onClick: () => setDocStatus(d, "draft", projectId) }]),
+            { label: t("delete"), danger: true, onClick: () => deleteEntity("context_doc", d.id, d.title, projectId) },
+          ]),
+          "write",
+        ),
       ),
     );
     list.append(li);
@@ -507,7 +517,7 @@ export async function openHistory(docId) {
         box,
         h(
           "div.toolbar",
-          { style: { "margin-top": "0.8rem" } },
+          { hidden: !can("write"), style: { "margin-top": "0.8rem" } },
           h(
             "button.btn",
             {

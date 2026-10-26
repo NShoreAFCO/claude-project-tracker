@@ -1,6 +1,7 @@
 // Trash view (spec F10): deleted items with restore; purge (admins, after the retention period).
 import { t, fmtDateTime } from "./i18n.js";
 import { api } from "./api.js";
+import { can } from "./access.js";
 import { h, clear, toast, toastError, confirmDialog } from "./dom.js";
 import { changed } from "./forms.js";
 
@@ -29,8 +30,9 @@ async function purge(item) {
 
 export async function renderTrash(main) {
   clear(main, h("h2", t("trashTitle")), h("p", t("loading")));
-  const [items, who] = await Promise.all([api.trash(), api.whoami().catch(() => null)]);
-  const isAdmin = who?.person?.access_role === "admin";
+  const items = await api.trash();
+  const canRestore = can("write");
+  const canPurge = can("purge");
   const rows = items.map((it) =>
     h(
       "tr",
@@ -46,8 +48,10 @@ export async function renderTrash(main) {
         "td.row-actions",
         h(
           "div.actions",
-          h("button.btn.small.secondary", { type: "button", on: { click: () => restore(it) } }, t("restore")),
-          isAdmin ? h("button.btn.small.danger", { type: "button", on: { click: () => purge(it) } }, t("purge")) : null,
+          canRestore && (it.access_role == null || can("manage_roles"))
+            ? h("button.btn.small.secondary", { type: "button", on: { click: () => restore(it) } }, t("restore"))
+            : null,
+          canPurge ? h("button.btn.small.danger", { type: "button", on: { click: () => purge(it) } }, t("purge")) : null,
         ),
       ),
     ),
