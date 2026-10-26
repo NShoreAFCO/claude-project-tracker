@@ -829,8 +829,10 @@ details.inherited > summary {
 /* ---- toast */
 .toast {
   position: fixed;
-  bottom: 1rem;
-  left: 50%;
+  inset: auto auto 1rem 50%;
+  margin: 0;
+  border: 0;
+  overflow: visible;
   transform: translateX(-50%);
   background: var(--color-text-strong);
   color: var(--color-on-primary);
@@ -1552,4 +1554,9 @@ details.objectives > summary h3 {
 .badge.unverified {
   border-color: var(--status-blocked);
   border-left-width: 4px;
+}
+.toast .linkbtn {
+  color: inherit;
+  text-decoration: underline;
+  font-weight: 700;
 }

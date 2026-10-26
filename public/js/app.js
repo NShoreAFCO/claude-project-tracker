@@ -132,8 +132,8 @@ async function renderView() {
   renderNav();
   if (view === "people") await renderPeople(main, state);
   else if (view === "trash") await renderTrash(main, state);
-  else if (view === "upcoming") await renderUpcoming(main, state);
-  else if (view === "mine") await renderMyWps(main, state);
+  else if (view === "upcoming") await renderUpcoming(main);
+  else if (view === "mine") await renderMyWps(main);
   else if (view === "gantt") await renderGantt(main, state);
   else if (view === "inbox") await renderInbox(main, state);
   else if (view === "search") await renderSearchResults(params.get("q") || "");

@@ -92,13 +92,29 @@ export function progressBar(pct, label) {
 
 // ---- toast
 let toastTimer;
-export function toast(msg, error = false) {
-  const el = document.getElementById("toast");
+let toastEl;
+function hideToast(el) {
+  try {
+    el.hidePopover();
+  } catch {}
+  el.hidden = true;
+  document.body.append(el);
+}
+export function toast(msg, error = false, action = null) {
+  const el = (toastEl ||= document.getElementById("toast"));
+  // an open modal dialog makes everything outside it inert: host the toast inside it so its action stays clickable
+  const host = [...document.querySelectorAll("dialog[open]")].pop() || document.body;
+  if (el.parentElement !== host) host.append(el);
   el.textContent = msg;
+  if (action) el.append(" ", h("button.linkbtn", { type: "button", on: { click: () => (action.onClick(), hideToast(el)) } }, action.label));
   el.classList.toggle("error", error);
   el.hidden = false;
+  // popover: the toast sits in the top layer, so it stays visible and clickable above an open dialog
+  try {
+    if (!el.matches(":popover-open")) el.showPopover();
+  } catch {}
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (el.hidden = true), error ? 6000 : 2500);
+  toastTimer = setTimeout(() => hideToast(el), action ? 12000 : error ? 6000 : 2500);
 }
 /**
  * Localised text for a failed call. 409s with a machine-readable `current.code` (PROJECT_CLOSED, PARENT_DELETED,

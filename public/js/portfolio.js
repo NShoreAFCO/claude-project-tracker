@@ -20,7 +20,8 @@ let mineAssignedOnly = false;
 export async function loadSummary() {
   try {
     return await api.portfolioSummary();
-  } catch {
+  } catch (error) {
+    toastError(error);
     return null;
   }
 }
@@ -37,7 +38,7 @@ export function summaryBar(summary, activeKpi, onPick) {
       "aria-label": t("summaryBarLabel"),
     },
     KPI_KEYS.map((key) => {
-      const count = summary[key].count;
+      const count = summary[key]?.count ?? 0;
       const pressed = activeKpi === key;
       const classes = ["button.kpi", pressed ? "active" : null, count === 0 ? "zero" : null].filter(Boolean).join(".");
 
@@ -150,89 +151,71 @@ function localDateString(date) {
   return `${year}-${month}-${day}`;
 }
 
-export async function renderUpcoming(main, state) {
-  clear(main, h("p", {}, t("loading")));
+let renderSeq = 0;
 
+/** Fetch rows for `view` and swap them in below its toolbar; a response that arrives after the route changed is dropped. */
+async function renderList(main, view, makeToolbar, fetchRows, emptyKey, showStart) {
+  const seq = ++renderSeq;
+  const hasToolbar = main.firstElementChild?.dataset?.view === view;
+  if (!hasToolbar) clear(main, h("p", {}, t("loading")));
   let rows;
   try {
-    rows = await api.upcomingWps({ limit: 100 });
+    rows = await fetchRows();
   } catch (error) {
-    toastError(error);
+    if (seq === renderSeq) toastError(error);
     return;
   }
-
-  const toolbar = h("div.toolbar", {}, h("h2", {}, t("upcomingTitle")), h("p.meta", {}, t("upcomingHint")));
-
-  if (rows.length === 0) {
-    clear(main, toolbar, h("p.empty", {}, t("upcomingEmpty")));
-    return;
-  }
-
-  clear(main, toolbar, wpTable(rows, false));
+  if (seq !== renderSeq || !location.hash.startsWith(`#/${view}`)) return;
+  const toolbar = hasToolbar ? main.firstElementChild : makeToolbar();
+  toolbar.dataset.view = view;
+  clear(main, toolbar, rows.length === 0 ? h("p.empty", {}, t(emptyKey)) : wpTable(rows, showStart));
 }
 
-export async function renderMyWps(main, state) {
-  clear(main, h("p", {}, t("loading")));
+export function renderUpcoming(main) {
+  return renderList(
+    main,
+    "upcoming",
+    () => h("div.toolbar", {}, h("h2", {}, t("upcomingTitle")), h("p.meta", {}, t("upcomingHint"))),
+    () => api.upcomingWps({ limit: 100 }),
+    "upcomingEmpty",
+    false,
+  );
+}
 
-  let rows;
-  try {
-    rows = await api.myWps({
-      sort: mineSort,
-      assigned_only: mineAssignedOnly ? 1 : "",
-    });
-  } catch (error) {
-    toastError(error);
-    return;
-  }
-
-  const sortValues = ["project", "in_progress", "start", "end"];
-
-  const sortSelect = h(
-    "select",
-    {
-      "aria-label": t("mineSortLabel"),
-      on: {
-        change: (event) => {
-          mineSort = event.currentTarget.value;
-          renderMyWps(main, state);
-        },
-      },
-    },
-    sortValues.map((value) =>
+export function renderMyWps(main) {
+  const again = () => renderMyWps(main);
+  const makeToolbar = () =>
+    h(
+      "div.toolbar",
+      {},
+      h("h2", {}, t("mineTitle")),
       h(
-        "option",
+        "select",
         {
-          value,
-          selected: mineSort === value,
+          "aria-label": t("mineSortLabel"),
+          on: { change: (event) => ((mineSort = event.currentTarget.value), again()) },
         },
-        t(`mineSort.${value}`),
+        ["project", "in_progress", "start", "end"].map((value) =>
+          h("option", { value, selected: mineSort === value }, t(`mineSort.${value}`)),
+        ),
       ),
-    ),
+      h(
+        "label.check",
+        {},
+        h("input", {
+          type: "checkbox",
+          checked: mineAssignedOnly,
+          on: { change: (event) => ((mineAssignedOnly = event.currentTarget.checked), again()) },
+        }),
+        t("mineAssignedOnly"),
+      ),
+    );
+  return renderList(
+    main,
+    "mine",
+    makeToolbar,
+    () => api.myWps({ sort: mineSort, assigned_only: mineAssignedOnly ? 1 : "" }),
+    "mineEmpty",
+    true,
   );
-
-  const assignedCheckbox = h("input", {
-    type: "checkbox",
-    checked: mineAssignedOnly,
-    on: {
-      change: (event) => {
-        mineAssignedOnly = event.currentTarget.checked;
-        renderMyWps(main, state);
-      },
-    },
-  });
-
-  const toolbar = h(
-    "div.toolbar",
-    {},
-    h("h2", {}, t("mineTitle")),
-    sortSelect,
-    h("label.check", {}, assignedCheckbox, t("mineAssignedOnly")),
-  );
-
-  if (rows.length === 0) {
-    clear(main, toolbar, h("p.empty", {}, t("mineEmpty")));
-    return;
-  }
-
-  clear(main, toolbar, wpTable(rows, true));
 }

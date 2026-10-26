@@ -136,7 +136,7 @@ export function renderGrid(main, state) {
 
   // Portfolio filter: a KPI tile or the select narrows the grid to that counter's projects (spec F9).
   const kpi = filter.kpi || "";
-  const kpiIds = kpi && state.summary?.[kpi] ? new Set(state.summary[kpi].project_ids) : null;
+  const kpiIds = kpi && state.summary?.[kpi] ? new Set(state.summary[kpi].project_ids ?? []) : null;
   const attentionSel = h(
     "select",
     { "aria-label": t("filterAttention"), on: { change: (e) => ((filter.kpi = e.target.value), renderGrid(main, state)) } },

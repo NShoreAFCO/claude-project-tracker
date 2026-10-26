@@ -34,36 +34,39 @@ export function mdBlock(src) {
 
 const block = (title, actions, ...content) => h("section.block", h("header", h("h3", title), actions || null), ...content);
 
-/** Download a Blob under a file name. */
-function saveBlob(blob, name) {
-  const url = URL.createObjectURL(blob);
-  const a = h("a", { href: url, download: name });
+/** Same-origin URL of a project report. */
+const reportUrl = (projectId, format) => `/api/projects/${encodeURIComponent(projectId)}/report?format=${format}`;
+
+/** Click a temporary anchor (new tab, or a download when `download` is set). */
+function clickAnchor(attrs) {
+  const a = h("a", attrs);
   document.body.append(a);
   a.click();
   a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
-/** Report button (spec F9): PDF by default; the menu offers HTML (new tab) and Markdown (download). */
+/** Report button (spec F9): PDF by default (fetched, so a 503 can be shown); the menu opens HTML in a tab and downloads Markdown. */
 function reportActions(projectId) {
-  const open = async (format) => {
+  const openHtml = () => clickAnchor({ href: reportUrl(projectId, "html"), target: "_blank", rel: "noopener" });
+  const downloadMd = () => clickAnchor({ href: reportUrl(projectId, "md"), download: `${projectId}.md` });
+  const downloadPdf = async () => {
     try {
-      const blob = await api.report(projectId, format);
-      if (format === "md") return saveBlob(blob, `${projectId}.md`);
-      const url = URL.createObjectURL(new Blob([blob], { type: format === "pdf" ? "application/pdf" : "text/html" }));
-      window.open(url, "_blank", "noopener");
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      const blob = await api.report(projectId, "pdf");
+      const url = URL.createObjectURL(blob);
+      clickAnchor({ href: url, download: `${projectId}.pdf` });
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch (e) {
-      if (e.status === 503 && e.body?.error === "pdf_unavailable") toast(t("reportPdfUnavailable"), true);
+      if (e.status === 503 && e.body?.error === "pdf_unavailable")
+        toast(t("reportPdfUnavailable"), true, { label: t("reportOpenHtml"), onClick: openHtml });
       else toastError(e);
     }
   };
   return h(
     "span.report-actions",
-    h("button.btn.small.secondary", { type: "button", on: { click: () => open("pdf") } }, t("report")),
+    h("button.btn.small.secondary", { type: "button", on: { click: downloadPdf } }, t("report")),
     menuButton(t("reportFormats"), [
-      { label: t("reportHtml"), onClick: () => open("html") },
-      { label: t("reportMd"), onClick: () => open("md") },
+      { label: t("reportHtml"), onClick: openHtml },
+      { label: t("reportMd"), onClick: downloadMd },
     ]),
   );
 }
@@ -120,8 +123,9 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
   let personNames = new Map();
   async function load() {
     try {
-      detail = await api.project(id);
-      personNames = new Map((await api.persons().catch(() => [])).map((x) => [x.id, x.name]));
+      const [d, persons] = await Promise.all([api.project(id), api.persons().catch(() => [])]);
+      detail = d;
+      personNames = new Map(persons.map((x) => [x.id, x.name]));
     } catch (e) {
       if (e.status === 404) return m.close();
       toastError(e);
