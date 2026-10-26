@@ -199,12 +199,15 @@ describe("dashboard categories (instance config)", () => {
     expect(c.PROJECT_CATEGORIES).toEqual(cfg.categories.project.map((x: { key: string }) => x.key));
     // @ts-expect-error untyped JS module
     const { LOCALE } = await import("../public/js/i18n.js");
-    expect(c.catLabel("p", "process-optimisation")).toBe(LOCALE === "de" ? "Prozessoptimierung" : "Process optimisation");
+    const first = cfg.categories.project[0];
+    expect(first.label[LOCALE]).toBeTruthy(); // raw config data
+    expect(c.catLabel("p", first.key)).toBe(first.label[LOCALE]);
     expect(c.catLabel("p", "retired-key")).toBe("retired-key");
     expect(c.catVar("p", "retired-key")).toBe("var(--cat-none)");
-    expect(c.catVar("w", "coding")).toBe("var(--cat-w-coding)");
+    const wkey = cfg.categories.workpackage[0].key;
+    expect(c.catVar("w", wkey)).toBe(`var(--cat-w-${wkey})`);
     expect(c.knownCategory("p", "retired-key")).toBeNull();
-    expect(c.knownCategory("p", "research")).toBe("research");
+    expect(c.knownCategory("p", first.key)).toBe(first.key);
   });
 });
 
@@ -225,11 +228,17 @@ describe("locales", () => {
     const en = (await import("../public/js/locales/en.js")).default;
     expect(JSON.stringify(en)).not.toMatch(/[äöüßÄÖÜ]|„/);
   });
-  it("default locale is English and instance overrides apply", async () => {
+  it("default locale is the instance locale and instance overrides apply", async () => {
     // @ts-expect-error untyped JS module
     const { LOCALE, t, mergeStrings } = await import("../public/js/i18n.js");
-    expect(LOCALE).toBe("en");
-    expect(t("navProjects")).toBe("Projects");
+    // @ts-expect-error untyped JS module
+    const cfg = (await import("../public/instance/config.js")).default;
+    const base = (await import(`../public/js/locales/${LOCALE}.js`)).default;
+    expect(LOCALE).toBe(cfg.app.locale);
+    expect(t("navProjects")).not.toBe("navProjects"); // not the raw key
+    expect(t("navProjects").trim()).not.toBe("");
+    const override = cfg.strings?.[LOCALE]?.navProjects;
+    expect(t("navProjects")).toBe(override !== undefined ? override : base.navProjects);
     expect(mergeStrings({ a: "x", n: { b: "y", c: "z" } }, { n: { b: "Y" } })).toEqual({ a: "x", n: { b: "Y", c: "z" } });
   });
 });
@@ -315,7 +324,11 @@ describe("R2 UI: schedule, baselines, gates", () => {
     expect(ui.overrideTarget(err({ code: "GATE_LOCKED", gates: [] }))).toBeNull();
     const strict = errorText(err({ code: "SCHEDULE_STRICT", issues: [issue("DEP_UNKNOWN", "w1", "zz")] }));
     expect(strict).not.toMatch(/errCode\./);
-    expect(strict).toContain("unknown");
+    // @ts-expect-error untyped JS module
+    const { t: tr } = await import("../public/js/i18n.js");
+    const depUnknown = tr("issue.DEP_UNKNOWN");
+    expect(depUnknown).not.toBe("issue.DEP_UNKNOWN"); // not the raw key
+    expect(strict).toContain(depUnknown);
     for (const code of ["SCHEDULE_CONFLICT", "DECISION_MAKER_LOCKED", "DECISION_MAKER_MISSING"]) {
       expect(errorText(err({ code })), code).not.toMatch(/errCode\.|api english/);
     }

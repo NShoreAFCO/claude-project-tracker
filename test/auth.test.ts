@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { verifyIdToken } from "../src/auth/oidc";
 import type { Env } from "../src/types";
 import { INSTANCE } from "../src/generated/instance";
+import { defaultLocale, serverT } from "../src/i18n/server";
 import { OIDC_ISS, TEAM, call, installTestKeys, serviceJwt, signJwt, userJwt } from "./helpers";
 
 beforeAll(installTestKeys);
@@ -157,10 +158,14 @@ describe("MCP client login: consent → Access OIDC redirect", () => {
     const html = await page.text();
     expect(html).toContain("&lt;b&gt;Evil&lt;/b&gt; Client"); // client name escaped
     expect(html).toContain("claude.ai");
-    // consent page: English, instance app name, no brand styling
-    expect(html).toContain('<html lang="en">');
+    // consent page: instance default locale and app name, no brand styling
+    expect(defaultLocale()).toBe(INSTANCE.policy.locales[0] ?? INSTANCE.app.locale); // what the instance config says
+    expect(html).toContain(`<html lang="${INSTANCE.policy.locales[0] ?? INSTANCE.app.locale}">`);
     expect(html).toContain(INSTANCE.app.name);
-    expect(html).toContain("Allow access?");
+    const heading = serverT(defaultLocale(), "consent.heading");
+    expect(heading).not.toBe("consent.heading"); // not the raw key
+    expect(heading.trim()).not.toBe("");
+    expect(html).toContain(heading);
     const handle = /name="handle" value="([^"]+)"/.exec(html)![1];
     const cookie = page.headers
       .getSetCookie()

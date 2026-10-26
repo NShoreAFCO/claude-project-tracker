@@ -72,10 +72,12 @@ describe("barCategory", () => {
     const kids = [wp("k1", { parent_id: "p", category: "docs" }), wp("k2", { parent_id: "p", category: "coding" })];
     expect(barCategory(parent, kids, eff(kids))).toBe("coding");
   });
-  it("tie without own category goes to the first in WP_CATEGORIES order", () => {
+  it("tie without own category goes to the first in WP_CATEGORIES order", async () => {
     const bare = wp("q");
-    const kids = [wp("k1", { parent_id: "q", category: "docs" }), wp("k2", { parent_id: "q", category: "research" })];
-    expect(barCategory(bare, kids, effectiveCategories([bare, ...kids]))).toBe("research");
+    const { INSTANCE } = await import("../src/generated/instance");
+    const [first, second] = INSTANCE.categories.workpackage.map((c) => c.key);
+    const kids = [wp("k1", { parent_id: "q", category: second }), wp("k2", { parent_id: "q", category: first })];
+    expect(barCategory(bare, kids, effectiveCategories([bare, ...kids]))).toBe(first);
   });
   it("ignores dropped children", () => {
     const kids = [
@@ -92,8 +94,11 @@ describe("barCategory", () => {
 describe("configured work category without human flag", () => {
   it("is listed and not human by default", async () => {
     const { WP_CATEGORIES } = await import("../src/data/categories");
-    expect(WP_CATEGORIES).toContain("design");
-    expect(isHuman(wp("m"), "design")).toBe(false);
+    const { INSTANCE } = await import("../src/generated/instance");
+    const key = INSTANCE.categories.workpackage.find((c) => !("human" in c && c.human))?.key;
+    expect(key).toBeDefined();
+    expect(WP_CATEGORIES).toContain(key);
+    expect(isHuman(wp("m"), key!)).toBe(false);
   });
 });
 
@@ -104,7 +109,7 @@ describe("categories from the instance", () => {
     expect([...PROJECT_CATEGORIES]).toEqual(INSTANCE.categories.project.map((c) => c.key));
     expect([...WP_CATEGORIES]).toEqual(INSTANCE.categories.workpackage.map((c) => c.key));
     expect([...HUMAN_DEFAULT]).toEqual(INSTANCE.categories.workpackage.filter((c) => c.human).map((c) => c.key));
-    expect(PROJECT_CATEGORIES).toContain("process-optimisation");
+    expect(new Set(PROJECT_CATEGORIES).size).toBe(PROJECT_CATEGORIES.length);
   });
 
   it("legacy category survives unrelated update", async () => {
@@ -121,8 +126,14 @@ describe("categories from the instance", () => {
   it("setting an unknown category is rejected", async () => {
     const { env } = await import("cloudflare:test");
     const { createProject } = await import("../src/data/projects");
+    const { INSTANCE } = await import("../src/generated/instance");
     await expect(createProject(env.DB, { id: "bad", title: "Bad", category: "retired-key" }, testCaller())).rejects.toThrow(
-      /research\|product-development\|product-launch/,
+      new RegExp(
+        INSTANCE.categories.project
+          .slice(0, 3)
+          .map((c) => c.key)
+          .join("\|"),
+      ),
     );
   });
 });

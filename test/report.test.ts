@@ -70,7 +70,7 @@ describe("report", () => {
     expect(md).toContain("Ship the **pilot**.");
     expect(md).toContain("Pilot line");
     expect(md).toContain("Gate one");
-    expect(md).toMatch(/go/i);
+    expect(md).toContain(serverT(reportLocale({ language: null }), "decision.go"));
     expect(md).toContain("Budget confirmed");
     expect(md).toContain("Supplier delay");
     expect(md).toContain("Weld defect");
