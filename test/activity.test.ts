@@ -6,6 +6,10 @@ import { upsertWorkpackage } from "../src/data/workpackages";
 import { logProgress } from "../src/data/logs";
 import { isStale, staleDaysFor, utcDayNumber } from "../src/data/activity";
 import { POLICY } from "../src/policy";
+import { appendContext } from "../src/data/context-write";
+import { setAfterScheduleReadForTesting } from "../src/data/schedule";
+import { CONTEXT_DOC_MAX_BYTES } from "../src/types";
+import { ConflictError, TooLargeError } from "../src/data/util";
 import { INSTANCE } from "../src/generated/instance";
 const db = env.DB;
 // testCaller defaults to channel "system"; activity tracking needs a real channel.
@@ -85,7 +89,49 @@ describe("activity timestamps", () => {
   });
 });
 
+describe("refused writes", () => {
+  it("refused write (version conflict) leaves project timestamps unchanged", async () => {
+    const p = await proj();
+    const wp = await upsertWorkpackage(db, p.id, { id: `act${n}-r`, title: "R" }, U);
+    await setOld(p.id);
+    // A concurrent writer bumps the version between this write's reads and its batch.
+    setAfterScheduleReadForTesting(async () => {
+      await db.prepare("UPDATE workpackage SET version = version + 1 WHERE id = ?").bind(wp.id).run();
+    });
+    try {
+      await expect(upsertWorkpackage(db, p.id, { id: wp.id, status: "doing" }, U)).rejects.toBeInstanceOf(ConflictError);
+    } finally {
+      setAfterScheduleReadForTesting(null);
+    }
+    expect(await row("project", p.id)).toEqual({ last_progress_at: OLD, last_changed_at: OLD });
+    expect(await row("workpackage", wp.id)).toEqual({ last_progress_at: OLD, last_changed_at: OLD });
+  });
+
+  it("refused context append (too large) leaves project timestamps unchanged", async () => {
+    const p = await proj();
+    await appendContext(db, { owner_kind: "project", owner_id: p.id, slug: "notes", text: "first" }, U);
+    await setOld(p.id);
+    await db
+      .prepare("UPDATE context_doc SET bytes = ? WHERE owner_id = ? AND slug = 'notes'")
+      .bind(CONTEXT_DOC_MAX_BYTES - 1, p.id)
+      .run();
+    await expect(
+      appendContext(db, { owner_kind: "project", owner_id: p.id, slug: "notes", text: "does not fit" }, U),
+    ).rejects.toBeInstanceOf(TooLargeError);
+    expect(await row("project", p.id)).toEqual({ last_progress_at: OLD, last_changed_at: OLD });
+  });
+});
+
 describe("staleness", () => {
+  it("malformed or SQLite-style timestamps never throw", () => {
+    const now = new Date("2026-10-20T00:00:00Z");
+    const base = { status: "active", created_at: "2026-10-01 08:30:00" };
+    expect(isStale({ ...base, last_progress_at: null }, 14, now)).toBe(true); // space separator accepted, UTC
+    expect(isStale({ ...base, last_progress_at: null }, 30, now)).toBe(false);
+    expect(isStale({ ...base, last_progress_at: "garbage" }, 14, now)).toBe(true); // falls back to created_at
+    expect(isStale({ status: "active", created_at: "garbage", last_progress_at: "also bad" }, 14, now)).toBe(false);
+    expect(utcDayNumber("2026-10-01 23:30:00")).toBe(utcDayNumber("2026-10-01"));
+  });
   const at = (iso: string) => new Date(iso);
   const p = { status: "active", last_progress_at: "2026-10-01T23:59:59.000Z", created_at: "2026-09-01T00:00:00.000Z" };
   it("stale flips exactly after stale_days (UTC date math)", () => {

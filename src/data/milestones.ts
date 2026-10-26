@@ -320,8 +320,8 @@ export async function upsertMilestone(
         summary: `${String(next.title)}: ${Object.keys(diff).join(", ")}`,
         diff,
       }),
+      ...touchProject(db, by, projectId, ts, false, true),
       ...linkStmts(existing.id, { version: existing.version + 1 }),
-      ...touchProject(db, by, projectId, ts),
       ...reachStmts(db, projectId, by),
       ...schedule.stmts,
     ]);

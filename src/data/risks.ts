@@ -348,7 +348,7 @@ export async function upsertRisk(
       diff,
     });
 
-    const results = await db.batch([update, event, ...touchProject(db, by, projectId, timestamp)]);
+    const results = await db.batch([update, event, ...touchProject(db, by, projectId, timestamp, false, true)]);
     const updateResult = results[0];
     if (!updateResult.meta.changes) {
       const current = await loadRiskRow(db, existing.id);

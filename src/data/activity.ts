@@ -30,11 +30,13 @@ export function utcDayNumber(s: string): number {
     return Math.floor(ms / 86_400_000);
   }
 
-  if (!/^\d{4}-\d{2}-\d{2}T/.test(s)) {
+  if (!/^\d{4}-\d{2}-\d{2}[T ]/.test(s)) {
     throw new Error("invalid date");
   }
 
-  const ms = Date.parse(s);
+  // SQLite-style "YYYY-MM-DD HH:MM:SS" (no offset) is UTC.
+  const iso = s.replace(" ", "T");
+  const ms = Date.parse(/(?:Z|[+-]\d{2}:?\d{2})$/.test(iso) ? iso : `${iso}Z`);
   if (!Number.isFinite(ms)) {
     throw new Error("invalid date");
   }
@@ -46,12 +48,18 @@ export function utcDayNumber(s: string): number {
 /** True only if p is an active item whose last progress is more than staleDays UTC calendar days before now. */
 export function isStale(p: { status: string; last_progress_at: string | null; created_at: string }, staleDays: number, now: Date): boolean {
   if (p.status !== "active") return false;
-  let referenceDay: number;
-  try {
-    referenceDay = utcDayNumber(p.last_progress_at ?? p.created_at);
-  } catch {
-    referenceDay = utcDayNumber(p.created_at);
+  let referenceDay: number | null = null;
+  for (const s of [p.last_progress_at, p.created_at]) {
+    if (s == null) continue;
+    try {
+      referenceDay = utcDayNumber(s);
+      break;
+    } catch {
+      // try the next candidate
+    }
   }
+  // Nothing parsable: not stale (never break a listing over a malformed timestamp).
+  if (referenceDay === null) return false;
   return utcDayNumber(now.toISOString()) - referenceDay > staleDays;
 }
 
@@ -89,14 +97,25 @@ export function projectActivityStmt(
   projectId: string,
   ts: string,
   progress: boolean,
+  ifChanged = false,
 ): D1PreparedStatement | null {
   if (isSystem(by)) return null;
   const a = activitySet(by, ts, progress);
-  return db.prepare(`UPDATE project SET ${a.sql.slice(2)} WHERE id = ?`).bind(...a.params, projectId);
+  // ifChanged: place directly after an eventStmtIfChanged; changes() is then 1 only if the main write applied.
+  return db
+    .prepare(`UPDATE project SET ${a.sql.slice(2)} WHERE id = ?${ifChanged ? " AND changes() > 0" : ""}`)
+    .bind(...a.params, projectId);
 }
 
 /** projectActivityStmt as a spreadable list (empty for system callers); a plain write counts as a change, not progress. */
-export function touchProject(db: D1Database, by: Caller, projectId: string, ts: string, progress = false): D1PreparedStatement[] {
-  const s = projectActivityStmt(db, by, projectId, ts, progress);
+export function touchProject(
+  db: D1Database,
+  by: Caller,
+  projectId: string,
+  ts: string,
+  progress = false,
+  ifChanged = false,
+): D1PreparedStatement[] {
+  const s = projectActivityStmt(db, by, projectId, ts, progress, ifChanged);
   return s ? [s] : [];
 }

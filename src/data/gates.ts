@@ -259,7 +259,7 @@ export async function overrideGateLock(db: D1Database, wpId: string, reason: str
         locked_by_gates: [gates.map((g) => g.milestone_id), null],
       },
     }),
-    ...touchProject(db, by, wp.project_id, ts),
+    ...touchProject(db, by, wp.project_id, ts, false, true),
   ]);
   const fresh = await db.prepare("SELECT * FROM workpackage WHERE id = ?").bind(wp.id).first<WorkpackageRow>();
   if (!res[0].meta.changes) {

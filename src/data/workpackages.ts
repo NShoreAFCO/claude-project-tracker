@@ -291,7 +291,7 @@ export async function upsertWorkpackage(
     const ts = now();
     const progressWrite = changed.includes("status") || changed.includes("progress");
     const act = activitySet(by, ts, progressWrite);
-    const projectAct = projectActivityStmt(db, by, projectId, ts, progressWrite);
+    const projectAct = projectActivityStmt(db, by, projectId, ts, progressWrite, true);
     const res = await gateGuardedBatch(
       db,
       [
