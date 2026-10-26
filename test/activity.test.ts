@@ -157,7 +157,11 @@ describe("staleness", () => {
     const saved = { cat: cat.stale_days, pol: POLICY.stale_days };
     try {
       POLICY.stale_days = 14;
-      const x = await createProject(db, { title: `Cat ${++n}`, owner: "O", status: "active", category: cat.key }, U);
+      const x = await createProject(
+        db,
+        { title: `Cat ${++n}`, owner: "O", status: "active", category: cat.key, target_date: "2099-12-31" },
+        U,
+      );
       const five = new Date(Date.now() - 5 * 86400000).toISOString();
       await db.prepare("UPDATE project SET last_progress_at = ? WHERE id = ?").bind(five, x.id).run();
       delete cat.stale_days;

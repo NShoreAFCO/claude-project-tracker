@@ -20,6 +20,7 @@ import {
   writeContext,
 } from "../data/context-write";
 import { search } from "../data/search";
+import { redactEvents } from "../data/internal";
 import { moveWorkpackages } from "../data/rules";
 import { ConflictError, ForbiddenError, ValidationError } from "../data/util";
 import { handleUpload } from "./upload";
@@ -94,15 +95,19 @@ route("GET", "/api/whoami", async ({ db, by, identity }) => ({ identity, person:
 route("GET", "/api/context/bundle", async ({ db, url }) => bundle(url, db));
 
 // ---- projects
-route("GET", "/api/projects", async ({ db, url }) =>
-  listProjects(db, {
-    status: url.searchParams.get("status") ?? undefined,
-    tag: url.searchParams.get("tag") ?? undefined,
-    owner: url.searchParams.get("owner") ?? undefined,
-  }),
+route("GET", "/api/projects", async ({ db, url, by }) =>
+  listProjects(
+    db,
+    {
+      status: url.searchParams.get("status") ?? undefined,
+      tag: url.searchParams.get("tag") ?? undefined,
+      owner: url.searchParams.get("owner") ?? undefined,
+    },
+    by,
+  ),
 );
 route("POST", "/api/projects", async ({ db, req, by }) => createProject(db, await readJson(req), by));
-route("GET", "/api/projects/:id", async ({ db, params }) => getProjectDetail(db, params[0]));
+route("GET", "/api/projects/:id", async ({ db, params, by }) => getProjectDetail(db, params[0], by));
 /** F9: read-only project report; format=md|html|pdf. Returns a ready Response (not JSON). */
 route("GET", "/api/projects/:id/report", async ({ db, env, url, params }) =>
   reportResponse(db, env, params[0], url.searchParams.get("format") ?? "html"),
@@ -249,14 +254,17 @@ route("POST", "/api/token-cost", async ({ db, req, by }) => {
 route("POST", "/api/progress", async ({ db, req, by }) => logProgress(db, (await readJson(req)) as never, by));
 
 // ---- events, inbox, search
-route("GET", "/api/events", async ({ db, url }) =>
-  listEvents(db, {
-    project_id: url.searchParams.get("project_id") ?? undefined,
-    limit: optNum(url.searchParams.get("limit")),
-    before_id: optNum(url.searchParams.get("before_id")),
-  }),
+route("GET", "/api/events", async ({ db, url, by }) =>
+  redactEvents(
+    await listEvents(db, {
+      project_id: url.searchParams.get("project_id") ?? undefined,
+      limit: optNum(url.searchParams.get("limit")),
+      before_id: optNum(url.searchParams.get("before_id")),
+    }),
+    by,
+  ),
 );
-route("GET", "/api/inbox", async ({ db }) => listInbox(db));
+route("GET", "/api/inbox", async ({ db, by }) => redactEvents(await listInbox(db), by));
 route("POST", "/api/inbox/:id/assign", async ({ db, req, by, params }) => {
   const { project_id } = await readJson(req);
   await assignInboxEvent(db, Number(params[0]), reqStr(project_id, "project_id"), by);

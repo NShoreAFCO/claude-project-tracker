@@ -132,12 +132,16 @@ export function registerTools(reg: Reg): void {
       readOnly: true,
     },
     async (args, tc) => {
-      const projects = await listProjects(tc.db, {
-        status: args.status,
-        tag: args.tag,
-        category: args.category,
-        owner: args.owner,
-      });
+      const projects = await listProjects(
+        tc.db,
+        {
+          status: args.status,
+          tag: args.tag,
+          category: args.category,
+          owner: args.owner,
+        },
+        tc.by,
+      );
 
       return projects.map((project) => ({
         id: project.id,
@@ -166,7 +170,7 @@ export function registerTools(reg: Reg): void {
       }),
       readOnly: true,
     },
-    async (args, tc) => getProjectDetail(tc.db, args.id),
+    async (args, tc) => getProjectDetail(tc.db, args.id, tc.by),
   );
 
   reg(
@@ -240,7 +244,7 @@ export function registerTools(reg: Reg): void {
     {
       title: "Update project",
       description:
-        'Update project fields. Setting status active requires an owner (set owner in the same patch if missing). Closing: status abandoned requires closure_note_md; status done requires closure_note_md and lessons_learned_md (may be "none") and no open work packages (todo|doing|blocked|waiting) — otherwise the call fails with a conflict listing them; finish or drop them, or move them to a follow-up project with move_workpackages.',
+        'Update project fields. Setting status active requires an owner (set owner in the same patch if missing), and a target_date for the project categories the instance policy names. Closing: status abandoned requires closure_note_md; status done requires closure_note_md and lessons_learned_md (may be "none") and no open work packages (todo|doing|blocked|waiting) — otherwise the call fails with a conflict listing them; finish or drop them, or move them to a follow-up project with move_workpackages.',
       inputSchema: z.object({
         id: z.string().describe("Identify the project."),
         patch: z

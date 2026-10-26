@@ -42,6 +42,7 @@ import { isAgent } from "../auth/caller";
 import { requireAction } from "../auth/permissions";
 import { POLICY } from "../policy";
 import { activitySet, isSystem, projectStale } from "./activity";
+import { omitInternal, redactEvents } from "./internal";
 import {
   ConflictError,
   LIVE,
@@ -237,14 +238,24 @@ async function personCols(db: D1Database, input: ProjectInput): Promise<Partial<
 }
 
 /**
- * Fields a project needs before it may be `active` (spec F1; F12 adds the target date for some types).
- * Returned names are API field names, so errors and warnings name what to fill in.
+ * Fields a project needs before it may be `active` (spec F1; F12 adds the target date for the project
+ * types in policy.target_date_required_categories). Returned names are API field names, so errors and
+ * warnings name what to fill in. `activating` = the write makes the project active (or creates it active):
+ * the target date rule bites only then, so legacy active projects without a date stay editable.
  */
-function missingForActive(row: Pick<ProjectRow, "owner_person_id" | "owner_text">): string[] {
+function missingForActive(
+  row: Pick<ProjectRow, "owner_person_id" | "owner_text" | "category" | "target_date">,
+  activating = true,
+): string[] {
   const missing: string[] = [];
   if (!row.owner_person_id && !row.owner_text) missing.push("owner");
+  if (activating && targetDateRequired(row.category) && !row.target_date) missing.push("target_date");
   return missing;
 }
+
+/** Spec F12: whether projects of this type need a target date before they become active. */
+export const targetDateRequired = (category: string | null | undefined): boolean =>
+  !!category && POLICY.target_date_required_categories.includes(category);
 
 /** Spec F7: manual progress needs a reason when a write switches to manual or changes the manual value. */
 export function manualReasonError(
@@ -269,8 +280,12 @@ export function manualReasonError(
     : null;
 }
 
+const MISSING_HINT: Record<string, string> = {
+  owner: "owner (a person id, an email or a name)",
+  target_date: "target_date (YYYY-MM-DD; required for this project category)",
+};
 const activeError = (missing: string[]) =>
-  new ValidationError(`status active requires ${missing.join(", ")} (a person id, an email or a name)`);
+  new ValidationError(`status active requires ${missing.map((f) => MISSING_HINT[f] ?? f).join(", ")}`);
 
 /** Test seam: runs between the open-WP pre-read and the conditional UPDATE when a project is closed as done. */
 let beforeCloseWrite: (() => Promise<void>) | null = null;
@@ -293,6 +308,8 @@ export async function getProjectRow(db: D1Database, id: string): Promise<Project
 export async function listProjects(
   db: D1Database,
   filter: { status?: string; tag?: string; category?: string; owner?: string } = {},
+  /** The reader; viewers get cards without the internal fields (spec F12). Omitted = internal read. */
+  by?: Caller,
 ): Promise<ProjectCard[]> {
   const [projects, wps, branches, docs, ms] = await db.batch([
     filter.status
@@ -365,10 +382,12 @@ export async function listProjects(
       };
     })
     .filter((c) => !tag || c.tags.some((t) => t.toLowerCase() === tag))
-    .filter((c) => !filter.category || (filter.category === "none" ? c.category === null : c.category === filter.category));
+    .filter((c) => !filter.category || (filter.category === "none" ? c.category === null : c.category === filter.category))
+    .map((c) => omitInternal(c, by));
 }
 
-export async function getProjectDetail(db: D1Database, id: string) {
+/** Full project view; `by` = the reader (viewers get it without the internal fields, spec F12). */
+export async function getProjectDetail(db: D1Database, id: string, by?: Caller) {
   const project = await getProjectRow(db, id);
   // Rows written before schedule validation (or by an older Worker) are computed once on first read.
   await ensureSchedule(db, id);
@@ -435,7 +454,7 @@ export async function getProjectDetail(db: D1Database, id: string) {
   const gateLocks = await gateLockedWpIds(db, id);
   const locked = new Set([...lockedWpIds(milestones), ...gateLocks.keys()]);
   return {
-    project: await toProjectOut(db, project, wpRows),
+    project: omitInternal(await toProjectOut(db, project, wpRows), by),
     progress: computeProjectProgress(project, wpRows),
     workpackages: buildWpTree(
       (await withPersonOuts(db, project, wpRows)).map((w) => ({
@@ -453,7 +472,7 @@ export async function getProjectDetail(db: D1Database, id: string) {
     risk_summary,
     score_history_count: (scoreCount.results[0] as { n: number }).n,
     token_cost: { ...totals, entries: costEntries.results as TokenCostRow[] },
-    events: events.results as EventOut[],
+    events: redactEvents(events.results as EventOut[], by),
     context_index: ctx.results as Array<Omit<ContextDocRow, "content_md" | "project_id" | "filename" | "created_at" | "created_by">>,
   };
 }
@@ -575,9 +594,9 @@ export async function updateProject(
   // legacy ownerless active project stay possible.
   const reasonErr = manualReasonError(current, next as unknown as ProjectRow);
   if (reasonErr) throw new ValidationError(reasonErr);
-  const missing = missingForActive(next as unknown as ProjectRow);
-  if (missing.length && next.status === "active" && (current.status !== "active" || "owner_person_id" in people))
-    throw activeError(missing);
+  const activating = next.status === "active" && current.status !== "active";
+  const missing = missingForActive(next as unknown as ProjectRow, activating);
+  if (missing.length && next.status === "active" && (activating || "owner_person_id" in people)) throw activeError(missing);
   // F3 closure: checked on the merged values when the project becomes done/abandoned, or when a closed
   // project's closure fields are edited.
   const status = String(next.status);
