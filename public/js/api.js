@@ -80,6 +80,19 @@ export const api = {
   updateRisk: (id, body, expected_version) => request("PATCH", `/api/risks/${encodeURIComponent(id)}`, { ...body, expected_version }),
   deleteRisk: (id) => request("DELETE", `/api/risks/${encodeURIComponent(id)}`),
 
+  portfolioSummary: () => request("GET", "/api/portfolio/summary"),
+  upcomingWps: (params = {}) => request("GET", `/api/workpackages/upcoming${q(params)}`),
+  myWps: (params = {}) => request("GET", `/api/workpackages/mine${q(params)}`),
+  /** Raw report fetch (pdf: a Blob; md/html: text). Throws ApiError, e.g. 503 pdf_unavailable. */
+  report: async (id, format) => {
+    const res = await fetch(`/api/projects/${encodeURIComponent(id)}/report?format=${format}`, { credentials: "same-origin" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new ApiError(res.status, body || { message: `HTTP ${res.status}` });
+    }
+    return res.blob();
+  },
+
   linkBranch: (body) => request("POST", "/api/branches", body),
   deleteBranch: (id) => request("DELETE", `/api/branches/${encodeURIComponent(id)}`),
   setScores: (project_id, scores) => request("POST", "/api/scores", { project_id, scores }),

@@ -5,6 +5,7 @@ import { api } from "./api.js";
 import { h, clear, toastError } from "./dom.js";
 import { renderGrid } from "./grid.js";
 import { renderGantt } from "./gantt.js";
+import { renderUpcoming, renderMyWps, loadSummary } from "./portfolio.js";
 import { renderInbox } from "./inbox.js";
 import { openProject } from "./project.js";
 import { renderPeople } from "./people.js";
@@ -22,12 +23,20 @@ nav.setAttribute("aria-label", t("navMain"));
 const searchForm = document.getElementById("search");
 
 /** Shared state: the project list (cards) is reused by forms, inbox and gantt. */
-export const state = { projects: [], persons: [], filter: { status: "", tag: "", category: "", owner: "" }, inboxCount: 0, view: "grid" };
+export const state = {
+  projects: [],
+  summary: null,
+  persons: [],
+  filter: { status: "", tag: "", category: "", owner: "" },
+  inboxCount: 0,
+  view: "grid",
+};
 
 export async function loadProjects() {
   // persons are only needed for owner names on cards; a failure must not block the grid
-  const [projects, persons] = await Promise.all([api.projects(), api.persons().catch(() => state.persons)]);
+  const [projects, persons, summary] = await Promise.all([api.projects(), api.persons().catch(() => state.persons), loadSummary()]);
   state.projects = projects;
+  state.summary = summary;
   state.persons = persons;
   return state.projects;
 }
@@ -58,6 +67,8 @@ function renderNav() {
     nav,
     link("grid", "#/", t("navProjects")),
     link("gantt", "#/gantt", t("navGantt")),
+    link("upcoming", "#/upcoming", t("navUpcoming")),
+    link("mine", "#/mine", t("navMine")),
     link("people", "#/people", t("navPeople")),
     link("trash", "#/trash", t("navTrash")),
     link(
@@ -116,11 +127,13 @@ function parseHash() {
 
 async function renderView() {
   const { parts, params } = parseHash();
-  const view = ["gantt", "inbox", "search", "people", "trash"].includes(parts[0]) ? parts[0] : "grid";
+  const view = ["gantt", "inbox", "search", "people", "trash", "upcoming", "mine"].includes(parts[0]) ? parts[0] : "grid";
   state.view = view;
   renderNav();
   if (view === "people") await renderPeople(main, state);
   else if (view === "trash") await renderTrash(main, state);
+  else if (view === "upcoming") await renderUpcoming(main, state);
+  else if (view === "mine") await renderMyWps(main, state);
   else if (view === "gantt") await renderGantt(main, state);
   else if (view === "inbox") await renderInbox(main, state);
   else if (view === "search") await renderSearchResults(params.get("q") || "");

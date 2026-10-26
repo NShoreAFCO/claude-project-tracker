@@ -3,7 +3,7 @@ import { t, fmtDate, fmtDateTime, fmtNum, fmtPct, STRINGS } from "./i18n.js";
 import { renderRisks } from "./risks.js";
 import { basisLabel, riskChip, staleChip, lastActivity } from "./progress-view.js";
 import { api } from "./api.js";
-import { h, clear, openModal, statusChip, progressBar, copyText, toastError, menuButton, personBadge, ageDays } from "./dom.js";
+import { h, clear, openModal, statusChip, progressBar, copyText, toast, toastError, menuButton, personBadge, ageDays } from "./dom.js";
 import { closureDialog } from "./closure.js";
 import { renderMarkdown } from "./markdown.js";
 import { catChip } from "./categories.js";
@@ -33,6 +33,41 @@ export function mdBlock(src) {
 }
 
 const block = (title, actions, ...content) => h("section.block", h("header", h("h3", title), actions || null), ...content);
+
+/** Download a Blob under a file name. */
+function saveBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = h("a", { href: url, download: name });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+/** Report button (spec F9): PDF by default; the menu offers HTML (new tab) and Markdown (download). */
+function reportActions(projectId) {
+  const open = async (format) => {
+    try {
+      const blob = await api.report(projectId, format);
+      if (format === "md") return saveBlob(blob, `${projectId}.md`);
+      const url = URL.createObjectURL(new Blob([blob], { type: format === "pdf" ? "application/pdf" : "text/html" }));
+      window.open(url, "_blank", "noopener");
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e) {
+      if (e.status === 503 && e.body?.error === "pdf_unavailable") toast(t("reportPdfUnavailable"), true);
+      else toastError(e);
+    }
+  };
+  return h(
+    "span.report-actions",
+    h("button.btn.small.secondary", { type: "button", on: { click: () => open("pdf") } }, t("report")),
+    menuButton(t("reportFormats"), [
+      { label: t("reportHtml"), onClick: () => open("html") },
+      { label: t("reportMd"), onClick: () => open("md") },
+    ]),
+  );
+}
+
 const smallBtn = (label, onClick, cls = "ghost") => h(`button.btn.small.${cls}`, { type: "button", on: { click: onClick } }, label);
 
 export async function openProject(id, { tab = "overview", owner = null, openDoc = null } = {}) {
@@ -82,9 +117,11 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
     );
   };
 
+  let personNames = new Map();
   async function load() {
     try {
       detail = await api.project(id);
+      personNames = new Map((await api.persons().catch(() => [])).map((x) => [x.id, x.name]));
     } catch (e) {
       if (e.status === 404) return m.close();
       toastError(e);
@@ -137,6 +174,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
           ? null
           : smallBtn(t("closeProject"), () => closureDialog({ project: p, workpackages: detail.workpackages }), "secondary"),
         h("a.btn.small.secondary", { href: `#/gantt?project=${encodeURIComponent(p.id)}` }, t("cardGantt")),
+        reportActions(p.id),
         smallBtn(t("logProgress"), () => logProgressForm(p.id, detail.workpackages), "secondary"),
         smallBtn(t("edit"), () => projectForm(p, { workpackages: detail.workpackages }), ""),
       );
@@ -254,6 +292,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
           w.locked ? h("span.badge.locked", { title: t("lockedBy", { name }) }, "🔒 ", t("locked")) : null,
           issueBadge(w, titleOf),
           w.critical ? h("span.badge.critical", t("criticalMark")) : null,
+          verifyBadge(w),
           !leaf ? h("span.meta", t("subCount", { n: w.children.length })) : null,
           ctxBadge("workpackage", w.id),
           dates,
@@ -284,6 +323,34 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
             w.children.filter((c) => !shown || shown.has(c.id)).map((c) => wpNode(c, shown)),
           )
         : null,
+    );
+  }
+
+  /** Verified (person + date) or done-but-unverified (legacy rows, verification required). */
+  function verifyBadge(w) {
+    if (w.verified_by && w.verified_at) {
+      const tip = t("verifiedTip", {
+        name: personNames.get(w.verified_by) || w.verified_by,
+        date: fmtDate(String(w.verified_at).slice(0, 10)),
+      });
+      return h("span.badge.verified", { title: tip, "aria-label": tip }, "✔");
+    }
+    if (w.status === "done" && w.verification && w.verification !== "none")
+      return h("span.badge.unverified", { title: t("unverifiedTip"), "aria-label": t("unverifiedTip") }, "⚠");
+    return null;
+  }
+
+  function objectivesBlock(p) {
+    const parts = [
+      ["fObjectives", p.objectives_md],
+      ["fScopeIn", p.scope_in_md],
+      ["fScopeOut", p.scope_out_md],
+      ["fSuccess", p.success_criteria_md],
+    ].filter(([, v]) => v);
+    return h(
+      "details.block.objectives",
+      h("summary", h("h3", t("objectivesScope"))),
+      parts.length ? parts.map(([k, v]) => [h("h4", t(k)), mdBlock(v)]) : h("p.empty", t("objectivesEmpty")),
     );
   }
 
@@ -467,6 +534,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
             ),
           )
         : null,
+      objectivesBlock(p),
       closureBlocks,
       copies,
       block(

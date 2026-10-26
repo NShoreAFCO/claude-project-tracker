@@ -1493,3 +1493,63 @@ tr.closed td {
 .slider input[type="range"]:disabled {
   cursor: default;
 }
+
+/* ---- portfolio (R4.4): summary bar, upcoming / my work packages, report, verification */
+.summary-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+button.kpi {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  padding: 0.5rem 0.7rem;
+  text-align: left;
+  background: var(--color-surface, transparent);
+  color: var(--color-text-strong);
+  border: 1px solid var(--color-border, currentColor);
+  border-radius: 6px;
+  cursor: pointer;
+}
+button.kpi .kpi-count {
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+button.kpi .kpi-label {
+  font-size: 0.8rem;
+}
+button.kpi.zero {
+  border-style: dashed;
+}
+button.kpi.active,
+button.kpi[aria-pressed="true"] {
+  background: var(--color-tint);
+  border-width: 2px;
+}
+tr.overdue td:nth-child(4),
+tr.overdue td:nth-child(5) {
+  font-weight: 700;
+}
+.report-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+details.objectives > summary {
+  cursor: pointer;
+}
+details.objectives > summary h3 {
+  display: inline;
+}
+.badge.verified {
+  border-color: var(--ms-done);
+  border-left-width: 4px;
+}
+.badge.unverified {
+  border-color: var(--status-blocked);
+  border-left-width: 4px;
+}
