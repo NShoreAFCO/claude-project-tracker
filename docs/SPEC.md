@@ -186,7 +186,7 @@ CREATE INDEX ctx_owner ON context_doc(owner_kind, owner_id);
 
 ## 5. MCP tools
 
-R1 adds owner, closure and trash fields and tools (§15–§17); the 23-tool total is counted there. R2 adds `create_baseline` (§18) and `record_gate_decision` (§19), 25 tools.
+R1 adds owner, closure and trash fields and tools (§15–§17); the 23-tool total is counted there. R2 adds `create_baseline` (§18) and `record_gate_decision` (§19), 25 tools. R3 adds `upsert_risk` and `list_risks` (§21), 27 tools.
 
 zod schemas, short imperative descriptions, compact JSON output.
 
@@ -411,3 +411,16 @@ Optional. It runs only when both `AUDIT_REPO` and `AUDIT_GITHUB_TOKEN` are set. 
 - **Input checks.** A new write with an unknown (or own) id in `depends_on` is refused (`400`), as is one that makes `depends_on` cyclic. Stored values are never checked.
 - **Strict projects.** `update_project` / `PATCH /api/projects/:id` take `schedule_strict` (true | false | null). In a strict project a write that adds an issue is refused with `409` `SCHEDULE_STRICT` (`current.issues` lists the added ones); issues that already exist never block an unrelated edit. Two schedule writes racing on one project: the loser gets `409` `SCHEDULE_CONFLICT`; reload and retry.
 - **409 codes** (R2): `SCHEDULE_STRICT`, `SCHEDULE_CONFLICT`, `GATE_LOCKED`, `GATE_NOT_LOCKED`, `DECISION_MAKER_MISSING`, `DECISION_MAKER_REQUIRED`, `DECISION_MAKER_LOCKED`, `DECISION_CONFLICT` (§19), plus `PROJECT_CLOSED` for decisions on closed projects. The code is in `current.code` of the error body.
+
+## 21. R3 additions: risks, progress transparency, activity
+
+- **Migration `0005_r3_risk_progress_activity.sql`** (additive only): table `risk`, `workpackage.effort_planned_pd` / `effort_actual_pd`, `project.progress_manual_reason`, and `last_progress_at` / `last_changed_at` on project and work package (backfilled from `updated_at`). The previous Worker version keeps running on it.
+- **Risk log.** One table for `type` `risk | issue | opportunity | nc` (nonconformity). `probability` and `impact` are 1–5; `score` = probability × impact (1–25) is derived and stored. Further fields: owner (person or text), `response` (`avoid | reduce | transfer | accept | exploit`), `action`, `due_date`, `status` (`open | monitoring | closed`), optional `workpackage_id` and `milestone_id`. The `nc_*` fields (`nc_detected_in_wp`, `nc_cause`, `nc_correction`, `nc_corrective_action`, `nc_effectiveness_check_date`) belong to type `nc` only: other types get `400`, and changing the type away from `nc` clears them. Optimistic locking with `expected_version` as for work packages.
+- **Open risks.** "Open" means not closed and not an opportunity. A risk is a trash child of its project: it is trashed, restored and purged with it (§17); `delete_entity` and `restore_entity` take kind `risk`.
+- **Derived risk criterion.** While a project has open risks, its `risk` score is derived: `round((max_open_score − 1) / 24 × 10)`, returned with `derived: true`. Without open risks the manually set score applies. Cards and `list_projects` add `risk_summary` `{open, max_score, high_without_action}`; open risks scored 15 or more without an `action` are a portfolio warning. The context bundle has an "Open risks" section.
+- **Interfaces.** MCP `upsert_risk(project_id, id?, …)` and `list_risks(project_id?, status?, type?)` (highest score first), 27 tools in total. REST `GET /api/risks?project_id=&status=&type=`, `POST /api/risks`, `PATCH /api/risks/:id` (body `project_id`, `expected_version?`), `DELETE /api/risks/:id` (to the trash).
+- **Progress basis.** Projects add `progress_basis` `{mode, done, total, weighted_percent, reason}`; `done` and `total` count live, non-dropped leaf WPs, `weighted_percent` is the derived value, `reason` the manual reason. Switching to `manual`, or changing the manual value, needs `progress_manual_reason` (`400` otherwise; a stored reason counts). Legacy manual projects without a reason stay editable.
+- **Effort.** Work packages take `effort_planned_pd` and `effort_actual_pd` (person-days); `log_progress` takes `effort_pd`, which is added to the actual effort. `weight` is read as person-days.
+- **Activity.** `last_progress_at` is set by progress-type writes (`log_progress`, status or progress changes, effort logs, gate decisions), `last_changed_at` by any write. Refused writes and system-channel writes change neither.
+- **Staleness.** `stale` is true for an active project whose last progress is more than `stale_days` UTC calendar days ago (`policy.stale_days`; a project type may override it in the instance categories). Project detail and cards carry `last_progress_at`, `last_changed_at` and `stale`.
+- **Breaking.** The card field `last_activity` is now `last_progress_at` (falling back to `created_at`); it was the latest event.
