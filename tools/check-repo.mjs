@@ -41,12 +41,42 @@ check("migrations numbered contiguously from 0001", migProblems.length === 0, mi
 
 // ---- theme contract (docs/THEMING.md): app.css uses tokens only; the instance theme defines them all
 const CONTRACT = [
-  "color-primary", "color-primary-strong", "color-on-primary", "color-accent", "color-accent-strong",
-  "color-surface", "color-tint", "color-border", "color-text", "color-text-strong", "color-text-muted",
-  "color-link", "color-danger",
-  "status-active", "status-doing", "status-idea", "status-hold", "status-done", "status-dropped", "status-blocked", "status-waiting",
-  "font", "font-heading", "font-size-base", "weight-heading", "heading-transform", "button-transform",
-  "button-letter-spacing", "radius", "header-rule",
+  "color-primary",
+  "color-primary-strong",
+  "color-on-primary",
+  "color-accent",
+  "color-accent-strong",
+  "color-surface",
+  "color-tint",
+  "color-border",
+  "color-text",
+  "color-text-strong",
+  "color-text-muted",
+  "color-link",
+  "color-danger",
+  "status-active",
+  "status-doing",
+  "status-idea",
+  "status-hold",
+  "status-done",
+  "status-dropped",
+  "status-blocked",
+  "status-waiting",
+  "risk-low",
+  "risk-medium",
+  "risk-high",
+  "risk-critical",
+  "risk-nc",
+  "risk-opportunity",
+  "font",
+  "font-heading",
+  "font-size-base",
+  "weight-heading",
+  "heading-transform",
+  "button-transform",
+  "button-letter-spacing",
+  "radius",
+  "header-rule",
 ];
 const css = read("public/app.css");
 const { dir: instDir, config: inst } = loadInstance(".");
@@ -91,12 +121,30 @@ const pairCheck = (name, pairs) => {
   check(name, weak.length === 0, weak.join("; "));
 };
 const TEXT = ["color-text", "color-text-strong", "color-text-muted", "color-link", "color-primary-strong", "color-danger"];
-pairCheck("text tokens ≥ 7:1 on surface", TEXT.map((t) => [t, "color-surface", 7]));
-pairCheck("text tokens ≥ 7:1 on tint", ["color-text", "color-text-strong", "color-primary-strong"].map((t) => [t, "color-tint", 7]));
-pairCheck("on-primary ≥ 7:1 on its fills", ["color-primary", "color-primary-strong", "color-danger", "color-text-strong"].map((b) => ["color-on-primary", b, 7]));
-pairCheck("status marks ≥ 3:1 on surface", CONTRACT.filter((k) => k.startsWith("status-")).map((k) => [k, "color-surface", 3]));
+pairCheck(
+  "text tokens ≥ 7:1 on surface",
+  TEXT.map((t) => [t, "color-surface", 7]),
+);
+pairCheck(
+  "text tokens ≥ 7:1 on tint",
+  ["color-text", "color-text-strong", "color-primary-strong"].map((t) => [t, "color-tint", 7]),
+);
+pairCheck(
+  "on-primary ≥ 7:1 on its fills",
+  ["color-primary", "color-primary-strong", "color-danger", "color-text-strong"].map((b) => ["color-on-primary", b, 7]),
+);
+pairCheck(
+  "status marks ≥ 3:1 on surface",
+  CONTRACT.filter((k) => k.startsWith("status-")).map((k) => [k, "color-surface", 3]),
+);
+pairCheck(
+  "risk fills carry text-strong ≥ 7:1",
+  CONTRACT.filter((k) => k.startsWith("risk-")).map((k) => ["color-text-strong", k, 7]),
+);
 const surface = hexOf("color-surface");
-const weakCat = [...inst.categories.project, ...inst.categories.workpackage].filter((c) => surface && contrast(c.color.toLowerCase(), surface) < 3);
+const weakCat = [...inst.categories.project, ...inst.categories.workpackage].filter(
+  (c) => surface && contrast(c.color.toLowerCase(), surface) < 3,
+);
 check("category colours ≥ 3:1 on surface", weakCat.length === 0, weakCat.map((c) => `${c.key} ${c.color}`).join(", "));
 const catTextUse = [...css.matchAll(/(?:^|[\s;{])color:\s*var\(--cat-/g)].length;
 check("category colours never used for text", catTextUse === 0, `${catTextUse} color: var(--cat-*) declarations`);
@@ -125,7 +173,8 @@ if (inst.checks?.denylist !== false) {
     } catch {
       continue;
     }
-    for (const m of s.matchAll(EMAIL)) if (!ALLOWED_EMAIL.test(m[0]) && m[0] !== "git@github.com" && !/@\d/.test(m[0])) badMail.push(`${f}: ${m[0]}`);
+    for (const m of s.matchAll(EMAIL))
+      if (!ALLOWED_EMAIL.test(m[0]) && m[0] !== "git@github.com" && !/@\d/.test(m[0])) badMail.push(`${f}: ${m[0]}`);
   }
   check("emails are example/noreply only", badMail.length === 0, [...new Set(badMail)].slice(0, 10).join(", "));
 }
@@ -133,7 +182,9 @@ if (inst.upstream) check("instance/ is not tracked in the upstream repo", !track
 for (const f of [".gitignore", ".claudeignore"]) check(`${f} lists secrets/`, read(f).split("\n").includes("secrets/"));
 
 // dashboard formats dates and numbers only through i18n.js (locale from the instance config)
-const hardLocale = tracked.filter((f) => /^public\/js\/.*\.js$/.test(f) && f !== "public/js/i18n.js" && /Intl\.[A-Za-z]+\(\s*["']/.test(read(f)));
+const hardLocale = tracked.filter(
+  (f) => /^public\/js\/.*\.js$/.test(f) && f !== "public/js/i18n.js" && /Intl\.[A-Za-z]+\(\s*["']/.test(read(f)),
+);
 check("no hard-coded Intl locale outside i18n.js", hardLocale.length === 0, hardLocale.join(", "));
 
 // every `npm run <x>` named in the docs exists in package.json

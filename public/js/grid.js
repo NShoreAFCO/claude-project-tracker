@@ -3,6 +3,7 @@ import { t, fmtDate, fmtDateTime, STRINGS } from "./i18n.js";
 import { h, clear, statusChip, progressBar, personBadge, ageDays } from "./dom.js";
 import { openProject } from "./project.js";
 import { projectForm } from "./forms.js";
+import { basisLabel, riskChip, staleChip } from "./progress-view.js";
 import { PROJECT_CATEGORIES, catVar, catDot, catLabel, knownCategory } from "./categories.js";
 
 const PROJECT_STATUSES = ["idea", "active", "on_hold", "done", "abandoned"];
@@ -16,7 +17,9 @@ function flagChips(p) {
   }
   if (p.waiting_count) chips.push(h("span.chip.flag-waiting", t("chipWaiting", { n: p.waiting_count })));
   if (p.closure_due) chips.push(h("span.chip.flag-closure", { title: t("closureDueHint") }, t("closureDue")));
-  return chips.length ? h("div.flags", chips) : null;
+  chips.push(riskChip(p.risk_summary), staleChip(p.stale));
+  const shown = chips.filter(Boolean);
+  return shown.length ? h("div.flags", shown) : null;
 }
 
 function card(p, persons) {
@@ -41,6 +44,7 @@ function card(p, persons) {
     flagChips(p),
     p.summary ? h("p.summary", p.summary) : null,
     progressBar(p.progress),
+    h("div.meta", basisLabel(p.progress_basis)),
     h(
       "div.meta",
       h("span", t("target"), ": ", h("b", fmtDate(p.target_date))),

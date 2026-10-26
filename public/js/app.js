@@ -139,7 +139,7 @@ async function route() {
         renderGrid(main, state);
       }
       document.querySelectorAll("dialog[open]").forEach((d) => d.close());
-      openProject(parts[1], { tab: parts[2] === "kontext" ? "context" : "overview" });
+      openProject(parts[1], { tab: parts[2] === "kontext" ? "context" : parts[2] === "risks" ? "risks" : "overview" });
       return;
     }
     // navigating to a base view closes any open popup (project, forms, dialogs)

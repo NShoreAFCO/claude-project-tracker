@@ -27,6 +27,12 @@
   --status-dropped: #6f7a84;
   --status-blocked: #a4262c;       /* red "Blocked" chip on project cards */
   --status-waiting: #b45f06;       /* amber "Waiting" chip on project cards */
+  --risk-low: #a8dbb5;             /* risk bands (heat map cells, score chips): fills, --color-text-strong on them >= 7:1 */
+  --risk-medium: #f2dc8c;
+  --risk-high: #f5a96b;
+  --risk-critical: #ef8f8f;
+  --risk-nc: #c7b6e8;              /* nonconformity type chip */
+  --risk-opportunity: #9cd0ec;     /* opportunity type chip */
 
   /* type and shape */
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;

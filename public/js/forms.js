@@ -135,7 +135,24 @@ export async function projectForm(existing, { workpackages = [] } = {}) {
         ],
         value: p.progress_mode || "derived",
       },
-      { name: "progress_manual", label: t("fProgressManualValue"), type: "number", min: 0, max: 100, step: 1, value: p.progress_manual },
+      {
+        name: "progress_manual",
+        label: t("fProgressManualValue"),
+        type: "number",
+        min: 0,
+        max: 100,
+        step: 1,
+        value: p.progress_manual,
+        showWhen: { field: "progress_mode", values: ["manual"] },
+      },
+      {
+        name: "progress_manual_reason",
+        label: t("fProgressReason"),
+        value: p.progress_manual_reason,
+        full: true,
+        hint: t("fProgressReasonHint"),
+        showWhen: { field: "progress_mode", values: ["manual"] },
+      },
       { name: "tags", label: t("fTags"), value: (p.tags || []).join(", "), full: true },
     ],
     onSubmit: async (v) => {
@@ -241,6 +258,8 @@ export async function wpForm(projectId, existing, tree, parentId = null, milesto
       },
       { name: "progress", label: t("fProgress"), type: "range", min: 0, max: 100, step: 5, value: w.progress ?? 0 },
       { name: "weight", label: t("fWeight"), type: "number", min: 0, step: 0.5, value: w.weight ?? 1 },
+      { name: "effort_planned_pd", label: t("fEffortPlanned"), type: "number", min: 0, step: 0.5, value: w.effort_planned_pd },
+      { name: "effort_actual_pd", label: t("fEffortActual"), type: "number", min: 0, step: 0.5, value: w.effort_actual_pd },
       { name: "start_date", label: t("fStart"), type: "date", value: w.start_date },
       { name: "end_date", label: t("fEnd"), type: "date", value: w.end_date },
       { name: "sort", label: t("fSort"), type: "number", step: 1, value: w.sort ?? 0 },
@@ -332,6 +351,122 @@ export async function saveWpProgress(projectId, wp, progress) {
   changed(projectId);
 }
 
+/** "Adjust progress" of a leaf work package: the slider is read-only in the row, changes go through this dialog. */
+export function adjustProgressDialog(projectId, wp) {
+  return formDialog({
+    title: t("adjustProgressTitle", { name: wp.title }),
+    narrow: true,
+    intro: h("p.meta", t("adjustProgressHint")),
+    fields: [{ name: "progress", label: t("fProgress"), type: "range", min: 0, max: 100, step: 5, value: wp.progress ?? 0 }],
+    onSubmit: async (v) => {
+      const res = await guardedWrite(
+        wp,
+        () =>
+          saveWithConflict((ver) => api.updateWp(wp.id, { project_id: projectId, progress: v.progress }, ver), wp.version, conflictSummary),
+        projectId,
+      );
+      if (res?.cancelled) return undefined;
+      if (!res?.reload) toast(t("progressSaved"));
+      changed(projectId);
+      return res || { ok: true };
+    },
+  });
+}
+
+/** Project-level progress: derived from the work packages, or set by hand with a reason (spec F7). */
+export function adjustProjectProgressForm(project) {
+  return formDialog({
+    title: t("adjustProgressTitle", { name: project.title }),
+    narrow: true,
+    intro: h("p.meta", t("adjustProjectProgressHint")),
+    fields: [
+      {
+        name: "progress_mode",
+        label: t("fProgressMode"),
+        type: "select",
+        options: [
+          ["derived", t("fProgressDerived")],
+          ["manual", t("fProgressManual")],
+        ],
+        value: project.progress_mode || "derived",
+      },
+      {
+        name: "progress_manual",
+        label: t("fProgressManualValue"),
+        type: "number",
+        min: 0,
+        max: 100,
+        step: 1,
+        value: project.progress_manual,
+        showWhen: { field: "progress_mode", values: ["manual"] },
+      },
+      {
+        name: "progress_manual_reason",
+        label: t("fProgressReason"),
+        value: project.progress_manual_reason,
+        full: true,
+        required: true,
+        hint: t("fProgressReasonHint"),
+        showWhen: { field: "progress_mode", values: ["manual"] },
+      },
+    ],
+    onSubmit: async (v) => {
+      const res = await saveWithConflict((ver) => api.updateProject(project.id, v, ver), project.version, conflictSummary);
+      if (res?.cancelled) return undefined;
+      if (!res?.reload) toast(t("saved"));
+      changed(project.id);
+      return res || { ok: true };
+    },
+  });
+}
+
+/**
+ * "Mark complete" for a work package at 100 %: sets Done. With a verification other than none it asks who verified
+ * (default: you); the server records verified_by. Full verification handling follows with R4.4.
+ */
+export async function markCompleteDialog(projectId, wp) {
+  const needsVerifier = wp.verification && wp.verification !== "none";
+  let persons = [];
+  let me = null;
+  if (needsVerifier) {
+    try {
+      [persons, me] = await Promise.all([personOptions(), getMe()]);
+    } catch (e) {
+      toastError(e);
+    }
+  }
+  return formDialog({
+    title: t("markCompleteTitle", { name: wp.title }),
+    narrow: true,
+    submitLabel: t("markComplete"),
+    intro: h("p.meta", needsVerifier ? t("markCompleteVerify", { how: t(`verification.${wp.verification}`) }) : t("markCompleteHint")),
+    fields: needsVerifier
+      ? [
+          {
+            name: "verified_by",
+            label: t("fVerifiedBy"),
+            type: "select",
+            required: true,
+            options: persons,
+            value: me?.id ?? wp.verified_by ?? "",
+          },
+        ]
+      : [],
+    onSubmit: async (v) => {
+      const body = { project_id: projectId, status: "done", progress: 100, ...(needsVerifier ? { verified_by: v.verified_by } : {}) };
+      const res = await guardedWrite(
+        wp,
+        () => saveWithConflict((ver) => api.updateWp(wp.id, body, ver), wp.version, conflictSummary),
+        projectId,
+      );
+      if (res?.cancelled) return undefined;
+      if (!res?.reload) toast(t("saved"));
+      changed(projectId);
+      return res || { ok: true };
+    },
+  });
+}
+
 /** Link (upsert by repo + name) a branch, fork or worktree. */
 export function branchForm(projectId, existing, tree) {
   const b = existing || {};
@@ -366,17 +501,33 @@ export function branchForm(projectId, existing, tree) {
   });
 }
 
-/** Append a full scorecard (all default criteria, 0–10). */
+/** Append a full scorecard (all default criteria, 0–10). The risk score is derived while open risks exist. */
 export function scoresForm(projectId, current) {
   const cur = Object.fromEntries((current || []).map((s) => [s.criterion, s]));
+  const derived = (c) => !!cur[c]?.derived;
   return formDialog({
     title: t("formScores"),
+    intro: h("p.meta", t("scoreScaleHelp")),
     fields: CRITERIA.flatMap((c) => [
-      { name: c, label: t(`criteria.${c}`), type: "number", min: 0, max: 10, step: 0.5, value: cur[c]?.value },
-      { name: `${c}__note`, label: `${t(`criteria.${c}`)} – ${t("fNote")}`, value: cur[c]?.note },
+      {
+        name: c,
+        label: t(`criteria.${c}`),
+        type: "number",
+        min: 0,
+        max: 10,
+        step: 0.5,
+        value: cur[c]?.value,
+        disabled: derived(c),
+        hint: derived(c) ? t("scoreDerivedHint") : t(`scoreScale.${c}`),
+      },
+      { name: `${c}__note`, label: `${t(`criteria.${c}`)} – ${t("fNote")}`, value: derived(c) ? null : cur[c]?.note, disabled: derived(c) },
     ]),
     onSubmit: async (v) => {
-      const scores = CRITERIA.filter((c) => v[c] !== null).map((c) => ({ criterion: c, value: v[c], note: v[`${c}__note`] }));
+      const scores = CRITERIA.filter((c) => !derived(c) && v[c] !== null).map((c) => ({
+        criterion: c,
+        value: v[c],
+        note: v[`${c}__note`],
+      }));
       if (!scores.length) return null;
       const res = await api.setScores(projectId, scores);
       toast(t("saved"));
@@ -434,11 +585,12 @@ const DELETE_CALL = {
   branch: (id) => api.deleteBranch(id),
   context_doc: (id) => api.contextDelete(id),
   person: (id) => api.deletePerson(id),
+  risk: (id) => api.deleteRisk(id),
 };
 
 /**
  * Ask what the delete would take along, confirm naming the children, then delete.
- * kind: project | workpackage | milestone | branch | context_doc | person. Everything but a branch moves to the trash.
+ * kind: project | workpackage | milestone | branch | context_doc | person | risk. Everything but a branch moves to the trash.
  */
 export async function deleteEntity(kind, id, name, projectId) {
   let children = null;
