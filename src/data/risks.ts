@@ -217,19 +217,33 @@ async function loadRiskRow(db: D1Database, id: string): Promise<RiskRow | null> 
 async function riskOut(db: D1Database, rowOrId: RiskRow | string): Promise<RiskOut> {
   const row = typeof rowOrId === "string" ? await loadRiskRow(db, rowOrId) : rowOrId;
   if (!row) throw new NotFoundError(`risk ${String(rowOrId)} not found`);
-  const ids = row.owner_person_id ? [row.owner_person_id] : [];
-  const people = await personOuts(db, ids);
-  return {
-    ...row,
-    owner: personRefOut(row.owner_person_id, row.owner_text, people),
-  };
+  return (await risksOut(db, [row]))[0];
 }
 
+/** Ids among `ids` that are live rows of `table` (trashed ones left out). */
+async function liveIds(db: D1Database, table: "workpackage" | "milestone", ids: string[]): Promise<Set<string>> {
+  if (!ids.length) return new Set();
+  const { results } = await db
+    .prepare(`SELECT id FROM ${table} WHERE id IN (SELECT value FROM json_each(?)) AND ${LIVE()}`)
+    .bind(JSON.stringify(ids))
+    .all<{ id: string }>();
+  return new Set(results.map((r) => r.id));
+}
+
+/**
+ * Client shape: owner chip, and a link to a WP or milestone in the trash reads as absent (null). The stored
+ * link is kept, so restoring the WP or milestone brings it back (spec F10).
+ */
 async function risksOut(db: D1Database, rows: RiskRow[]): Promise<RiskOut[]> {
   const ids = Array.from(new Set(rows.map((row) => row.owner_person_id).filter((id): id is string => id !== null)));
   const people = await personOuts(db, ids);
+  const linked = (k: "workpackage_id" | "milestone_id") => [...new Set(rows.map((r) => r[k]).filter((id): id is string => !!id))];
+  const wps = await liveIds(db, "workpackage", linked("workpackage_id"));
+  const ms = await liveIds(db, "milestone", linked("milestone_id"));
   return rows.map((row) => ({
     ...row,
+    workpackage_id: row.workpackage_id && wps.has(row.workpackage_id) ? row.workpackage_id : null,
+    milestone_id: row.milestone_id && ms.has(row.milestone_id) ? row.milestone_id : null,
     owner: personRefOut(row.owner_person_id, row.owner_text, people),
   }));
 }
@@ -319,8 +333,10 @@ export async function upsertRisk(
       }
     }
 
-    await validateLinkedEntity(db, "workpackage", next.workpackage_id, projectId);
-    await validateLinkedEntity(db, "milestone", next.milestone_id, projectId);
+    // Links are checked when given: a stored link to an item in the trash stays (it reads as absent and
+    // comes back with a restore), so the risk's other fields stay editable meanwhile.
+    if (has(input, "workpackage_id")) await validateLinkedEntity(db, "workpackage", next.workpackage_id, projectId);
+    if (has(input, "milestone_id")) await validateLinkedEntity(db, "milestone", next.milestone_id, projectId);
 
     next.score = next.probability * next.impact;
 

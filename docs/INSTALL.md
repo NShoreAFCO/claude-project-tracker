@@ -236,11 +236,11 @@ Open the address the setup printed, e.g. `https://project-tracker.<subdomain>.wo
 
 **If no code arrives:** check spam. Codes are only sent to allowed addresses. The page looks the same for other addresses, but no code is sent (on purpose). Check the spelling in `instance/instance.config.json` → `deploy.allowedEmails`, then see "Add or remove people".
 
-You can delete the demo project from its row menu (⋯ → Delete) whenever you like. Deleted items go to the Trash view, where they can be restored.
+You can delete the demo project from its row menu (⋯ → Delete) whenever you like. Deleted items go to the Trash view, where an admin can restore them.
 
 Your own entry appears in the **People** view after your first sign-in, with the admin role if you named yourself as admin in the setup. Admins give other people a role there (viewer, editor, decider, admin); someone who signs in for the first time gets the default role (`editor`). Stakeholders without a login can be added there too.
 
-What each role may do: a **viewer** reads (and edits only their own language, name and phone); an **editor** also writes projects, work packages and the rest, and restores from the Trash; a **decider** also closes and reopens projects, records gate decisions and verifies sign-offs; an **admin** also changes roles and email addresses, deletes users and purges the Trash. Claude (through the connector) acts with your role, but never decides gates, manages roles or purges. The admin role is given from the setup list at first sign-in only; later changes are made in the People view. A role change applies on the person's next request.
+What each role may do: a **viewer** reads (and edits only their own language, name and phone); an **editor** also writes projects, work packages and the rest; a **decider** also closes and reopens projects, records gate decisions and verifies sign-offs; an **admin** also changes roles and email addresses, deletes users, and restores from and purges the Trash. Claude (through the connector) acts with your role, but never decides gates, manages roles or purges. The admin role is given from the setup list at first sign-in; someone on the list who signed in earlier becomes admin only while the tracker has no admin. Later changes are made in the People view. A role change applies on the person's next request.
 
 ## 9. Connect Claude
 

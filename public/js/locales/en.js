@@ -347,7 +347,7 @@ export default {
     risk: "risk",
   },
   trashTitle: "Trash",
-  trashHint: "Deleted items can be restored. Items come back together with what was deleted with them.",
+  trashHint: "Admins can restore deleted items. Items come back together with what was deleted with them.",
   trashEmpty: "The trash is empty.",
   trashChildren: "{n} with it",
   colDeleted: "Deleted",

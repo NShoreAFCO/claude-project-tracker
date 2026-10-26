@@ -1,4 +1,4 @@
-// Trash view (spec F10): deleted items with restore; purge (admins, after the retention period).
+// Trash view (spec F10): deleted items with restore (admins) and purge (admins, after the retention period).
 import { t, fmtDateTime } from "./i18n.js";
 import { api } from "./api.js";
 import { can } from "./access.js";
@@ -31,7 +31,8 @@ async function purge(item) {
 export async function renderTrash(main) {
   clear(main, h("h2", t("trashTitle")), h("p", t("loading")));
   const items = await api.trash();
-  const canRestore = can("write");
+  // Restore and purge are admin actions (spec §4.2); the buttons are shown to admins only.
+  const canRestore = can("restore");
   const canPurge = can("purge");
   const rows = items.map((it) =>
     h(
@@ -48,9 +49,7 @@ export async function renderTrash(main) {
         "td.row-actions",
         h(
           "div.actions",
-          canRestore && (it.access_role == null || can("manage_roles"))
-            ? h("button.btn.small.secondary", { type: "button", on: { click: () => restore(it) } }, t("restore"))
-            : null,
+          canRestore ? h("button.btn.small.secondary", { type: "button", on: { click: () => restore(it) } }, t("restore")) : null,
           canPurge ? h("button.btn.small.danger", { type: "button", on: { click: () => purge(it) } }, t("purge")) : null,
         ),
       ),

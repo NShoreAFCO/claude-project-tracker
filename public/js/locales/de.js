@@ -349,7 +349,7 @@ export default {
     risk: "Risiko",
   },
   trashTitle: "Papierkorb",
-  trashHint: "Gelöschte Elemente lassen sich wiederherstellen, zusammen mit allem, was mit ihnen gelöscht wurde.",
+  trashHint: "Admins können gelöschte Elemente wiederherstellen, zusammen mit allem, was mit ihnen gelöscht wurde.",
   trashEmpty: "Der Papierkorb ist leer.",
   trashChildren: "{n} mit gelöscht",
   colDeleted: "Gelöscht",

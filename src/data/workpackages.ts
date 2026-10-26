@@ -7,6 +7,7 @@ import { reachStmts } from "./milestones";
 import { gateGuardedBatch, startGuard } from "./gates";
 import { personOuts, personRefInput, personRefOut, resolvePersonRef } from "./persons";
 import {
+  CLOSED_PROJECT_STATUSES,
   VERIFICATIONS,
   applyVerificationRules,
   applyWpRules,
@@ -69,14 +70,43 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/;
 const DELIVERABLE_MAX = 500;
 
-/** verified_at: YYYY-MM-DD or an ISO timestamp with offset (stored as UTC), not in the future; "" or null clears. */
+/**
+ * In-batch project guard (F3, Ruling 20): a WP is created, or reopened to an open status, only while its
+ * project is live and not done/abandoned. The write sets `project_id` to NULL otherwise (a NOT NULL
+ * violation that rolls the whole batch back), so a close or trash that commits after the pre-read wins.
+ * Binds the project id once.
+ */
+const PROJECT_OPEN_SQL = `EXISTS (SELECT 1 FROM project WHERE id = ? AND deleted_at IS NULL AND status NOT IN (${CLOSED_PROJECT_STATUSES.map((s) => `'${s}'`).join(", ")}))`;
+const PROJECT_GUARD_FAILED = /NOT NULL constraint failed: workpackage\.project_id/i;
+
+/** Runs a WP batch; a failed project guard becomes 409 PROJECT_CLOSED (404 when the project went to the trash). */
+async function projectGuarded<T>(db: D1Database, projectId: string, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (e) {
+    if (!PROJECT_GUARD_FAILED.test(String((e as Error)?.message ?? e))) throw e;
+    const p = await db
+      .prepare("SELECT status, deleted_at FROM project WHERE id = ?")
+      .bind(projectId)
+      .first<{ status: string; deleted_at: string | null }>();
+    if (!p || p.deleted_at) throw new NotFoundError(`project ${projectId} not found`);
+    throw projectClosedError(projectId, p.status);
+  }
+}
+
+/**
+ * verified_at: YYYY-MM-DD or an ISO timestamp with offset (stored as UTC), not in the future; "" or null
+ * clears. A date-only value may be up to UTC today + 1 day: a user east of UTC is already on the next day
+ * between local midnight and UTC midnight. Timestamps get 5 minutes of clock skew.
+ */
 function verifiedAtInput(v: unknown): string | null {
   if (v === null || v === "") return null;
   const s = typeof v === "string" ? v.trim() : "";
   const valid = DATE_RE.test(s) ? Number.isFinite(Date.parse(`${s}T00:00:00Z`)) : TIMESTAMP_RE.test(s) && Number.isFinite(Date.parse(s));
   if (!valid) throw new ValidationError("verified_at must be YYYY-MM-DD or an ISO timestamp");
   const out = DATE_RE.test(s) ? s : new Date(Date.parse(s)).toISOString();
-  const future = DATE_RE.test(out) ? out > new Date().toISOString().slice(0, 10) : Date.parse(out) > Date.now() + 5 * 60_000;
+  const latestDate = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+  const future = DATE_RE.test(out) ? out > latestDate : Date.parse(out) > Date.now() + 5 * 60_000;
   if (future) throw new ValidationError("verified_at cannot be in the future");
   return out;
 }
@@ -335,31 +365,43 @@ export async function upsertWorkpackage(
     // F2: agents never lower the verification; re-checked on the stored row when the batch runs (the
     // version condition alone already rules out a change since the read; this states the rule in SQL).
     const agentVerify = isAgent(by) && "verification" in diff ? ` AND verification IN ${verificationNotAboveSql(next.verification)}` : "";
-    const res = await gateGuardedBatch(
-      db,
-      [
-        ...gateGuard.stmts,
-        ...stakeStmts,
-        db
-          .prepare(
-            `UPDATE workpackage SET ${changed.map((f) => `${f} = ?, `).join("")}version = version + 1, updated_at = ?${act.sql} WHERE id = ? AND version = ?${agentVerify}`,
-          )
-          .bind(...changed.map((f) => next[f] ?? null), ts, ...act.params, existing.id, existing.version),
-        eventStmtIfChanged(db, {
-          by,
-          project_id: projectId,
-          entity: "workpackage",
-          entity_id: existing.id,
-          action: "update",
-          summary: `${String(next.title)}: ${Object.keys(diff).join(", ")}`,
-          diff,
-        }),
-        ...(projectAct ? [projectAct] : []),
-        ...reachStmts(db, projectId, by),
-        ...schedule.stmts,
-      ],
-      gateGuard.ids,
-      by,
+    // Reopening (an open status that differs from the stored one) re-checks the project in the batch.
+    const reopening = changed.includes("status") && isOpenWpStatus(String(next.status));
+    const projectGuard = reopening ? `project_id = CASE WHEN ${PROJECT_OPEN_SQL} THEN project_id ELSE NULL END, ` : "";
+    const res = await projectGuarded(db, projectId, () =>
+      gateGuardedBatch(
+        db,
+        [
+          ...gateGuard.stmts,
+          ...stakeStmts,
+          db
+            .prepare(
+              `UPDATE workpackage SET ${projectGuard}${changed.map((f) => `${f} = ?, `).join("")}version = version + 1, updated_at = ?${act.sql} WHERE id = ? AND version = ?${agentVerify}`,
+            )
+            .bind(
+              ...(reopening ? [projectId] : []),
+              ...changed.map((f) => next[f] ?? null),
+              ts,
+              ...act.params,
+              existing.id,
+              existing.version,
+            ),
+          eventStmtIfChanged(db, {
+            by,
+            project_id: projectId,
+            entity: "workpackage",
+            entity_id: existing.id,
+            action: "update",
+            summary: `${String(next.title)}: ${Object.keys(diff).join(", ")}`,
+            diff,
+          }),
+          ...(projectAct ? [projectAct] : []),
+          ...reachStmts(db, projectId, by),
+          ...schedule.stmts,
+        ],
+        gateGuard.ids,
+        by,
+      ),
     );
     if (!res[gateGuard.stmts.length + stakeStmts.length].meta.changes) {
       // The batch stored issues computed for this write; put back the ones of the stored plan.
@@ -425,32 +467,37 @@ export async function upsertWorkpackage(
     checkDependsOn: fields.depends_on !== undefined ? id : undefined,
   });
   const cols = ["id", "project_id", ...WRITE_COLS, "version", "created_at", "updated_at", "last_progress_at", "last_changed_at"] as const;
-  await gateGuardedBatch(
-    db,
-    [
-      ...gateGuard.stmts,
-      db
-        .prepare(`INSERT INTO workpackage (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`)
-        .bind(...cols.map((c) => (row as unknown as Record<string, unknown>)[c] ?? null)),
-      eventStmt(db, {
-        by,
-        project_id: projectId,
-        entity: "workpackage",
-        entity_id: id,
-        action: "create",
-        summary: title,
-        diff: {
-          ...diffFields(null, row as unknown as Record<string, unknown>, WRITE_COLS),
-          ...(stakeholders?.length ? { priority_stakeholders: [null, stakeholders] } : {}),
-        },
-      }),
-      ...(stakeholders?.length ? stakeholderStmts(db, id, 1, stakeholders) : []),
-      ...(projectAct ? [projectAct] : []),
-      ...reachStmts(db, projectId, by),
-      ...schedule.stmts,
-    ],
-    gateGuard.ids,
-    by,
+  // project_id carries the in-batch project guard (NULL → the batch aborts → PROJECT_CLOSED / 404).
+  const values = cols.map((c) => (c === "project_id" ? `CASE WHEN ${PROJECT_OPEN_SQL} THEN ? ELSE NULL END` : "?"));
+  const params = cols.flatMap((c) =>
+    c === "project_id" ? [projectId, projectId] : [(row as unknown as Record<string, unknown>)[c] ?? null],
+  );
+  await projectGuarded(db, projectId, () =>
+    gateGuardedBatch(
+      db,
+      [
+        ...gateGuard.stmts,
+        db.prepare(`INSERT INTO workpackage (${cols.join(", ")}) VALUES (${values.join(", ")})`).bind(...params),
+        eventStmt(db, {
+          by,
+          project_id: projectId,
+          entity: "workpackage",
+          entity_id: id,
+          action: "create",
+          summary: title,
+          diff: {
+            ...diffFields(null, row as unknown as Record<string, unknown>, WRITE_COLS),
+            ...(stakeholders?.length ? { priority_stakeholders: [null, stakeholders] } : {}),
+          },
+        }),
+        ...(stakeholders?.length ? stakeholderStmts(db, id, 1, stakeholders) : []),
+        ...(projectAct ? [projectAct] : []),
+        ...reachStmts(db, projectId, by),
+        ...schedule.stmts,
+      ],
+      gateGuard.ids,
+      by,
+    ),
   );
   return { ...(await getWpOut(db, project, id)), warnings: issuesOf(schedule.issues, id) };
 }

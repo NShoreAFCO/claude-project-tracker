@@ -28,7 +28,7 @@ describe("R5.3 role-based UI helpers", () => {
     viewer: ["read"],
     editor: ["read", "write"],
     decider: ["read", "write", "decide", "close", "verify_sign_off"],
-    admin: ["read", "write", "decide", "close", "verify_sign_off", "manage_roles", "purge"],
+    admin: ["read", "write", "decide", "close", "verify_sign_off", "manage_roles", "purge", "restore"],
   } as const;
 
   for (const accessRole of ROLES) {

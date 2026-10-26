@@ -58,6 +58,97 @@ describe("persons and identity", () => {
     expect(await personsByEmail("new@example.com")).toHaveLength(1);
   });
 
+  describe("admin bootstrap from policy.admins (Ruling 59)", () => {
+    /** Runs `f` with no live admin: demotes the live admins and puts them back afterwards. */
+    async function withoutAdmins(f: () => Promise<void>): Promise<void> {
+      const { results } = await db
+        .prepare("SELECT id FROM person WHERE access_role = 'admin' AND deleted_at IS NULL")
+        .all<{ id: string }>();
+      const ids = results.map((r) => r.id);
+      await db
+        .prepare("UPDATE person SET access_role = 'editor' WHERE id IN (SELECT value FROM json_each(?))")
+        .bind(JSON.stringify(ids))
+        .run();
+      try {
+        await f();
+      } finally {
+        await db
+          .prepare("UPDATE person SET access_role = 'admin' WHERE id IN (SELECT value FROM json_each(?))")
+          .bind(JSON.stringify(ids))
+          .run();
+      }
+    }
+    async function withListed(addr: string, f: () => Promise<void>): Promise<void> {
+      POLICY.admins.push(addr);
+      try {
+        await f();
+      } finally {
+        POLICY.admins.splice(POLICY.admins.indexOf(addr), 1);
+      }
+    }
+    const adminEvents = async (id: string) =>
+      (
+        await db.prepare("SELECT * FROM event WHERE entity = 'person' AND entity_id = ? ORDER BY id").bind(id).all<EventRow>()
+      ).results.filter((e) => JSON.parse(e.diff_json ?? "{}").access_role?.[1] === "admin");
+
+    it("a listed email that signed in before the list was set is promoted when no admin exists", async () => {
+      // signed in first as an editor (policy.admins still empty)
+      const early = await whoami("early-admin@example.com");
+      expect(early.body.person!.access_role).toBe("editor");
+      await withoutAdmins(() =>
+        withListed("early-admin@example.com", async () => {
+          const { body } = await whoami("Early-Admin@example.com");
+          expect(body.person).toMatchObject({ id: early.body.person!.id, access_role: "admin" });
+          const evs = await adminEvents(early.body.person!.id);
+          expect(evs).toHaveLength(1);
+          expect(JSON.parse(evs[0].diff_json!).access_role).toEqual(["editor", "admin"]);
+          // idempotent: the next request changes nothing
+          await whoami("early-admin@example.com");
+          expect(await adminEvents(early.body.person!.id)).toHaveLength(1);
+        }),
+      );
+    });
+
+    it("no promotion while another live admin exists (a deliberate demotion stays)", async () => {
+      const other = await ensureUserPerson(db, "standing-admin@example.com");
+      await db.prepare("UPDATE person SET access_role = 'admin' WHERE id = ?").bind(other.id).run();
+      const late = await whoami("late-listed@example.com");
+      expect(late.body.person!.access_role).toBe("editor");
+      await withListed("late-listed@example.com", async () => {
+        const { body } = await whoami("late-listed@example.com");
+        expect(body.person!.access_role).toBe("editor");
+        expect(await adminEvents(late.body.person!.id)).toHaveLength(0);
+      });
+      // a trashed admin does not count as live: the listed login is promoted then
+      await withoutAdmins(async () => {
+        await db
+          .prepare("UPDATE person SET access_role = 'admin', deleted_at = ?, deleted_by = 'test' WHERE id = ?")
+          .bind(new Date().toISOString(), other.id)
+          .run();
+        try {
+          await withListed("late-listed@example.com", async () => {
+            expect((await whoami("late-listed@example.com")).body.person!.access_role).toBe("admin");
+          });
+        } finally {
+          await db
+            .prepare("UPDATE person SET deleted_at = NULL, deleted_by = NULL, access_role = 'editor' WHERE id = ?")
+            .bind(other.id)
+            .run();
+          await db.prepare("UPDATE person SET access_role = 'editor' WHERE id = ?").bind(late.body.person!.id).run();
+        }
+      });
+    });
+
+    it("an email not in policy.admins is never promoted, even without any admin", async () => {
+      await withoutAdmins(async () => {
+        const { body } = await whoami("not-listed@example.com");
+        expect(body.person!.access_role).toBe("editor");
+        expect((await whoami("not-listed@example.com")).body.person!.access_role).toBe("editor");
+        expect(await adminEvents(body.person!.id)).toHaveLength(0);
+      });
+    });
+  });
+
   it("admin from policy.admins gets role admin", async () => {
     POLICY.admins.push("boss@example.com");
     try {

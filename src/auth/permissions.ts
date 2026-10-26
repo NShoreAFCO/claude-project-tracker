@@ -10,9 +10,9 @@
 import type { Caller, Role } from "../types";
 import { ForbiddenError } from "../data/util";
 
-export type Action = "read" | "write" | "decide" | "close" | "verify_sign_off" | "manage_roles" | "purge";
+export type Action = "read" | "write" | "decide" | "close" | "verify_sign_off" | "manage_roles" | "purge" | "restore";
 
-export const ACTIONS: readonly Action[] = ["read", "write", "decide", "close", "verify_sign_off", "manage_roles", "purge"];
+export const ACTIONS: readonly Action[] = ["read", "write", "decide", "close", "verify_sign_off", "manage_roles", "purge", "restore"];
 
 const RANK: Record<Role, number> = { viewer: 0, editor: 1, decider: 2, admin: 3 };
 /** Own-property lookup, so inherited names ("constructor", "toString") never count as a role or action. */
@@ -27,15 +27,17 @@ export const MIN_ROLE: Record<Action, Role> = {
   verify_sign_off: "decider",
   manage_roles: "admin",
   purge: "admin",
+  restore: "admin",
 };
 
 /**
  * Actions an agent channel never performs, whatever its role. Service tokens (hook, webhook, scripts) act
- * as editor and never decide, close, verify a sign_off, change access or purge, also with on_behalf_of.
- * MCP clients act with their OAuth login's role, but never change access or purge (global constraints).
+ * as editor and never decide, close, verify a sign_off, change access, purge or restore, also with
+ * on_behalf_of. MCP clients act with their OAuth login's role (an admin login may restore, spec §4.2),
+ * but never change access or purge (global constraints).
  */
 const AGENT_DENIED: Record<"mcp" | "service", readonly Action[]> = {
-  service: ["decide", "close", "verify_sign_off", "manage_roles", "purge"],
+  service: ["decide", "close", "verify_sign_off", "manage_roles", "purge", "restore"],
   mcp: ["manage_roles", "purge"],
 };
 
@@ -47,6 +49,7 @@ const WHAT: Record<Action, string> = {
   verify_sign_off: "verifying a sign_off work package",
   manage_roles: "changing a user's access (role, login email, deleting or restoring a user)",
   purge: "purging items from the trash",
+  restore: "restoring items from the trash",
 };
 
 /** Whether the caller's role is `role` or above (for rules that name a role rather than an action). */
@@ -120,9 +123,9 @@ export const REST_ACTIONS: Readonly<Record<string, Action>> = {
   "PATCH /api/persons/me": "read",
   "PATCH /api/persons/:id": "write",
   "DELETE /api/persons/:id": "write",
-  // trash (restoring a user also needs "manage_roles")
+  // trash (spec §4.2: restore and purge are admin actions)
   "GET /api/trash": "read",
-  "POST /api/trash/:kind/:id/restore": "write",
+  "POST /api/trash/:kind/:id/restore": "restore",
   "DELETE /api/trash/:kind/:id": "purge",
   "GET /api/delete-preview": "read",
   // audit export trigger
@@ -169,7 +172,7 @@ export const TOOL_ACTIONS: Readonly<Record<string, Action>> = {
   upsert_risk: "write",
   list_risks: "read",
   delete_entity: "write",
-  restore_entity: "write",
+  restore_entity: "restore",
   log_progress: "write",
   link_branch: "write",
   set_scores: "write",

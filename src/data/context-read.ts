@@ -2,6 +2,7 @@ import type { ContextDocRow, OwnerKind } from "../types";
 import { LIVE, NotFoundError, ValidationError, utf8Bytes } from "./util";
 import { ensureSchedule } from "./schedule";
 import { openRisksMarkdown } from "./risks";
+import { gateStatusMarkdown } from "./gates";
 
 export type OwnerRef = { owner_kind: OwnerKind; owner_id: string };
 export type OwnerInfo = OwnerRef & { project_id: string; title: string };
@@ -200,6 +201,9 @@ export async function getContextBundle(
   // F6: open risks of the project, after the documents (data, not instructions).
   const risks = await openRisksMarkdown(db, args.project_id);
   if (risks) parts.push(risks);
+  // §4.4: gate status (undecided gates, gate-locked WPs) after the risks, in the same style.
+  const gates = await gateStatusMarkdown(db, args.project_id);
+  if (gates) parts.push(risks ? `\n${gates}` : gates);
   const markdown = parts.join("");
   return { markdown, included: ids, omitted, bytes: utf8Bytes(markdown) };
 }

@@ -272,6 +272,17 @@ describe("verification of work packages (F2)", () => {
     );
   });
 
+  it("a date-only verified_at is accepted up to UTC today + 1 day (a user east of UTC after local midnight)", async () => {
+    const { p, wp } = await setup("review");
+    const day = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+    const ok = await upsertWorkpackage(db, p.id, { id: wp.id, status: "done", verified_at: day(1) }, await dash());
+    expect([ok.status, ok.verified_at]).toEqual(["done", day(1)]);
+    await expect(upsertWorkpackage(db, p.id, { id: wp.id, verified_at: day(2) }, SYS)).rejects.toMatchObject({ status: 400 });
+    // timestamps keep the 5-minute tolerance
+    const later = new Date(Date.now() + 60 * 60_000).toISOString();
+    await expect(upsertWorkpackage(db, p.id, { id: wp.id, verified_at: later }, SYS)).rejects.toMatchObject({ status: 400 });
+  });
+
   it("validates verification fields and keeps them in the event diff", async () => {
     const { p, wp } = await setup("none", { deliverable: "Test report", acceptance_criteria_md: "- all tests pass" });
     expect([wp.verification, wp.deliverable, wp.acceptance_criteria_md]).toEqual(["none", "Test report", "- all tests pass"]);

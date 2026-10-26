@@ -15,7 +15,7 @@ import { requireAction } from "../auth/permissions";
 import { reachStmts } from "./milestones";
 import { agentGateRemovalError, gateClosedSql, gatesEnforced } from "./gates";
 import { REDACTED_FIELDS } from "./persons";
-import { TransitionError } from "./rules";
+import { OPEN_WP_STATUSES, TransitionError, isClosedProjectStatus, projectClosedError } from "./rules";
 import { recomputeScheduleStmts, scheduleBatch, storeSchedule } from "./schedule";
 import { NotFoundError, ValidationError, eventStmt, eventStmtIfChanged, eventStmtWhere, now, type Diff } from "./util";
 
@@ -334,8 +334,9 @@ async function checkParents(db: D1Database, kind: EntityKind, r: Row): Promise<v
 }
 
 /**
- * Take an item and everything deleted together with it out of the trash. Refused (409 PARENT_DELETED)
- * while its parent is in the trash, and (409 SLUG_TAKEN) when a doc's slug has been reused meanwhile.
+ * Take an item and everything deleted together with it out of the trash (admins, spec §4.2). Refused
+ * (409 PARENT_DELETED) while its parent is in the trash, (409 SLUG_TAKEN) when a doc's slug has been
+ * reused meanwhile, and (409 PROJECT_CLOSED) when open WPs would come back into a done/abandoned project.
  */
 export async function restoreEntity(
   db: D1Database,
@@ -344,6 +345,8 @@ export async function restoreEntity(
   by: Caller,
 ): Promise<{ restored: string; children: number }> {
   checkKind(kind);
+  // Restoring is an admin action (spec §4.2; the route and tool map to "restore" too).
+  requireAction(by, "restore");
   if (kind === "branch") throw new ValidationError("branches are deleted permanently; link the branch again");
   const row = await trashedRow(db, kind, id);
   if (kind === "person") checkPersonAccess(by, row);
@@ -351,6 +354,17 @@ export async function restoreEntity(
   const stamp = row.deleted_at;
   const children = await collectChildren(db, kind, row, { stamp });
   const projectId = projectOf(kind, row);
+  // A done/abandoned project gets no open work back (F3, Ruling 20): reopen the project first.
+  if (kind === "workpackage") {
+    const project = await db.prepare("SELECT status FROM project WHERE id = ?").bind(projectId).first<{ status: string }>();
+    if (project && isClosedProjectStatus(project.status)) {
+      const open = await db
+        .prepare(`SELECT 1 FROM workpackage WHERE id ${IN_IDS} AND status IN (${OPEN_WP_STATUSES.map((s) => `'${s}'`).join(", ")}) LIMIT 1`)
+        .bind(JSON.stringify([id, ...children.workpackages]))
+        .first();
+      if (open) throw projectClosedError(projectId!, project.status);
+    }
+  }
 
   let slug: string | null = null;
   if (kind === "context_doc" && String(row.slug).includes(SLUG_MARK)) {
@@ -499,7 +513,9 @@ export async function listTrash(db: D1Database): Promise<TrashItem[]> {
     db.prepare("SELECT id, title, project_id, parent_id, deleted_at, deleted_by FROM workpackage WHERE deleted_at IS NOT NULL"),
     db.prepare("SELECT id, title, project_id, workpackage_id, deleted_at, deleted_by FROM milestone WHERE deleted_at IS NOT NULL"),
     db.prepare("SELECT id, title, project_id, owner_kind, owner_id, deleted_at, deleted_by FROM context_doc WHERE deleted_at IS NOT NULL"),
-    db.prepare("SELECT id, name AS title, NULL AS project_id, access_role, deleted_at, deleted_by FROM person WHERE deleted_at IS NOT NULL"),
+    db.prepare(
+      "SELECT id, name AS title, NULL AS project_id, access_role, deleted_at, deleted_by FROM person WHERE deleted_at IS NOT NULL",
+    ),
     db.prepare("SELECT id, title, project_id, deleted_at, deleted_by FROM risk WHERE deleted_at IS NOT NULL"),
   ]);
   const projects = p.results as T[];

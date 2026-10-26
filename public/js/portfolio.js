@@ -73,7 +73,7 @@ function wpTable(rows, showStart) {
 
   headers.push(t("colProgress"));
 
-  const today = localDateString(new Date());
+  const now = new Date();
 
   return h(
     "div.table-wrap",
@@ -125,7 +125,7 @@ function wpTable(rows, showStart) {
 
           cells.push(h("td", {}, progressBar(row.progress)));
 
-          const overdue = row.end_date && row.end_date < today;
+          const overdue = isOverdue(row.end_date, now);
 
           return h(overdue ? "tr.overdue" : "tr", {}, cells);
         }),
@@ -144,11 +144,14 @@ function ownerContent(owner) {
   return [personBadge(owner, { label: t("fOwner") }), " ", name];
 }
 
-function localDateString(date) {
-  const year = String(date.getFullYear());
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+/** The UTC date (YYYY-MM-DD) of `date`: the server and ageDays count overdue and ages in UTC too. */
+export function utcDateString(date = new Date()) {
+  return date.toISOString().slice(0, 10);
+}
+
+/** Whether a work package ending on `endDate` is overdue: its end date is before today (UTC). */
+export function isOverdue(endDate, now = new Date()) {
+  return !!endDate && endDate < utcDateString(now);
 }
 
 let renderSeq = 0;

@@ -15,6 +15,8 @@ import { mcpCaller, serviceCaller, userCaller } from "../src/auth/caller";
 import { ensureUserPerson } from "../src/data/persons";
 import { POLICY } from "../src/policy";
 import { mcpApiHandler } from "../src/mcp/server";
+import { getContextBundle } from "../src/data/context-read";
+import { upsertRisk } from "../src/data/risks";
 import type { Caller, Env, Role, WorkpackageRow } from "../src/types";
 
 const db = env.DB;
@@ -384,13 +386,20 @@ describe("gate decisions", () => {
       ["Close open review findings", "todo", g.p.id],
       ["Order spare parts", "todo", g.p.id],
     ]);
-    // not linked as requires or unlocks (the gate stays reached, nothing new is locked)
-    const links = await db
-      .prepare("SELECT COUNT(*) AS n FROM milestone_link WHERE workpackage_id IN (?, ?)")
+    // linked to the gate as `requires` (spec F5 "linked to the milestone"): the follow-up work shows on the
+    // gate; never as `unlocks`, so a later hold cannot lock the condition WPs themselves
+    const { results: links } = await db
+      .prepare("SELECT milestone_id, workpackage_id, role FROM milestone_link WHERE workpackage_id IN (?, ?) ORDER BY workpackage_id")
       .bind(...d.created_wps!)
-      .first<{ n: number }>();
-    expect(links!.n).toBe(0);
+      .all();
+    expect(links).toEqual(
+      d
+        .created_wps!.map((id) => ({ milestone_id: g.m1, workpackage_id: id, role: "requires" }))
+        .sort((a, b) => a.workpackage_id.localeCompare(b.workpackage_id)),
+    );
     const m = (await listMilestones(db, g.p.id)).find((x) => x.id === g.m1)!;
+    expect(m.requires).toEqual(expect.arrayContaining(d.created_wps!));
+    expect(m.reached_at).not.toBeNull(); // reached stays set; the gate stays open
     expect(m.decision_state).toBe("go_with_conditions");
     expect(m.decisions[0].conditions).toEqual([
       { title: "Close open review findings", workpackage_id: d.created_wps![0] },
@@ -403,6 +412,67 @@ describe("gate decisions", () => {
       .first<{ n: number }>();
     expect(items!.n).toBe(12);
     expect((await gateLockedWpIds(db, g.p.id)).size).toBe(0);
+    // a later hold locks the gate's unlocks again, never the condition WPs
+    await recordGateDecision(db, g.m1, { decision: "hold", note_md: "re-check" }, DM);
+    const locked = await gateLockedWpIds(db, g.p.id);
+    expect(d.created_wps!.some((id) => locked.has(id))).toBe(false);
+  });
+
+  it("the decision event carries note, evidence, conditions and on_behalf", async () => {
+    const g = await gated();
+    const d = await recordGateDecision(
+      db,
+      g.m1,
+      {
+        decision: "go_with_conditions",
+        note_md: "Board agreed on 2 conditions",
+        evidence: ["https://example.com/review"],
+        conditions: ["Fix finding 1"],
+      },
+      DM,
+    );
+    const ev = (await listEvents(db, { project_id: g.p.id, limit: 500 })).find((e) => e.entity === "milestone" && e.action === "decision")!;
+    const diff = JSON.parse(ev.diff_json!);
+    expect(diff.decision).toEqual([null, "go_with_conditions"]);
+    expect(diff.note_md).toEqual([null, "Board agreed on 2 conditions"]);
+    expect(diff.evidence).toEqual([null, ["https://example.com/review"]]);
+    expect(diff.conditions).toEqual([null, [{ title: "Fix finding 1", workpackage_id: d.created_wps![0] }]]);
+    expect(diff.on_behalf).toEqual([null, false]);
+    // on behalf of the decision maker (admin)
+    await recordGateDecision(db, g.m1, { decision: "hold", note_md: "for the DM", on_behalf_of_decision_maker: true }, ADMIN);
+    const evs = (await listEvents(db, { project_id: g.p.id, limit: 500 })).filter(
+      (e) => e.entity === "milestone" && e.action === "decision",
+    );
+    const hold = evs.map((e) => JSON.parse(e.diff_json!)).find((x) => x.decision[1] === "hold")!;
+    expect([hold.decision, hold.on_behalf, hold.note_md, hold.evidence, hold.conditions]).toEqual([
+      ["go_with_conditions", "hold"],
+      [null, true],
+      [null, "for the DM"],
+      [null, []],
+      [null, []],
+    ]);
+  });
+
+  it("bundle lists gate status", async () => {
+    const g = await gated();
+    await upsertRisk(db, g.p.id, { title: "Supplier slips", probability: 4, impact: 4, status: "open" }, SYS);
+    const md = (await getContextBundle(db, { project_id: g.p.id })).markdown;
+    expect(md).toContain("## Gates");
+    const gates = md.slice(md.indexOf("## Gates"));
+    // after the open risks, in the same style
+    expect(md.indexOf("## Open risks")).toBeGreaterThan(-1);
+    expect(md.indexOf("## Open risks")).toBeLessThan(md.indexOf("## Gates"));
+    const m1 = (await listMilestones(db, g.p.id)).find((m) => m.id === g.m1)!;
+    expect(gates).toContain(`- M1 (${g.m1}; due ${m1.due_date}; latest decision: none)`);
+    expect(gates).toContain(`- WP2 (${g.wp2}; locked by gate M1)`);
+    // other gates of the plan are not gates here; non-gate milestones are not listed
+    expect(gates).not.toContain(`(${g.m2};`);
+    // soft delete: a trashed locked WP is not listed
+    await deleteEntity(db, "workpackage", g.wp2, SYS);
+    expect((await getContextBundle(db, { project_id: g.p.id })).markdown).not.toContain(g.wp2);
+    // decided: the section goes away
+    await recordGateDecision(db, g.m1, { decision: "go" }, DM);
+    expect((await getContextBundle(db, { project_id: g.p.id })).markdown).not.toContain("## Gates");
   });
 
   it("stop puts project on_hold with closure_decision_pending", async () => {

@@ -9,7 +9,9 @@ import { upsertMilestone, listMilestones } from "../src/data/milestones";
 import { writeContext } from "../src/data/context-write";
 import { linkBranch } from "../src/data/branches";
 import { OPEN_WP_STATUSES, TransitionError, moveWorkpackages, parseBlockedBy, setBeforeMoveWriteForTesting } from "../src/data/rules";
-import { ConflictError, ValidationError } from "../src/data/util";
+import { ConflictError, NotFoundError, ValidationError } from "../src/data/util";
+import { setAfterScheduleReadForTesting } from "../src/data/schedule";
+import { deleteEntity } from "../src/data/entities";
 import { mcpApiHandler } from "../src/mcp/server";
 import { ensureUserPerson } from "../src/data/persons";
 import type { Env, WorkpackageRow } from "../src/types";
@@ -69,7 +71,10 @@ beforeAll(async () => {
   const me = await ensureUserPerson(db, "user@example.com");
   await db.prepare("UPDATE person SET access_role = 'decider' WHERE id = ?").bind(me.id).run();
 });
-afterEach(() => setBeforeCloseWriteForTesting(null));
+afterEach(() => {
+  setBeforeCloseWriteForTesting(null);
+  setAfterScheduleReadForTesting(null);
+});
 
 describe("project closure", () => {
   it("closing with open WPs returns 409 listing them", async () => {
@@ -213,6 +218,54 @@ describe("closed projects stay closed", () => {
     // log_progress on a closed project's WP stays allowed and cannot reopen it
     const r = await logProgress(db, { project_id: p.id, workpackage_id: w.id, summary: "archived the files" }, A);
     expect(r.workpackage!.status).toBe("done");
+  });
+
+  it("creating a WP fails if the project closes between read and write", async () => {
+    const p = await owned("Create race");
+    await upsertWorkpackage(db, p.id, { title: "finished", status: "done" }, A);
+    setAfterScheduleReadForTesting(async () => {
+      // a concurrent close commits after the WP write's pre-read
+      setAfterScheduleReadForTesting(null);
+      await updateProject(db, p.id, { status: "done", ...CLOSURE }, A);
+    });
+    const wpEvents = async () => (await listEvents(db, { project_id: p.id, limit: 200 })).filter((e) => e.entity === "workpackage").length;
+    const before = await wpEvents();
+    const err = await upsertWorkpackage(db, p.id, { title: "late arrival" }, A).catch((e) => e);
+    expect(err).toBeInstanceOf(TransitionError);
+    expect(err.current.code).toBe("PROJECT_CLOSED");
+    const detail = await getProjectDetail(db, p.id);
+    expect(detail.project.status).toBe("done");
+    expect(detail.workpackages.map((w) => w.title)).toEqual(["finished"]);
+    expect(await wpEvents()).toBe(before);
+  });
+
+  it("reopening a WP fails if the project closes between read and write", async () => {
+    const p = await owned("Reopen race");
+    const w = await upsertWorkpackage(db, p.id, { title: "finished", status: "done" }, A);
+    setAfterScheduleReadForTesting(async () => {
+      setAfterScheduleReadForTesting(null);
+      await updateProject(db, p.id, { status: "abandoned", closure_note_md: "Stopped." }, A);
+    });
+    const err = await upsertWorkpackage(db, p.id, { id: w.id, status: "doing" }, A).catch((e) => e);
+    expect(err).toBeInstanceOf(TransitionError);
+    expect(err.current.code).toBe("PROJECT_CLOSED");
+    const row = (await wpRow(w.id))!;
+    expect([row.status, row.version]).toEqual(["done", w.version]);
+    expect((await getProjectDetail(db, p.id)).project.status).toBe("abandoned");
+    const events = await listEvents(db, { project_id: p.id, limit: 200 });
+    expect(events.some((e) => e.entity === "workpackage" && e.action === "update")).toBe(false);
+  });
+
+  it("creating a WP fails if the project is trashed between read and write", async () => {
+    const p = await owned("Trash race");
+    setAfterScheduleReadForTesting(async () => {
+      setAfterScheduleReadForTesting(null);
+      await deleteEntity(db, "project", p.id, A);
+    });
+    const err = await upsertWorkpackage(db, p.id, { title: "orphan" }, A).catch((e) => e);
+    expect(err).toBeInstanceOf(NotFoundError);
+    const n = await db.prepare("SELECT COUNT(*) AS n FROM workpackage WHERE project_id = ?").bind(p.id).first<{ n: number }>();
+    expect(n!.n).toBe(0);
   });
 
   it("after reopening the project a WP can be added", async () => {

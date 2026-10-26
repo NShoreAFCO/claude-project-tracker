@@ -83,7 +83,9 @@ async function fixtures() {
   const trashed = await createProject(db, { title: `R51 trash ${k}`, owner: "Owner" }, SYS);
   await deleteEntity(db, "project", trashed.id, SYS);
   await db.prepare("UPDATE project SET deleted_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").bind(trashed.id).run();
-  return { open, gated, gate, wp, stakeholder, trashed };
+  const restorable = await createProject(db, { title: `R51 restore ${k}`, owner: "Owner" }, SYS);
+  await deleteEntity(db, "project", restorable.id, SYS);
+  return { open, gated, gate, wp, stakeholder, trashed, restorable };
 }
 
 beforeAll(async () => {
@@ -93,47 +95,72 @@ beforeAll(async () => {
 
 describe("requireAction: role × action matrix", () => {
   // Expected outcome per caller (true = allowed), in ACTIONS order:
-  //                 read   write  decide close  verify_sign_off manage_roles purge
+  //                 read   write  decide close  verify_sign_off manage_roles purge  restore
   const EXPECTED: Array<[string, Caller, boolean[]]> = [
     [
       "dashboard viewer",
       { actor: "u", personId: "p", role: "viewer", channel: "dashboard" },
-      [true, false, false, false, false, false, false],
+      [true, false, false, false, false, false, false, false],
     ],
     [
       "dashboard editor",
       { actor: "u", personId: "p", role: "editor", channel: "dashboard" },
-      [true, true, false, false, false, false, false],
+      [true, true, false, false, false, false, false, false],
     ],
     [
       "dashboard decider",
       { actor: "u", personId: "p", role: "decider", channel: "dashboard" },
-      [true, true, true, true, true, false, false],
+      [true, true, true, true, true, false, false, false],
     ],
-    ["dashboard admin", { actor: "u", personId: "p", role: "admin", channel: "dashboard" }, [true, true, true, true, true, true, true]],
-    ["mcp viewer", { actor: "mcp:c", personId: "p", role: "viewer", channel: "mcp" }, [true, false, false, false, false, false, false]],
-    ["mcp editor", { actor: "mcp:c", personId: "p", role: "editor", channel: "mcp" }, [true, true, false, false, false, false, false]],
-    ["mcp decider", { actor: "mcp:c", personId: "p", role: "decider", channel: "mcp" }, [true, true, true, true, true, false, false]],
-    ["mcp admin", { actor: "mcp:c", personId: "p", role: "admin", channel: "mcp" }, [true, true, true, true, true, false, false]],
-    ["service", { actor: "hook:x", personId: null, role: "editor", channel: "service" }, [true, true, false, false, false, false, false]],
+    [
+      "dashboard admin",
+      { actor: "u", personId: "p", role: "admin", channel: "dashboard" },
+      [true, true, true, true, true, true, true, true],
+    ],
+    [
+      "mcp viewer",
+      { actor: "mcp:c", personId: "p", role: "viewer", channel: "mcp" },
+      [true, false, false, false, false, false, false, false],
+    ],
+    [
+      "mcp editor",
+      { actor: "mcp:c", personId: "p", role: "editor", channel: "mcp" },
+      [true, true, false, false, false, false, false, false],
+    ],
+    [
+      "mcp decider",
+      { actor: "mcp:c", personId: "p", role: "decider", channel: "mcp" },
+      [true, true, true, true, true, false, false, false],
+    ],
+    // roles apply equally to MCP (spec §4.2): an admin login restores; role changes and purge stay dashboard-only
+    ["mcp admin", { actor: "mcp:c", personId: "p", role: "admin", channel: "mcp" }, [true, true, true, true, true, false, false, true]],
+    [
+      "service",
+      { actor: "hook:x", personId: null, role: "editor", channel: "service" },
+      [true, true, false, false, false, false, false, false],
+    ],
     [
       "service on_behalf_of",
       { actor: "hook:x", personId: "p", role: "editor", channel: "service" },
-      [true, true, false, false, false, false, false],
+      [true, true, false, false, false, false, false, false],
     ],
     // defence in depth: a service caller never gains decider rights, even with a higher role on the caller
     [
       "service (role admin)",
       { actor: "hook:x", personId: "p", role: "admin", channel: "service" },
-      [true, true, false, false, false, false, false],
+      [true, true, false, false, false, false, false, false],
     ],
-    ["system", SYSTEM_CALLER, [true, true, true, true, true, true, true]],
+    ["system", SYSTEM_CALLER, [true, true, true, true, true, true, true, true]],
     [
       "no role (dashboard)",
       { actor: "u", personId: "p", role: null, channel: "dashboard" },
-      [false, false, false, false, false, false, false],
+      [false, false, false, false, false, false, false, false],
     ],
-    ["no role (mcp)", { actor: "mcp:c", personId: null, role: null, channel: "mcp" }, [false, false, false, false, false, false, false]],
+    [
+      "no role (mcp)",
+      { actor: "mcp:c", personId: null, role: null, channel: "mcp" },
+      [false, false, false, false, false, false, false, false],
+    ],
   ];
 
   it.each(EXPECTED)("%s", (_label, caller, expected) => {
@@ -207,6 +234,9 @@ describe("REST enforcement per role", () => {
     // purge
     const purged = await rest(me, "DELETE", `/api/trash/project/${f.trashed.id}`);
     expect(purged.status).toBe(at("admin") ? 200 : 403);
+    // restore from the trash (spec §4.2: admin)
+    const restored = await rest(me, "POST", `/api/trash/project/${f.restorable.id}/restore`);
+    expect(restored.status).toBe(at("admin") ? 200 : 403);
     // own UI preferences stay possible for every role
     expect((await rest(me, "PATCH", "/api/persons/me", { locale: "en" })).status).toBe(200);
   });
@@ -271,6 +301,8 @@ describe("MCP enforcement per role", () => {
     // manage_roles: agents never delete (deactivate) a user, not even with an admin login
     const user = await ensureUserPerson(db, "user@example.com");
     expectAllowed(await tool(me, "delete_entity", { kind: "person", id: user.id, confirm: true }), false);
+    // restore (spec §4.2: admin; roles apply equally to MCP)
+    expectAllowed(await tool(me, "restore_entity", { kind: "project", id: f.restorable.id }), at("admin"));
     expect(toolError(await tool(me, "upsert_person", { id: f.stakeholder.id, comment: "seen" }))).toBe(at("editor") ? null : "forbidden");
   });
 

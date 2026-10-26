@@ -33,8 +33,8 @@ After any change: `npm run check`, then `npm run deploy` (it rebuilds the genera
 
 | Field | Default | Meaning |
 |---|---|---|
-| `admins` | the admin email(s) you gave in setup | these people get the `admin` role when they first sign in; no later promotion, an admin changes roles in the People view |
-| `default_role` | `editor` | role of everyone else on first sign-in: `viewer` (read only), `editor`, `decider` (also closes projects, decides gates, verifies sign-offs) or `admin` (also roles and purge) |
+| `admins` | the admin email(s) you gave in setup | these people get the `admin` role when they first sign in; later only while the tracker has no admin (otherwise an admin changes roles in the People view) |
+| `default_role` | `editor` | role of everyone else on first sign-in: `viewer` (read only), `editor`, `decider` (also closes projects, decides gates, verifies sign-offs) or `admin` (also roles, restore and purge) |
 | `locales` | `app.locale` first, then the other language | languages people may choose in the dashboard; a project's report `language` must be one of them. The OAuth sign-in pages use the instance default language |
 | `stale_days` | `14` | days without activity before a project counts as stale; a project type may set its own `stale_days` |
 | `schedule_strict_default` | `false` | default for a project's strict schedule mode (schedule warnings become errors) |

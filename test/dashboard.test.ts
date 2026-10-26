@@ -172,6 +172,22 @@ describe("delete confirm names children", () => {
     expect(ageDays("2026-10-20", new Date("2026-10-25T23:00:00Z"))).toBe(5);
     expect(ageDays(null)).toBeNull();
   });
+  it("portfolio overdue uses the UTC date, like ageDays and the server", async () => {
+    // @ts-expect-error untyped JS module
+    const { isOverdue, utcDateString } = await import("../public/js/portfolio.js");
+    // 23:30 UTC on the 25th is already the 26th for a user east of UTC (local getters say 26)
+    const at = new Date("2026-10-25T23:30:00Z");
+    const eastOfUtc = Object.assign(Object.create(at), {
+      getFullYear: () => 2026,
+      getMonth: () => 9,
+      getDate: () => 26,
+      toISOString: () => at.toISOString(),
+    });
+    expect(utcDateString(eastOfUtc)).toBe("2026-10-25");
+    expect(isOverdue("2026-10-25", eastOfUtc)).toBe(false);
+    expect(isOverdue("2026-10-24", eastOfUtc)).toBe(true);
+    expect(isOverdue(null, eastOfUtc)).toBe(false);
+  });
 });
 
 describe("dashboard categories (instance config)", () => {
