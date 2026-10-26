@@ -99,16 +99,19 @@ describe("MCP server", () => {
   });
 
   it("categories, human flag and milestones via MCP", async () => {
-    const p = JSON.parse(text(await call("create_project", { title: "MCP Cats", category: "process-optimisation" })));
-    expect(p.category).toBe("process-optimisation");
-    const w = JSON.parse(text(await call("upsert_workpackage", { project_id: p.id, title: "Lab", category: "experimental", human: true })));
-    expect([w.category, w.human]).toEqual(["experimental", 1]);
+    const { PROJECT_CATEGORIES, WP_CATEGORIES } = await import("../src/data/categories");
+    const pcat = PROJECT_CATEGORIES[PROJECT_CATEGORIES.length - 1];
+    const [wcat] = WP_CATEGORIES;
+    const p = JSON.parse(text(await call("create_project", { title: "MCP Cats", category: pcat })));
+    expect(p.category).toBe(pcat);
+    const w = JSON.parse(text(await call("upsert_workpackage", { project_id: p.id, title: "Lab", category: wcat, human: true })));
+    expect([w.category, w.human]).toEqual([wcat, 1]);
     const m = JSON.parse(text(await call("upsert_milestone", { project_id: p.id, title: "Lab done", requires: [w.id] })));
     expect([m.done, m.requires]).toEqual([false, [w.id]]);
-    const listed = JSON.parse(text(await call("list_projects", { category: "process-optimisation" })));
+    const listed = JSON.parse(text(await call("list_projects", { category: pcat })));
     const card = listed.find((x: { id: string }) => x.id === p.id);
     expect([card.category, card.wp_counts, card.next_milestone.title]).toEqual([
-      "process-optimisation",
+      pcat,
       { open: 1, in_progress: 0, waiting_blocked: 0, done: 0 },
       "Lab done",
     ]);
@@ -116,7 +119,7 @@ describe("MCP server", () => {
     expect(del.isError).toBeFalsy();
     const tools = (await rpc("tools/list")).result.tools;
     expect(tools.find((t: { name: string }) => t.name === "upsert_workpackage").description).toContain("human");
-    expect(tools.find((t: { name: string }) => t.name === "upsert_workpackage").description).toContain("pm|research|design|coding");
+    expect(tools.find((t: { name: string }) => t.name === "upsert_workpackage").description).toContain(WP_CATEGORIES.join("|"));
   });
 
   it("errors come back as tool errors with a typed code", async () => {

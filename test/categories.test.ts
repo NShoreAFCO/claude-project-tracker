@@ -92,8 +92,11 @@ describe("barCategory", () => {
 describe("configured work category without human flag", () => {
   it("is listed and not human by default", async () => {
     const { WP_CATEGORIES } = await import("../src/data/categories");
-    expect(WP_CATEGORIES).toContain("design");
-    expect(isHuman(wp("m"), "design")).toBe(false);
+    const { INSTANCE } = await import("../src/generated/instance");
+    const key = INSTANCE.categories.workpackage.find((c) => !("human" in c && c.human))?.key;
+    expect(key).toBeDefined();
+    expect(WP_CATEGORIES).toContain(key);
+    expect(isHuman(wp("m"), key!)).toBe(false);
   });
 });
 
@@ -104,7 +107,7 @@ describe("categories from the instance", () => {
     expect([...PROJECT_CATEGORIES]).toEqual(INSTANCE.categories.project.map((c) => c.key));
     expect([...WP_CATEGORIES]).toEqual(INSTANCE.categories.workpackage.map((c) => c.key));
     expect([...HUMAN_DEFAULT]).toEqual(INSTANCE.categories.workpackage.filter((c) => c.human).map((c) => c.key));
-    expect(PROJECT_CATEGORIES).toContain("process-optimisation");
+    expect(new Set(PROJECT_CATEGORIES).size).toBe(PROJECT_CATEGORIES.length);
   });
 
   it("legacy category survives unrelated update", async () => {

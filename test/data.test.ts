@@ -53,12 +53,14 @@ describe("projects", () => {
   });
   it("workpackage category and human round-trip and are validated", async () => {
     const { p, sub } = await setup();
-    const w = await upsertWorkpackage(db, p.id, { id: sub.id, category: "experimental", human: true }, A);
-    expect(w.category).toBe("experimental");
+    const { WP_CATEGORIES } = await import("../src/data/categories");
+    const [catA, catB] = WP_CATEGORIES;
+    const w = await upsertWorkpackage(db, p.id, { id: sub.id, category: catA, human: true }, A);
+    expect(w.category).toBe(catA);
     expect(w.human).toBe(1);
     expect((await upsertWorkpackage(db, p.id, { id: sub.id, human: null }, A)).human).toBeNull();
     await expect(upsertWorkpackage(db, p.id, { id: sub.id, category: "lab" }, A)).rejects.toBeInstanceOf(ValidationError);
-    expect((await upsertWorkpackage(db, p.id, { id: sub.id, category: "design" }, A)).category).toBe("design");
+    expect((await upsertWorkpackage(db, p.id, { id: sub.id, category: catB }, A)).category).toBe(catB);
     await expect(upsertWorkpackage(db, p.id, { id: sub.id, human: "yes" }, A)).rejects.toBeInstanceOf(ValidationError);
   });
   it("rejects invalid enums and dates", async () => {
