@@ -200,12 +200,14 @@ describe("dashboard categories (instance config)", () => {
     // @ts-expect-error untyped JS module
     const { LOCALE } = await import("../public/js/i18n.js");
     const first = cfg.categories.project[0];
-    expect(c.catLabel("p", first.key)).toBe(first.label[LOCALE] ?? first.label.en ?? first.key);
+    expect(first.label[LOCALE]).toBeTruthy(); // raw config data
+    expect(c.catLabel("p", first.key)).toBe(first.label[LOCALE]);
     expect(c.catLabel("p", "retired-key")).toBe("retired-key");
     expect(c.catVar("p", "retired-key")).toBe("var(--cat-none)");
-    expect(c.catVar("w", "coding")).toBe("var(--cat-w-coding)");
+    const wkey = cfg.categories.workpackage[0].key;
+    expect(c.catVar("w", wkey)).toBe(`var(--cat-w-${wkey})`);
     expect(c.knownCategory("p", "retired-key")).toBeNull();
-    expect(c.knownCategory("p", "research")).toBe("research");
+    expect(c.knownCategory("p", first.key)).toBe(first.key);
   });
 });
 
@@ -233,7 +235,10 @@ describe("locales", () => {
     const cfg = (await import("../public/instance/config.js")).default;
     const base = (await import(`../public/js/locales/${LOCALE}.js`)).default;
     expect(LOCALE).toBe(cfg.app.locale);
-    expect(t("navProjects")).toBe(cfg.strings?.[LOCALE]?.navProjects ?? base.navProjects);
+    expect(t("navProjects")).not.toBe("navProjects"); // not the raw key
+    expect(t("navProjects").trim()).not.toBe("");
+    const override = cfg.strings?.[LOCALE]?.navProjects;
+    expect(t("navProjects")).toBe(override !== undefined ? override : base.navProjects);
     expect(mergeStrings({ a: "x", n: { b: "y", c: "z" } }, { n: { b: "Y" } })).toEqual({ a: "x", n: { b: "Y", c: "z" } });
   });
 });
@@ -321,7 +326,9 @@ describe("R2 UI: schedule, baselines, gates", () => {
     expect(strict).not.toMatch(/errCode\./);
     // @ts-expect-error untyped JS module
     const { t: tr } = await import("../public/js/i18n.js");
-    expect(strict).toContain(tr("issue.DEP_UNKNOWN"));
+    const depUnknown = tr("issue.DEP_UNKNOWN");
+    expect(depUnknown).not.toBe("issue.DEP_UNKNOWN"); // not the raw key
+    expect(strict).toContain(depUnknown);
     for (const code of ["SCHEDULE_CONFLICT", "DECISION_MAKER_LOCKED", "DECISION_MAKER_MISSING"]) {
       expect(errorText(err({ code })), code).not.toMatch(/errCode\.|api english/);
     }

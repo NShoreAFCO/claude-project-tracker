@@ -99,9 +99,13 @@ describe("MCP server", () => {
   });
 
   it("categories, human flag and milestones via MCP", async () => {
-    const { PROJECT_CATEGORIES, WP_CATEGORIES } = await import("../src/data/categories");
-    const pcat = PROJECT_CATEGORIES[PROJECT_CATEGORIES.length - 1];
-    const [wcat] = WP_CATEGORIES;
+    const { INSTANCE } = await import("../src/generated/instance");
+    const pkeys = INSTANCE.categories.project.map((c) => c.key);
+    const wkeys = INSTANCE.categories.workpackage.map((c) => c.key);
+    expect(pkeys.length).toBeGreaterThanOrEqual(1);
+    expect(wkeys.length).toBeGreaterThanOrEqual(2);
+    const pcat = pkeys[pkeys.length - 1];
+    const [wcat] = wkeys;
     const p = JSON.parse(text(await call("create_project", { title: "MCP Cats", category: pcat })));
     expect(p.category).toBe(pcat);
     const w = JSON.parse(text(await call("upsert_workpackage", { project_id: p.id, title: "Lab", category: wcat, human: true })));
@@ -119,7 +123,7 @@ describe("MCP server", () => {
     expect(del.isError).toBeFalsy();
     const tools = (await rpc("tools/list")).result.tools;
     expect(tools.find((t: { name: string }) => t.name === "upsert_workpackage").description).toContain("human");
-    expect(tools.find((t: { name: string }) => t.name === "upsert_workpackage").description).toContain(WP_CATEGORIES.join("|"));
+    expect(tools.find((t: { name: string }) => t.name === "upsert_workpackage").description).toContain(wkeys.join("|"));
   });
 
   it("errors come back as tool errors with a typed code", async () => {

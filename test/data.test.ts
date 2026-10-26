@@ -46,15 +46,20 @@ describe("projects", () => {
     expect((await updateProject(db, p.id, { tags: ["c"] }, A)).tags).toEqual(["c"]);
   });
   it("project category round-trips and is validated", async () => {
-    const p = await createProject(db, { title: uniq("Cat"), category: "other" }, A);
-    expect(p.category).toBe("other");
+    const { INSTANCE } = await import("../src/generated/instance");
+    const pkeys = INSTANCE.categories.project.map((c) => c.key);
+    expect(pkeys.length).toBeGreaterThanOrEqual(1);
+    const p = await createProject(db, { title: uniq("Cat"), category: pkeys[pkeys.length - 1] }, A);
+    expect(p.category).toBe(pkeys[pkeys.length - 1]);
     expect((await updateProject(db, p.id, { category: null }, A)).category).toBeNull();
     await expect(createProject(db, { title: "x", category: "foo" }, A)).rejects.toBeInstanceOf(ValidationError);
   });
   it("workpackage category and human round-trip and are validated", async () => {
     const { p, sub } = await setup();
-    const { WP_CATEGORIES } = await import("../src/data/categories");
-    const [catA, catB] = WP_CATEGORIES;
+    const { INSTANCE } = await import("../src/generated/instance");
+    const wkeys = INSTANCE.categories.workpackage.map((c) => c.key);
+    expect(wkeys.length).toBeGreaterThanOrEqual(2);
+    const [catA, catB] = wkeys;
     const w = await upsertWorkpackage(db, p.id, { id: sub.id, category: catA, human: true }, A);
     expect(w.category).toBe(catA);
     expect(w.human).toBe(1);
@@ -79,16 +84,19 @@ describe("projects", () => {
 
 describe("list and detail enrichment", () => {
   it("counts leaf WPs by state and filters by category", async () => {
-    const p = await createProject(db, { title: uniq("Counts"), category: "research" }, A);
+    const { INSTANCE } = await import("../src/generated/instance");
+    const pkeys = INSTANCE.categories.project.map((c) => c.key);
+    const pc = pkeys[0];
+    const p = await createProject(db, { title: uniq("Counts"), category: pc }, A);
     const parent = await upsertWorkpackage(db, p.id, { title: "P" }, A);
     await upsertWorkpackage(db, p.id, { title: "c1", parent_id: parent.id, status: "doing" }, A);
     await upsertWorkpackage(db, p.id, { title: "c2", parent_id: parent.id, status: "done" }, A);
     await upsertWorkpackage(db, p.id, { title: "c3", parent_id: parent.id, status: "dropped", drop_reason: "not needed" }, A);
     await upsertWorkpackage(db, p.id, { title: "leaf", status: "waiting" }, A);
-    const card = (await listProjects(db, { category: "research" })).find((c) => c.id === p.id)!;
-    expect(card.category).toBe("research");
+    const card = (await listProjects(db, { category: pc })).find((c) => c.id === p.id)!;
+    expect(card.category).toBe(pc);
     expect(card.wp_counts).toEqual({ open: 0, in_progress: 1, waiting_blocked: 1, done: 1 });
-    expect((await listProjects(db, { category: "other" })).some((c) => c.id === p.id)).toBe(false);
+    if (pkeys.length > 1) expect((await listProjects(db, { category: pkeys[pkeys.length - 1] })).some((c) => c.id === p.id)).toBe(false);
     expect((await listProjects(db, { category: "none" })).some((c) => c.id === p.id)).toBe(false);
   });
   it("next_milestone skips done ones, ordered by due date", async () => {

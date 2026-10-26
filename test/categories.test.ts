@@ -72,10 +72,12 @@ describe("barCategory", () => {
     const kids = [wp("k1", { parent_id: "p", category: "docs" }), wp("k2", { parent_id: "p", category: "coding" })];
     expect(barCategory(parent, kids, eff(kids))).toBe("coding");
   });
-  it("tie without own category goes to the first in WP_CATEGORIES order", () => {
+  it("tie without own category goes to the first in WP_CATEGORIES order", async () => {
     const bare = wp("q");
-    const kids = [wp("k1", { parent_id: "q", category: "docs" }), wp("k2", { parent_id: "q", category: "research" })];
-    expect(barCategory(bare, kids, effectiveCategories([bare, ...kids]))).toBe("research");
+    const { INSTANCE } = await import("../src/generated/instance");
+    const [first, second] = INSTANCE.categories.workpackage.map((c) => c.key);
+    const kids = [wp("k1", { parent_id: "q", category: second }), wp("k2", { parent_id: "q", category: first })];
+    expect(barCategory(bare, kids, effectiveCategories([bare, ...kids]))).toBe(first);
   });
   it("ignores dropped children", () => {
     const kids = [
@@ -124,8 +126,14 @@ describe("categories from the instance", () => {
   it("setting an unknown category is rejected", async () => {
     const { env } = await import("cloudflare:test");
     const { createProject } = await import("../src/data/projects");
+    const { INSTANCE } = await import("../src/generated/instance");
     await expect(createProject(env.DB, { id: "bad", title: "Bad", category: "retired-key" }, testCaller())).rejects.toThrow(
-      /research\|product-development\|product-launch/,
+      new RegExp(
+        INSTANCE.categories.project
+          .slice(0, 3)
+          .map((c) => c.key)
+          .join("\|"),
+      ),
     );
   });
 });
