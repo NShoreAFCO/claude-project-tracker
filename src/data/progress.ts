@@ -140,3 +140,28 @@ export function buildWpTree<T extends WorkpackageRow>(wps: T[], opts: { locked?:
   sortRec(roots);
   return roots;
 }
+
+export type ProgressBasis = {
+  mode: "derived" | "manual";
+  done: number;
+  total: number;
+  weighted_percent: number;
+  reason: string | null;
+};
+
+export function progressBasis(
+  project: Pick<ProjectRow, "progress_mode" | "progress_manual" | "progress_manual_reason">,
+  wps: WorkpackageRow[],
+): ProgressBasis {
+  const parentIds = new Set(wps.map((wp) => wp.parent_id).filter((id): id is string => id !== null));
+
+  const leaves = wps.filter((wp) => !parentIds.has(wp.id) && wp.status !== "dropped");
+
+  return {
+    mode: project.progress_mode,
+    done: leaves.filter((wp) => wp.status === "done").length,
+    total: leaves.length,
+    weighted_percent: computeProjectProgress({ progress_mode: "derived", progress_manual: null }, wps),
+    reason: project.progress_manual_reason ?? null,
+  };
+}

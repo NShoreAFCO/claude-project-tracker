@@ -23,6 +23,8 @@ export const WP_FIELDS = [
   "blocked_by",
   "progress",
   "weight",
+  "effort_planned_pd",
+  "effort_actual_pd",
   "start_date",
   "end_date",
   "depends_on",
@@ -178,6 +180,12 @@ function normalise(input: Record<string, unknown>): Partial<Record<WpField, unkn
         break;
       case "weight":
         if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) throw new ValidationError("weight must be greater than 0");
+        break;
+      case "effort_planned_pd":
+      case "effort_actual_pd":
+        if (v === "") v = null;
+        if (v !== null && (typeof v !== "number" || !Number.isFinite(v) || v < 0))
+          throw new ValidationError(`${f} must be a number of person-days >= 0 or null`);
         break;
       case "sort":
         if (typeof v !== "number" || !Number.isFinite(v)) throw new ValidationError("sort must be a number");
@@ -335,6 +343,8 @@ export async function upsertWorkpackage(
     blocked_by: null,
     progress: 0,
     weight: 1,
+    effort_planned_pd: null,
+    effort_actual_pd: null,
     start_date: null,
     end_date: null,
     depends_on: null,

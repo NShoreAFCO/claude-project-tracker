@@ -10,7 +10,7 @@ import type {
   WorkpackageRow,
   WriteWarning,
 } from "../types";
-import { buildWpTree, computeProjectProgress, leafCounts, type WpCounts } from "./progress";
+import { buildWpTree, computeProjectProgress, leafCounts, progressBasis, type ProgressBasis, type WpCounts } from "./progress";
 import { QUALIFIES, listMilestones, lockedWpIds } from "./milestones";
 import { PROJECT_CATEGORIES, checkCategory } from "./categories";
 import { personOuts, personRefInput, personRefOut, refInitials } from "./persons";
@@ -67,6 +67,7 @@ export const PROJECT_FIELDS = [
   "target_date",
   "progress_mode",
   "progress_manual",
+  "progress_manual_reason",
   "tags",
   "category",
   "closure_note_md",
@@ -114,6 +115,7 @@ export type ProjectCard = {
   owner_id: string | null;
   /** open = todo, in_progress = doing, waiting_blocked = waiting + blocked; started = in_progress (alias until the UI moves). */
   wp_counts: WpCounts;
+  progress_basis: ProgressBasis;
   stalled_blocked: boolean;
   closure_due: boolean;
   /** Oldest `blocked_since` among blocked WPs (YYYY-MM-DD), for the card's age hint; null when none is blocked. */
@@ -168,6 +170,8 @@ export type ProjectOut = Omit<ProjectRow, "tags"> & {
   stalled_blocked: boolean;
   /** 100 % derived progress, all WPs done (or dropped), project not yet closed. */
   closure_due: boolean;
+  /** What the percentage rests on (spec F7): mode, done/total leaf WPs, derived weighted percent, manual reason. */
+  progress_basis: ProgressBasis;
   /** Projects this one continues / its follow-up projects (project_link kind "follows"). */
   follows: string[];
   followed_by: string[];
@@ -192,6 +196,10 @@ export async function toProjectOut(db: D1Database, row: ProjectRow, wps?: Workpa
     owner: personRefOut(row.owner_person_id, row.owner_text, people),
     sponsor: personRefOut(row.sponsor_person_id, row.sponsor_text, people),
     decision_maker: personRefOut(row.decision_maker_person_id, row.decision_maker_text, people),
+    progress_basis: progressBasis(
+      row,
+      list.filter((w) => !(w as { deleted_at?: string | null }).deleted_at),
+    ),
     ...projectFlags(row.status, list, derivedProgress),
     ...(await projectLinks(db, row.id)),
   };
@@ -217,6 +225,29 @@ function missingForActive(row: Pick<ProjectRow, "owner_person_id" | "owner_text"
   const missing: string[] = [];
   if (!row.owner_person_id && !row.owner_text) missing.push("owner");
   return missing;
+}
+
+/** Spec F7: manual progress needs a reason when a write switches to manual or changes the manual value. */
+export function manualReasonError(
+  current: { progress_mode: string; progress_manual: number | null } | null,
+  next: {
+    progress_mode: string;
+    progress_manual: number | null;
+    progress_manual_reason?: string | null;
+  },
+): string | null {
+  if (next.progress_mode !== "manual") {
+    return null;
+  }
+
+  const reasonRequired =
+    current === null || current.progress_mode !== "manual" || (current.progress_manual ?? null) !== (next.progress_manual ?? null);
+
+  const reasonPresent = typeof next.progress_manual_reason === "string" && next.progress_manual_reason.trim().length > 0;
+
+  return reasonRequired && !reasonPresent
+    ? "progress_manual_reason is required when progress_mode is manual or the manual progress changes"
+    : null;
 }
 
 const activeError = (missing: string[]) =>
@@ -295,6 +326,7 @@ export async function listProjects(
         owner_initials: refInitials(personRefOut(p.owner_person_id, p.owner_text, people)),
         owner_id: p.owner_person_id && people.has(p.owner_person_id) ? p.owner_person_id : null,
         wp_counts: leafCounts(list),
+        progress_basis: progressBasis(p, list),
         ...projectFlags(p.status, list, derivedProgress),
         blocked_since:
           list
@@ -425,6 +457,13 @@ export async function createProject(db: D1Database, input: ProjectInput, by: Cal
   if (!title) throw new ValidationError("title is required");
   if (input.id !== undefined && !ID_RE.test(String(input.id))) throw new ValidationError("id must match ^[a-z0-9][a-z0-9-]{0,62}$");
 
+  const createReasonErr = manualReasonError(null, {
+    progress_mode: String(fields.progress_mode ?? "derived"),
+    progress_manual: (fields.progress_manual as number | null | undefined) ?? null,
+    progress_manual_reason: fields.progress_manual_reason as string | null | undefined,
+  });
+  if (createReasonErr) throw new ValidationError(createReasonErr);
+
   const base = input.id ? String(input.id) : slugify(title);
   let id = base;
   for (let n = 2; await db.prepare("SELECT 1 FROM project WHERE id = ?").bind(id).first(); n++) id = `${base}-${n}`;
@@ -445,6 +484,7 @@ export async function createProject(db: D1Database, input: ProjectInput, by: Cal
     target_date: null,
     progress_mode: "derived",
     progress_manual: null,
+    progress_manual_reason: null,
     tags: null,
     category: null,
     owner_person_id: null,
@@ -507,6 +547,8 @@ export async function updateProject(
   const next = { ...current, ...fields, ...people } as Record<string, unknown>;
   // Checked where status becomes active, or when an active project's owner changes; other edits of a
   // legacy ownerless active project stay possible.
+  const reasonErr = manualReasonError(current, next as unknown as ProjectRow);
+  if (reasonErr) throw new ValidationError(reasonErr);
   const missing = missingForActive(next as unknown as ProjectRow);
   if (missing.length && next.status === "active" && (current.status !== "active" || "owner_person_id" in people))
     throw activeError(missing);

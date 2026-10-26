@@ -101,6 +101,26 @@ export async function logTokenCost(
   return row;
 }
 
+export function parseEffortPd(v: unknown): number | null {
+  if (v === undefined || v === null) {
+    return null;
+  }
+
+  if (typeof v !== "number" || !Number.isFinite(v) || v <= 0 || v > 1000) {
+    throw new ValidationError("effort_pd must be a number of person-days greater than 0 and at most 1000");
+  }
+
+  return v;
+}
+
+export function effortStmt(db: D1Database, wpId: string, pd: number, ts: string): D1PreparedStatement {
+  return db
+    .prepare(
+      "UPDATE workpackage SET effort_actual_pd = COALESCE(effort_actual_pd, 0) + ?, version = version + 1, updated_at = ? WHERE id = ?",
+    )
+    .bind(pd, ts, wpId);
+}
+
 /** Test seam: runs between the reads of logProgress and its batch. */
 let beforeProgressWrite: (() => Promise<void>) | null = null;
 export function setBeforeProgressWriteForTesting(f: (() => Promise<void>) | null): void {
@@ -110,7 +130,14 @@ export function setBeforeProgressWriteForTesting(f: (() => Promise<void>) | null
 /** Main "log what we did" call: event, optional WP progress, optional session id. */
 export async function logProgress(
   db: D1Database,
-  input: { project_id: string; summary: string; workpackage_id?: string | null; progress?: number | null; session_id?: string | null },
+  input: {
+    project_id: string;
+    summary: string;
+    workpackage_id?: string | null;
+    progress?: number | null;
+    effort_pd?: number | null;
+    session_id?: string | null;
+  },
   by: Caller,
 ): Promise<{ event_id: number; workpackage?: WorkpackageRow }> {
   await requireProject(db, input.project_id);
@@ -118,6 +145,8 @@ export async function logProgress(
   if (!summary || summary.length > 2000) throw new ValidationError("summary must be 1..2000 characters");
   const wp = input.workpackage_id ? await requireWpOf(db, input.project_id, input.workpackage_id) : null;
   const progress = input.progress ?? null;
+  const effort = parseEffortPd(input.effort_pd);
+  if (effort !== null && !wp) throw new ValidationError("effort_pd needs a workpackage_id");
   if (progress !== null && (typeof progress !== "number" || !Number.isFinite(progress) || progress < 0 || progress > 100)) {
     throw new ValidationError("progress must be 0..100");
   }
@@ -159,7 +188,9 @@ export async function logProgress(
         .bind(ts, wp.id),
     );
   }
+  if (wp && effort !== null) stmts.push(effortStmt(db, wp.id, effort, ts));
   const diff: Diff = {};
+  if (wp && effort !== null) diff.effort_actual_pd = [wp.effort_actual_pd ?? null, (wp.effort_actual_pd ?? 0) + effort];
   if (wp && progress !== null) diff.progress = [wp.progress, progress];
   if (wp && nextStatus !== wp.status) diff.status = [wp.status, nextStatus];
   if (input.session_id) {

@@ -53,6 +53,8 @@ export interface ProjectRow {
   target_date: string | null;
   progress_mode: "derived" | "manual";
   progress_manual: number | null;
+  /** Why the progress is set by hand (spec F7); required when manual mode or the manual value is written. */
+  progress_manual_reason?: string | null;
   tags: string | null;
   category: string | null;
   /** Owner, sponsor, decision maker: a person id, or free text when no person matches (spec §4.1). */
@@ -88,7 +90,11 @@ export interface WorkpackageRow {
   status: WpStatus;
   blocked_by: string | null;
   progress: number;
+  /** Effort in person-days (PD); also the progress weight. */
   weight: number;
+  /** Planned and actual effort in PD (spec F7); actual is added to by log_progress effort_pd. */
+  effort_planned_pd?: number | null;
+  effort_actual_pd?: number | null;
   start_date: string | null;
   end_date: string | null;
   depends_on: string | null;
