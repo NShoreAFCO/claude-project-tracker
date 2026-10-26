@@ -16,6 +16,7 @@ import { moveWorkpackages } from "../data/rules";
 import { HUMAN_DEFAULT, PROJECT_CATEGORIES, WP_CATEGORIES } from "../data/categories";
 import { ConflictError, ValidationError } from "../data/util";
 import { listPersons, upsertPerson } from "../data/persons";
+import { summary as portfolioSummary } from "../data/portfolio";
 import type { PersonRow } from "../types";
 import { POLICY } from "../policy";
 import { VERIFICATIONS } from "../data/rules";
@@ -851,6 +852,18 @@ export function registerTools(reg: Reg): void {
       );
       return result;
     },
+  );
+
+  reg(
+    "get_portfolio_summary",
+    {
+      title: "Get portfolio summary",
+      description:
+        "Read-only portfolio overview: project counts per status, and for open projects the ids with overdue milestones, gates awaiting a decision, blocked work packages, stale activity, missing target date or owner, schedule issues, and open risks scored 15 or more.",
+      inputSchema: z.object({}),
+      readOnly: true,
+    },
+    async (_args, tc) => portfolioSummary(tc.db, new Date().toISOString().slice(0, 10)),
   );
 
   reg(
