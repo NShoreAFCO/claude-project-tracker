@@ -2,12 +2,13 @@
 // consent → Access OIDC callback (token endpoint mocked) → token → /mcp with a bearer token.
 import { env } from "cloudflare:test";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import seedSql from "../seed/seed.sql?raw";
 import { OIDC_ISS, call, installTestKeys, signJwt } from "./helpers";
 
 const REDIRECT = "https://claude.ai/api/mcp/auth_callback";
 const VERIFIER = "acceptance-test-code-verifier-0123456789-abcdefghijklmnop";
 let CHALLENGE = ""; // S256(VERIFIER), computed in beforeAll
+// the example seed, generated in vitest.config.ts; independent of the built instance
+const seedSql: string = __EXAMPLE_SEED_SQL__;
 const SEED_IDS = ["example-website-relaunch"];
 
 /** seed.sql → statements (one INSERT per statement; doc contents span lines). */

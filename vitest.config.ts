@@ -1,7 +1,10 @@
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
+// @ts-expect-error untyped JS module
+import { exampleSeedSql } from "./test/example-seed.mjs";
 
 export default defineConfig({
+  define: { __EXAMPLE_SEED_SQL__: JSON.stringify(exampleSeedSql()) },
   plugins: [
     cloudflareTest(async () => ({
       wrangler: { configPath: "./wrangler.jsonc" },
