@@ -1,6 +1,7 @@
 import type { Caller, Env, Identity, OwnerKind } from "../types";
 import { createProject, getProjectDetail, listProjects, updateProject } from "../data/projects";
 import { listWorkpackagesOut, upsertWorkpackage } from "../data/workpackages";
+import { mineWorkpackages, summary, upcomingWorkpackages } from "../data/portfolio";
 import { listMilestones, upsertMilestone } from "../data/milestones";
 import { listRisks, upsertRisk, type RiskType } from "../data/risks";
 import { createBaseline } from "../data/baselines";
@@ -125,6 +126,21 @@ route("PATCH", "/api/risks/:id", async ({ db, req, by, params }) => {
   return upsertRisk(db, reqStr(project_id, "project_id"), { ...input, id: params[0] }, by, optNum(expected_version));
 });
 route("DELETE", "/api/risks/:id", async ({ db, by, params }) => deleteEntity(db, "risk", params[0], by));
+
+// ---- portfolio overview (F9), read-only
+route("GET", "/api/portfolio/summary", async ({ db }) => summary(db, new Date().toISOString().slice(0, 10)));
+route("GET", "/api/workpackages/upcoming", async ({ db, url }) =>
+  upcomingWorkpackages(db, {
+    project_id: url.searchParams.get("project_id") ?? undefined,
+    limit: optNum(url.searchParams.get("limit")),
+  }),
+);
+route("GET", "/api/workpackages/mine", async ({ db, url, by }) =>
+  mineWorkpackages(db, by.personId, {
+    assigned_only: ["1", "true"].includes(url.searchParams.get("assigned_only") ?? ""),
+    sort: (url.searchParams.get("sort") ?? undefined) as "project" | "in_progress" | "start" | "end" | undefined,
+  }),
+);
 
 // ---- work packages
 route("GET", "/api/workpackages", async ({ db, url }) => listWorkpackagesOut(db, reqStr(url.searchParams.get("project_id"), "project_id")));
