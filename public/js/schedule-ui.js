@@ -130,7 +130,7 @@ export function gateNames(err) {
     return "";
   }
 
-  return gates.map((gate) => `“${gate.title}”`).join(", ");
+  return gates.map((gate) => t("quoted", { s: gate.title })).join(", ");
 }
 
 /** Extract the work package ID from a gate override endpoint. */

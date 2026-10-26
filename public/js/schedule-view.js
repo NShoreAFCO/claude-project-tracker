@@ -72,18 +72,16 @@ export function milestoneItem(ms, { today, titleOf, requiresText, unlocksText, a
   const stateLabel = state === "done" ? t("reached") : state === "overdue" ? t("overdue") : t("msOpen");
 
   const meta = [
-    `${t("due")}: ${fmtDate(ms.due_date)}`,
-    " · ",
-    `${t("requires")}: ${requiresText}`,
-    " · ",
-    `${t("unlocks")}: ${unlocksText}`,
+    h("span", `${t("due")}: ${fmtDate(ms.due_date)}`),
+    h("span", `${t("requires")}: ${requiresText}`),
+    h("span", `${t("unlocks")}: ${unlocksText}`),
   ];
 
   for (const node of scheduleMeta(ms)) {
     if (node.classList.contains("critical")) {
       continue;
     }
-    meta.push(" · ", node);
+    meta.push(node);
   }
 
   let lastDecision = null;

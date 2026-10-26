@@ -481,6 +481,7 @@ export default {
   fOnBehalf: "Stellvertretend für den Entscheider erfassen (nur Admins, Notiz nötig)",
   decisionRecorded: "Entscheidung erfasst.",
   decisionBy: "{decision} von {name}, {date}",
+  quoted: "„{s}“",
   overrideTitle: "Vor der Entscheidung starten",
   overrideText: "„{name}“ ist durch das Gate {gates} gesperrt. Ein Start jetzt wird als Übersteuerung mit deiner Begründung festgehalten.",
   overrideTextAgent: "„{name}“ ist durch das Gate {gates} gesperrt. Nur eine Person im Dashboard kann die Sperre übersteuern.",

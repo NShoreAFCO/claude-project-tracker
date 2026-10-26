@@ -252,12 +252,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
             { label: t("delete"), danger: true, onClick: () => deleteEntity("workpackage", w.id, w.title, id) },
           ]),
         ),
-        schedMeta.length
-          ? h(
-              "div.meta",
-              schedMeta.flatMap((n, i) => (i ? [" · ", n] : [n])),
-            )
-          : null,
+        schedMeta.length ? h("div.meta", schedMeta) : null,
         issueList(w, titleOf),
         w.blocked_by ? h("div.blocked", `${t("blockedBy")}: ${blockedLabel(w.blocked_by)}`, blockedAge(w)) : null,
         w.waiting_reason ? h("div.blocked", `${t("fWaitingReason")}: ${w.waiting_reason}`) : null,

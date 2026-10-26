@@ -476,6 +476,7 @@ export default {
   fOnBehalf: "Record on behalf of the decision maker (admins only, note required)",
   decisionRecorded: "Decision recorded.",
   decisionBy: "{decision} by {name}, {date}",
+  quoted: "“{s}”",
   overrideTitle: "Start before decision",
   overrideText: "“{name}” is locked by gate {gates}. Starting it now is recorded as an override with your reason.",
   overrideTextAgent: "“{name}” is locked by gate {gates}. Only a person in the dashboard can override the lock.",
