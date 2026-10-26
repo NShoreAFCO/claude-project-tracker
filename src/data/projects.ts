@@ -39,6 +39,7 @@ import {
 } from "./rules";
 import { gateClosedSql, gateLockedWpIds } from "./gates";
 import { isAgent } from "../auth/caller";
+import { POLICY } from "../policy";
 import { activitySet, isSystem, projectStale } from "./activity";
 import {
   ConflictError,
@@ -74,6 +75,11 @@ export const PROJECT_FIELDS = [
   "closure_note_md",
   "lessons_learned_md",
   "schedule_strict",
+  "objectives_md",
+  "scope_in_md",
+  "scope_out_md",
+  "success_criteria_md",
+  "language",
 ] as const;
 type ProjectField = (typeof PROJECT_FIELDS)[number];
 /** Person-or-text roles of a project; each is stored as <role>_person_id or <role>_text. */
@@ -148,6 +154,11 @@ function normalise(input: ProjectInput): Partial<Record<ProjectField, unknown>> 
       // true/false, or null to follow the policy default (spec F4)
       if (v !== null && typeof v !== "boolean") throw new ValidationError("schedule_strict must be true, false or null");
       v = v === null ? null : v ? 1 : 0;
+    } else if (f === "language") {
+      // Report language (spec F2, §4.4): one of the instance's offered locales, null = instance default.
+      if (v === "") v = null;
+      if (v !== null && !POLICY.locales.includes(String(v)))
+        throw new ValidationError(`language must be one of ${POLICY.locales.join("|")} or null`);
     } else if (f === "category") v = checkCategory(v, PROJECT_CATEGORIES);
     else if (f === "progress_manual") {
       if (v !== null && (typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > 100))
@@ -500,6 +511,11 @@ export async function createProject(db: D1Database, input: ProjectInput, by: Cal
     decision_maker_text: null,
     closure_note_md: null,
     lessons_learned_md: null,
+    objectives_md: null,
+    scope_in_md: null,
+    scope_out_md: null,
+    success_criteria_md: null,
+    language: null,
     ...(fields as Partial<ProjectRow>),
     ...people,
     version: 1,

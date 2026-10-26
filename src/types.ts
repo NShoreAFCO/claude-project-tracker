@@ -67,6 +67,13 @@ export interface ProjectRow {
   /** Closure record (spec F3): `done` and `abandoned` need the note, `done` also lessons learned. */
   closure_note_md: string | null;
   lessons_learned_md: string | null;
+  /** Objectives and scope (spec F2), Markdown. */
+  objectives_md?: string | null;
+  scope_in_md?: string | null;
+  scope_out_md?: string | null;
+  success_criteria_md?: string | null;
+  /** Report language (one of policy.locales); NULL = instance default locale. */
+  language?: string | null;
   /** Schedule validation (spec F4): 1 strict, 0 lenient, NULL = policy schedule_strict_default. */
   schedule_strict?: number | null;
   /** Bumped by every schedule-affecting write (guarded, same batch) to detect concurrent writes. */
@@ -113,6 +120,14 @@ export interface WorkpackageRow {
   blocked_since: string | null;
   /** Optional reason for a deferral (`waiting`); cleared when it leaves `waiting`. */
   waiting_reason: string | null;
+  /** Deliverable (short text) and acceptance criteria (Markdown), spec F2. */
+  deliverable?: string | null;
+  acceptance_criteria_md?: string | null;
+  /** How completion is verified: review|test|demo|sign_off|none (default none). */
+  verification?: string;
+  /** Person id of the verifier (never an agent) and when; set only while the WP is done. */
+  verified_by?: string | null;
+  verified_at?: string | null;
   /** Stored schedule issues (JSON array of ScheduleIssue; "[]" = none, NULL = not computed yet), spec F4. */
   schedule_issues?: string | null;
   /** Gate lock override by a person (spec F5). */

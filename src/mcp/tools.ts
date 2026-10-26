@@ -17,6 +17,8 @@ import { HUMAN_DEFAULT, PROJECT_CATEGORIES, WP_CATEGORIES } from "../data/catego
 import { ConflictError, ValidationError } from "../data/util";
 import { listPersons, upsertPerson } from "../data/persons";
 import type { PersonRow } from "../types";
+import { POLICY } from "../policy";
+import { VERIFICATIONS } from "../data/rules";
 
 const projectStatusSchema = z.enum(["idea", "active", "on_hold", "done", "abandoned"]);
 
@@ -62,6 +64,21 @@ function personRef(description: string) {
     .describe(
       `${description} Give a person id or email (see list_persons); an exact name also matches, other text is stored as free text. null clears.`,
     );
+}
+
+/** Objectives, scope and report language of a project (spec F2). */
+function projectScopeFields() {
+  return {
+    objectives_md: optionalText("Set the objectives (Markdown): what the project is meant to achieve."),
+    scope_in_md: optionalText("Set what is in scope (Markdown)."),
+    scope_out_md: optionalText("Set what is explicitly out of scope (Markdown)."),
+    success_criteria_md: optionalText("Set the success criteria (Markdown): how the project's success is judged."),
+    language: z
+      .enum(POLICY.locales as [string, ...string[]])
+      .nullable()
+      .optional()
+      .describe("Set the language of the project's reports (null = instance default)."),
+  };
 }
 
 /**
@@ -156,7 +173,7 @@ export function registerTools(reg: Reg): void {
     {
       title: "Create project",
       description:
-        "Create a project. Fill owner (defaults to you, the logged-in person), and sponsor / decision_maker when known. Status active requires an owner: with status omitted and no owner the project starts as idea and the result carries a warning; an explicit status active without owner fails.",
+        "Create a project. Fill owner (defaults to you, the logged-in person), and sponsor / decision_maker when known. Fill objectives_md, scope_in_md, scope_out_md and success_criteria_md when the user has stated them (ask if unclear; do not invent them). Status active requires an owner: with status omitted and no owner the project starts as idea and the result carries a warning; an explicit status active without owner fails.",
       inputSchema: z.object({
         title: z.string().min(1).describe("Set the project title."),
         id: z.string().optional().describe("Set an optional project identifier (slug)."),
@@ -178,6 +195,7 @@ export function registerTools(reg: Reg): void {
         decision_maker: personRef("Set the decision maker (decides at gates)."),
         closure_note_md: optionalText("Set the closure note (required for status done or abandoned)."),
         lessons_learned_md: optionalText('Set lessons learned (required for status done; may be "none").'),
+        ...projectScopeFields(),
         on_behalf_of: onBehalfOf,
       }),
     },
@@ -206,6 +224,11 @@ export function registerTools(reg: Reg): void {
           decision_maker: args.decision_maker,
           closure_note_md: args.closure_note_md,
           lessons_learned_md: args.lessons_learned_md,
+          objectives_md: args.objectives_md,
+          scope_in_md: args.scope_in_md,
+          scope_out_md: args.scope_out_md,
+          success_criteria_md: args.success_criteria_md,
+          language: args.language,
         },
         tc.by,
       ),
@@ -249,6 +272,7 @@ export function registerTools(reg: Reg): void {
               .nullable()
               .optional()
               .describe("Refuse writes that add schedule issues (true), only warn (false), or follow the instance default (null)."),
+            ...projectScopeFields(),
           })
           .describe("Provide the fields to update."),
         expected_version: z.number().int().optional().describe("Require the expected project version."),
@@ -262,7 +286,7 @@ export function registerTools(reg: Reg): void {
     "upsert_workpackage",
     {
       title: "Upsert work package",
-      description: `Create or update a work package. category: ${WP_CATEGORIES.join("|")} (null = inherit from the parent). WPs with human=true${HUMAN_DEFAULT.length ? ` (default for ${HUMAN_DEFAULT.join(", ")})` : ""} are done off the computer: log progress the user reports, and set them to done only when the user says so. Set owner when someone other than the project owner is responsible (effective_owner falls back to the project owner); priority_stakeholders lists persons to keep informed. Status: use blocked only for a real blocker (blocked_by wp:<id>, ms:<id> or ext:<text>; blocked_since defaults to today) and waiting for a deliberate deferral (optional waiting_reason). dropped requires drop_reason. A todo WP whose progress rises above 0 becomes doing unless you set status in the same call. The result lists schedule issues in warnings (start before a predecessor ends or before an unlocking milestone is due, child outside its parent); fix them or tell the user. In a schedule_strict project a write that adds issues fails with a conflict listing them. A WP behind an undecided gate milestone is gate-locked: setting it to doing or done, or setting its progress, fails with 409 GATE_LOCKED naming the gate; tell the user (the decision maker decides, or a person overrides in the dashboard).`,
+      description: `Create or update a work package. category: ${WP_CATEGORIES.join("|")} (null = inherit from the parent). WPs with human=true${HUMAN_DEFAULT.length ? ` (default for ${HUMAN_DEFAULT.join(", ")})` : ""} are done off the computer: log progress the user reports, and set them to done only when the user says so. When you create a WP, fill deliverable and acceptance_criteria_md (how to tell it is done) and choose verification (${VERIFICATIONS.join("|")}). Verification: setting a WP with verification other than none to done records your OAuth login's person as verified_by (verified_at now), so do it only when the user confirms they verified it; never mark human=true WPs verified yourself, and never set verified_by to an agent, free text or anyone but your login (refused). Set owner when someone other than the project owner is responsible (effective_owner falls back to the project owner); priority_stakeholders lists persons to keep informed. Status: use blocked only for a real blocker (blocked_by wp:<id>, ms:<id> or ext:<text>; blocked_since defaults to today) and waiting for a deliberate deferral (optional waiting_reason). dropped requires drop_reason. A todo WP whose progress rises above 0 becomes doing unless you set status in the same call. The result lists schedule issues in warnings (start before a predecessor ends or before an unlocking milestone is due, child outside its parent); fix them or tell the user. In a schedule_strict project a write that adds issues fails with a conflict listing them. A WP behind an undecided gate milestone is gate-locked: setting it to doing or done, or setting its progress, fails with 409 GATE_LOCKED naming the gate; tell the user (the decision maker decides, or a person overrides in the dashboard).`,
       inputSchema: z.object({
         project_id: z.string().describe("Identify the owning project."),
         id: z.string().optional().describe("Identify an existing work package (omit to create)."),
@@ -292,6 +316,25 @@ export function registerTools(reg: Reg): void {
         sort: z.number().int().optional().describe("Set the sort order."),
         category: wpCategorySchema.nullable().optional().describe("Set the work category (null = inherit)."),
         human: z.boolean().nullable().optional().describe("Mark as human (off-computer) work; null = default from category."),
+        deliverable: z.string().max(500).nullable().optional().describe("Set the deliverable (short text: what the WP produces)."),
+        acceptance_criteria_md: optionalText("Set the acceptance criteria (Markdown): how to tell the WP is done. Fill on creation."),
+        verification: z
+          .enum(VERIFICATIONS)
+          .optional()
+          .describe("Set how completion is verified (default none). Other than none, status done needs a person as verified_by."),
+        verified_by: z
+          .string()
+          .max(200)
+          .nullable()
+          .optional()
+          .describe(
+            "Omit: done records your OAuth login's person. Only your own login's person id or email is accepted; never an agent or free text.",
+          ),
+        verified_at: z
+          .string()
+          .nullable()
+          .optional()
+          .describe("Set when it was verified (YYYY-MM-DD or ISO timestamp, not in the future; default now)."),
         owner: personRef("Set the work package owner (empty = project owner)."),
         priority_stakeholders: z
           .array(z.string())
@@ -493,7 +536,7 @@ export function registerTools(reg: Reg): void {
     {
       title: "Log progress",
       description:
-        "Log what was done in this session. Main logging tool. With workpackage_id, a todo work package moves to doing; progress 100 marks it done. A gate-locked work package (behind an undecided gate) is not started, and setting its progress is refused (409 GATE_LOCKED).",
+        "Log what was done in this session. Main logging tool. With workpackage_id, a todo work package moves to doing; progress 100 marks it done (for a WP with verification other than none this records your OAuth login's person as verified_by, so log 100 only when the user confirms the verification; never for human=true WPs on your own). A gate-locked work package (behind an undecided gate) is not started, and setting its progress is refused (409 GATE_LOCKED).",
       inputSchema: z.object({
         project_id: z.string().describe("Identify the project."),
         summary: z.string().min(1).describe("Summarize the completed work."),
