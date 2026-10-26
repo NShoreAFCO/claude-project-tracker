@@ -3,7 +3,8 @@ import { reachStmts } from "./milestones";
 import { gateGuardedBatch, gateLockedSql, lockingGates, startGuard } from "./gates";
 import { LIVE, NotFoundError, ValidationError, eventStmt, newId, now, type Diff } from "./util";
 import { activitySet } from "./activity";
-import { verificationGuardStmt, verificationGuarded, verificationRequiredError } from "./rules";
+import { signOffGuardStmt, verificationGuardStmt, verificationGuarded, verificationRequiredError } from "./rules";
+import { canDo, requireAction } from "../auth/permissions";
 
 async function requireProject(db: D1Database, id: string): Promise<void> {
   if (!(await db.prepare(`SELECT 1 FROM project WHERE id = ? AND ${LIVE()}`).bind(id).first()))
@@ -180,9 +181,15 @@ export async function logProgress(
   const verifier = by.personId ?? null;
   const needsVerifier = completes && (wp.verification ?? "none") !== "none";
   if (needsVerifier && !verifier) throw verificationRequiredError(String(wp.verification));
+  // F11: completing a sign_off WP records the caller as its verifier: decider or above, never a service token.
+  if (completes && wp.verification === "sign_off") requireAction(by, "verify_sign_off");
   // Guarded whenever the log may complete the WP, also when it was done at read time: it may be reopened
-  // with a verification meanwhile (the guard checks status and verification when the batch runs).
-  const verifyGuard = wp && progress !== null && progress >= 100 && !verifier ? [verificationGuardStmt(db, wp.id)] : [];
+  // with a verification meanwhile (the guard checks status and verification when the batch runs). A
+  // verifier who may not sign off is guarded against a sign_off appearing meanwhile in the same way.
+  const mayComplete = !!wp && progress !== null && progress >= 100;
+  const signOffGuarded = mayComplete && !!verifier && !canDo(by, "verify_sign_off");
+  const verifyGuard =
+    !wp || !mayComplete ? [] : !verifier ? [verificationGuardStmt(db, wp.id)] : signOffGuarded ? [signOffGuardStmt(db, wp.id)] : [];
   if (wp && progress !== null) {
     const verify = "? >= 100 AND status != 'done' AND verification != 'none' AND verified_by IS NULL";
     stmts.push(
@@ -236,7 +243,12 @@ export async function logProgress(
   const reach = Object.keys(diff).length ? reachStmts(db, input.project_id, by) : [];
   const batch = [...gateGuard.stmts, ...verifyGuard, ...stmts, ...reach];
   if (beforeProgressWrite) await beforeProgressWrite();
-  const res = await verificationGuarded(db, wp?.id ?? "", () => gateGuardedBatch(db, batch, gateGuard.ids, by));
+  const res = await verificationGuarded(
+    db,
+    wp?.id ?? "",
+    () => gateGuardedBatch(db, batch, gateGuard.ids, by),
+    signOffGuarded ? by : undefined,
+  );
   const eventId = Number(res[gateGuard.stmts.length + verifyGuard.length + stmts.length - 1].meta.last_row_id);
   if (!wp) return { event_id: eventId };
   return {

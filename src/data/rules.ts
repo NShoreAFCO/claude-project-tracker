@@ -20,6 +20,7 @@ import {
 import { gateLockedError, gateLockedSql, gatesEnforced, lockingGates } from "./gates";
 import { resolvePersonRef } from "./persons";
 import { isAgent } from "../auth/caller";
+import { requireAction } from "../auth/permissions";
 
 /** Machine-readable details of a refused transition (the 409 body's `current`). */
 export type TransitionDetails = {
@@ -263,6 +264,9 @@ export function applyVerificationRules(before: VerifyState | null, fields: Recor
     verificationRank(fields.verification) < verificationRank(before.verification)
   )
     throw verificationLoweredError(String(before.verification ?? "none"), String(fields.verification));
+  // F11: waiving a sign_off (lowering it to a weaker method) is a sign-off decision: decider or above.
+  if (before?.verification === "sign_off" && fields.verification !== undefined && fields.verification !== "sign_off")
+    requireAction(by, "verify_sign_off");
   const next = String(fields.status ?? before?.status ?? "todo");
   if (next !== "done") {
     fields.verified_by = null;
@@ -290,6 +294,9 @@ export function applyVerificationRules(before: VerifyState | null, fields: Recor
       "agents cannot change a verification recorded by another person; that person changes it in the dashboard, or reopen the work package",
     );
   if (verification !== "none" && verifiedBy === null) throw verificationRequiredError(verification);
+  // F11: recording or changing a sign_off verification needs a decider (never a service token, Ruling 42
+  // covers review/test/demo only). Reopening, which clears it, stays an ordinary write.
+  if (verification === "sign_off") requireAction(by, "verify_sign_off");
   fields.verified_by = verifiedBy;
   fields.verified_at = verifiedAt;
 }
@@ -306,13 +313,25 @@ export const verificationGuardStmt = (db: D1Database, wpId: string): D1PreparedS
     .prepare("UPDATE workpackage SET title = NULL WHERE id = ? AND status != 'done' AND verification != 'none' AND verified_by IS NULL")
     .bind(wpId);
 
-/** Runs `write`; a failed verificationGuardStmt becomes 409 VERIFICATION_REQUIRED. */
-export async function verificationGuarded<T>(db: D1Database, wpId: string, write: () => Promise<T>): Promise<T> {
+/**
+ * Guard statement (put it first in the batch) for a write by a caller without "verify_sign_off" that may
+ * complete WP `wpId` with the caller as verifier: fails the batch (NOT NULL, as above) if the WP is not
+ * done and needs a sign_off when the batch runs. Catches a sign_off set (or a reopen) between read and write.
+ */
+export const signOffGuardStmt = (db: D1Database, wpId: string): D1PreparedStatement =>
+  db.prepare("UPDATE workpackage SET title = NULL WHERE id = ? AND status != 'done' AND verification = 'sign_off'").bind(wpId);
+
+/**
+ * Runs `write`; a failed verificationGuardStmt becomes 409 VERIFICATION_REQUIRED. Pass `signOffBy` (the
+ * caller) when the batch carries a signOffGuardStmt: its failure becomes 403 (a sign_off `signOffBy` may not record).
+ */
+export async function verificationGuarded<T>(db: D1Database, wpId: string, write: () => Promise<T>, signOffBy?: Caller): Promise<T> {
   try {
     return await write();
   } catch (e) {
     if (!VERIFY_GUARD_FAILED.test(String((e as Error)?.message ?? e))) throw e;
     const row = await db.prepare("SELECT verification FROM workpackage WHERE id = ?").bind(wpId).first<{ verification: string }>();
+    if (signOffBy && row?.verification === "sign_off") requireAction(signOffBy, "verify_sign_off");
     throw verificationRequiredError(row?.verification ?? "set");
   }
 }

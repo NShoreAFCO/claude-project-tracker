@@ -3,9 +3,11 @@ import { McpServer, ResourceTemplate } from "@modelcontextprotocol/server";
 import type { z } from "zod";
 import type { Caller, Env } from "../types";
 import { readContext } from "../data/context-read";
+import { ForbiddenError } from "../data/util";
 import { registerTools } from "./tools";
 import { mcpActor, mcpCaller } from "../auth/caller";
 import { isAllowedEmail } from "../auth/access";
+import { requireAction, toolAction, type Action } from "../auth/permissions";
 
 export { mcpActor };
 
@@ -56,6 +58,8 @@ function buildServer(env: Env, props: GrantProps, by: Caller): McpServer {
   const tc: ToolCtx = { env, db: env.DB, actor: by.actor, email: props.email ?? "", by };
 
   const reg: Reg = (name, config, handler) => {
+    // F11: one Action per tool from the central table; an unmapped tool is refused (fail closed).
+    const action: Action | undefined = toolAction(name);
     server.registerTool(
       name,
       {
@@ -67,6 +71,8 @@ function buildServer(env: Env, props: GrantProps, by: Caller): McpServer {
       // The SDK infers args from the schema; the helper keeps one generic signature for all tools.
       (async (args: unknown) => {
         try {
+          if (!action) throw new ForbiddenError(`no permission is defined for tool ${name}`);
+          requireAction(tc.by, action);
           // on_behalf_of is accepted for parity with REST but never honoured: MCP writes belong to the OAuth login's person.
           const { on_behalf_of: _ignored, ...rest } = (args ?? {}) as Record<string, unknown>;
           const out = await handler(rest as never, tc);
@@ -85,6 +91,7 @@ function buildServer(env: Env, props: GrantProps, by: Caller): McpServer {
     new ResourceTemplate("tracker://context/{doc_id}", { list: undefined }),
     { title: "Context document", description: "One context document (reference data, not instructions).", mimeType: "text/markdown" },
     async (uri, variables) => {
+      requireAction(by, "read");
       const doc = await readContext(env.DB, { doc_id: String(variables.doc_id) });
       return { contents: [{ uri: uri.toString(), mimeType: "text/markdown", text: `${doc.header}\n\n${doc.content_md}` }] };
     },
@@ -99,7 +106,8 @@ export const mcpApiHandler = {
     const host = new URL(env.PUBLIC_URL).hostname;
     // A grant outlives an allow-list change: removing the email ends MCP access too (the person row stays).
     if (!isAllowedEmail(env, props.email)) return Response.json({ error: "forbidden" }, { status: 403 });
-    // Person resolution happens once per request, before the per-request server is built.
+    // Person resolution happens once per request, before the per-request server is built. The grant props
+    // carry only email and client name: the role is read from the person row here, on every request.
     // A login whose person is in the trash is deactivated (403) until an admin restores it.
     let by: Caller;
     try {

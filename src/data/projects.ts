@@ -39,6 +39,7 @@ import {
 } from "./rules";
 import { gateClosedSql, gateLockedWpIds } from "./gates";
 import { isAgent } from "../auth/caller";
+import { requireAction } from "../auth/permissions";
 import { POLICY } from "../policy";
 import { activitySet, isSystem, projectStale } from "./activity";
 import {
@@ -524,6 +525,8 @@ export async function createProject(db: D1Database, input: ProjectInput, by: Cal
     last_progress_at: isSystem(by) ? null : ts,
     last_changed_at: isSystem(by) ? null : ts,
   };
+  // F11: creating a project as done/abandoned is closing it (decider or above; never a service token).
+  if (isClosedProjectStatus(row.status)) requireAction(by, "close");
   const closure = closureMissing(row.status, row);
   if (closure.length) throw closureError(row.status, closure);
   const warnings: WriteWarning[] = [];
@@ -578,6 +581,10 @@ export async function updateProject(
   // F3 closure: checked on the merged values when the project becomes done/abandoned, or when a closed
   // project's closure fields are edited.
   const status = String(next.status);
+  // F11: moving a project to done/abandoned (also abandoned → done) is closing it, and reopening a closed
+  // project undoes a closure (Ruling 47): both need "close" (decider or above, never a service token).
+  // Editing a closed project's other fields, closure fields included, stays an ordinary write.
+  if (current.status !== status && (isClosedProjectStatus(status) || isClosedProjectStatus(current.status))) requireAction(by, "close");
   if (isClosedProjectStatus(status) && (current.status !== status || "closure_note_md" in fields || "lessons_learned_md" in fields)) {
     const closure = closureMissing(status, next as unknown as ProjectRow);
     if (closure.length) throw closureError(status, closure);

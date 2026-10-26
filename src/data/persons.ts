@@ -1,6 +1,6 @@
 import type { Caller, PersonOut, PersonRefOut, PersonRow, Role } from "../types";
 import { POLICY } from "../policy";
-import { isAgent } from "../auth/caller";
+import { requireAction } from "../auth/permissions";
 import {
   ConflictError,
   ForbiddenError,
@@ -244,8 +244,8 @@ async function checkEmailFree(db: D1Database, email: unknown, selfId: string | n
 
 /**
  * Create a person, or update the one named by input.id. undefined keeps a field, null clears it.
- * Agents (MCP, service tokens) never change access roles or a user's email; only admins change either.
- * Further role checks per §4.2 arrive with R5.
+ * Changing an access role or a user's email needs "manage_roles" (admins; never agents). The route's own
+ * Action ("write") is checked centrally (src/auth/permissions.ts).
  */
 export async function upsertPerson(
   db: D1Database,
@@ -255,14 +255,12 @@ export async function upsertPerson(
 ): Promise<PersonRow> {
   const fields = normalise(input);
   const existing = input.id ? await getPerson(db, String(input.id)) : null;
+  // Editors add and edit stakeholders; granting or changing access is for admins, never agents (§4.1, §4.2).
   const roleChange = "access_role" in fields && (fields.access_role ?? null) !== (existing?.access_role ?? null);
-  if (roleChange && isAgent(by)) throw new ForbiddenError("agents cannot change access roles");
-  // Editors add and edit stakeholders; granting or changing access is for admins (§4.1).
-  if (roleChange && by.role !== "admin") throw new ForbiddenError("only admins can change access roles");
+  if (roleChange) requireAction(by, "manage_roles");
   // A user's email is their login: whoever controls it inherits the row's role. Only admins (never agents) change it (§4.1).
   const userEmailChange = !!existing && existing.access_role !== null && "email" in fields && (fields.email ?? null) !== existing.email;
-  if (userEmailChange && isAgent(by)) throw new ForbiddenError("agents cannot change the email of a user");
-  if (userEmailChange && by.role !== "admin") throw new ForbiddenError("only admins can change the email of a user");
+  if (userEmailChange) requireAction(by, "manage_roles");
 
   if (existing) {
     if (typeof expectedVersion === "number" && expectedVersion !== existing.version) throw new ConflictError("version conflict", existing);
