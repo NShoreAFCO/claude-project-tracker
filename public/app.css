@@ -1560,3 +1560,93 @@ details.objectives > summary h3 {
   text-decoration: underline;
   font-weight: 700;
 }
+
+/* ---- header user bar, role badge, language switch, collapsed empty categories (R5.3) */
+.userbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.userbar:empty {
+  display: none;
+}
+
+.userbar .who {
+  max-width: 16rem;
+  overflow: hidden;
+  font-weight: 600;
+  color: var(--color-text-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.role-badge {
+  border-left: 4px solid var(--color-text-muted);
+  background: var(--color-surface);
+  color: var(--color-text-strong);
+}
+
+.role-badge.role-viewer {
+  border-left-color: var(--color-text-muted);
+}
+
+.role-badge.role-editor {
+  border-left-color: var(--color-accent);
+}
+
+.role-badge.role-decider {
+  border-left-color: var(--color-primary);
+}
+
+.role-badge.role-admin {
+  border-left-color: var(--color-primary-strong);
+}
+
+.userbar .lang-switch {
+  width: auto;
+  min-width: 0;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.85rem;
+}
+
+.cat-empty {
+  margin-bottom: 0.8rem;
+}
+
+.cat-empty > summary.cat-head {
+  margin-bottom: 0;
+  border-radius: var(--radius);
+  cursor: pointer;
+  list-style: none;
+}
+
+.cat-empty > summary.cat-head::before {
+  content: "\25B8";
+}
+
+details.cat-empty[open] > summary.cat-head {
+  margin-bottom: 0.5rem;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+
+details.cat-empty[open] > summary.cat-head::before {
+  content: "\25BE";
+}
+
+.cat-empty > summary::-webkit-details-marker {
+  display: none;
+}
+
+.cat-empty > p {
+  padding: 0 0.9rem;
+}
+
+@media (max-width: 720px) {
+  .userbar {
+    width: 100%;
+    margin-left: 0;
+  }
+}

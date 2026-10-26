@@ -1,5 +1,4 @@
-// UI strings. The locale comes from the instance config (app.locale); instance/strings.<locale>.json
-// overrides single strings. t("key", { var }) fills {var} placeholders.
+// UI strings. The locale comes from the instance config (app.locale); instance/strings.<locale>.json overrides single strings.
 import config from "../instance/config.js";
 import en from "./locales/en.js";
 import de from "./locales/de.js";
@@ -7,7 +6,8 @@ import de from "./locales/de.js";
 const LOCALES = { en, de };
 const INTL = { en: "en-GB", de: "de-AT" };
 
-/** Deep-merge string overrides into a locale table (objects merge, strings replace). */
+export const AVAILABLE = Object.keys(LOCALES);
+
 export function mergeStrings(base, over) {
   const out = { ...base };
   for (const [k, v] of Object.entries(over || {}))
@@ -15,10 +15,54 @@ export function mergeStrings(base, over) {
   return out;
 }
 
-export const LOCALE = LOCALES[config.app?.locale] ? config.app.locale : "en";
-export const STRINGS = mergeStrings(LOCALES[LOCALE], { appTitle: config.app?.name, ...(config.strings?.[LOCALE] || {}) });
+export let LOCALE;
+export let STRINGS;
+export let INTL_LOCALE;
 
-/** Look up a dotted key ("status.done") and fill {placeholders}. Missing keys render as the key itself. */
+let dtf;
+let df;
+let nf;
+
+export function setLocale(code) {
+  if (!LOCALES[code]) return false;
+
+  LOCALE = code;
+  STRINGS = mergeStrings(LOCALES[LOCALE], {
+    appTitle: config.app?.name,
+    ...(config.strings?.[LOCALE] || {}),
+  });
+  INTL_LOCALE = INTL[LOCALE];
+
+  dtf = new Intl.DateTimeFormat(INTL_LOCALE, { dateStyle: "medium", timeStyle: "short" });
+  df = new Intl.DateTimeFormat(INTL_LOCALE, { dateStyle: "medium" });
+  nf = new Intl.NumberFormat(INTL_LOCALE);
+
+  if (typeof document !== "undefined") {
+    document.documentElement.lang = LOCALE;
+  }
+
+  return true;
+}
+
+export function storedLocale() {
+  try {
+    const code = localStorage.getItem("tracker.locale");
+    return LOCALES[code] ? code : null;
+  } catch {
+    return null;
+  }
+}
+
+export function rememberLocale(code) {
+  try {
+    localStorage.setItem("tracker.locale", code);
+  } catch {
+    // Ignore storage errors.
+  }
+}
+
+setLocale(storedLocale() ?? (LOCALES[config.app?.locale] ? config.app.locale : "en"));
+
 export function t(key, vars) {
   let s = key.split(".").reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), STRINGS);
   if (typeof s !== "string") return key;
@@ -26,13 +70,7 @@ export function t(key, vars) {
   return s;
 }
 
-export const INTL_LOCALE = INTL[LOCALE];
-const dtf = new Intl.DateTimeFormat(INTL[LOCALE], { dateStyle: "medium", timeStyle: "short" });
-const df = new Intl.DateTimeFormat(INTL[LOCALE], { dateStyle: "medium" });
-const nf = new Intl.NumberFormat(INTL[LOCALE]);
-
 export const fmtDateTime = (iso) => (iso ? dtf.format(new Date(iso)) : t("none"));
-/** YYYY-MM-DD → local date without timezone shift. */
 export const fmtDate = (ymd) => {
   if (!ymd) return t("none");
   const [y, m, d] = ymd.slice(0, 10).split("-").map(Number);

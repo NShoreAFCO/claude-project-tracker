@@ -109,7 +109,7 @@ describe("MCP server", () => {
     const card = listed.find((x: { id: string }) => x.id === p.id);
     expect([card.category, card.wp_counts, card.next_milestone.title]).toEqual([
       "process-optimisation",
-      { open: 1, in_progress: 0, waiting_blocked: 0, done: 0, started: 0 },
+      { open: 1, in_progress: 0, waiting_blocked: 0, done: 0 },
       "Lab done",
     ]);
     const del = await call("delete_entity", { kind: "milestone", id: m.id, confirm: true });

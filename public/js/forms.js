@@ -5,6 +5,7 @@ import { h, formDialog, saveWithConflict, toast, confirmDialog, toastError, dele
 import { PROJECT_CATEGORIES, WP_CATEGORIES, catLabel } from "./categories.js";
 import { closureDialog } from "./closure.js";
 import { guardedWrite } from "./gates-ui.js";
+import { getMe, roleTip, can } from "./access.js";
 
 export const changed = (project_id) => window.dispatchEvent(new CustomEvent("tracker:changed", { detail: { project_id } }));
 
@@ -47,13 +48,84 @@ export function flatWps(tree, out = []) {
 /** WPs that keep a project from being closed as done (todo, doing, blocked, waiting). */
 export const openWps = (tree) => flatWps(tree).filter((w) => OPEN_WP_STATUS.includes(w.status));
 
-/** The logged-in person (for defaults and role checks); null when unknown. */
-let mePromise;
-export const getMe = () =>
-  (mePromise ||= api
-    .whoami()
-    .then((w) => w.person || null)
-    .catch(() => null));
+/** Returns project status select options with applicable access and completion restrictions. */
+function projectStatusOptions(existing, doneBlocked, doneTip) {
+  const statuses = ["idea", "active", "on_hold", "done", "abandoned"];
+  const closed = ["done", "abandoned"];
+  const closeDenied = existing !== null && !can("close");
+  const currentClosed = existing !== null && closed.includes(existing.status);
+
+  return statuses
+    .filter((status) => existing !== null || !closed.includes(status))
+    .map((status) => {
+      const roleBlocked = closeDenied && status !== existing.status && (closed.includes(status) || currentClosed);
+
+      if (roleBlocked) {
+        return [
+          status,
+          t("status." + status),
+          {
+            disabled: true,
+            title: roleTip("close"),
+          },
+        ];
+      }
+
+      if (status === "done" && doneBlocked) {
+        return [
+          status,
+          t("status." + status),
+          {
+            disabled: true,
+            title: doneTip,
+          },
+        ];
+      }
+
+      return [status, t("status." + status)];
+    });
+}
+
+/** Returns work package status select options with sign-off verification restrictions. */
+function wpStatusOptions(existing, statuses) {
+  const doneBlocked = !can("verify_sign_off") && existing !== null && existing.verification === "sign_off" && existing.status !== "done";
+
+  return statuses.map((status) => {
+    if (status === "done" && doneBlocked) {
+      return [
+        status,
+        t("status." + status),
+        {
+          disabled: true,
+          title: roleTip("verify_sign_off"),
+        },
+      ];
+    }
+
+    return [status, t("status." + status)];
+  });
+}
+
+/** Returns work package verification select options with sign-off downgrade restrictions. */
+function wpVerificationOptions(existing, methods) {
+  const downgradeBlocked = !can("verify_sign_off") && existing?.verification === "sign_off";
+
+  return methods.map((method) => {
+    if (downgradeBlocked && method !== "sign_off") {
+      return [
+        method,
+        t("verification." + method),
+        {
+          disabled: true,
+          title: roleTip("verify_sign_off"),
+        },
+      ];
+    }
+
+    return [method, t("verification." + method)];
+  });
+}
+
 /** [[id, "Name (Company)"]] of all live persons, for pickers. */
 export async function personOptions() {
   return (await api.persons()).map((p) => [p.id, p.company ? `${p.name} (${p.company})` : p.name]);
@@ -72,11 +144,7 @@ export async function projectForm(existing, { workpackages = [] } = {}) {
   const open = existing ? openWps(workpackages) : [];
   const doneBlocked = open.length > 0 && existing.status !== "done";
   const doneTip = doneBlocked ? t("doneBlockedByOpen", { list: open.map((w) => w.title).join(", ") }) : "";
-  const statusOptions = (existing ? PROJECT_STATUS : PROJECT_STATUS.filter((s) => !CLOSED.includes(s))).map((s) => [
-    s,
-    t(`status.${s}`),
-    s === "done" && doneBlocked ? { disabled: true, title: doneTip } : undefined,
-  ]);
+  const statusOptions = projectStatusOptions(existing, doneBlocked, doneTip);
   return formDialog({
     title: existing ? t("formProjectEdit") : t("formProjectNew"),
     narrow: false,
@@ -212,7 +280,7 @@ export async function wpForm(projectId, existing, tree, parentId = null, milesto
     narrow: false,
     fields: [
       { name: "title", label: t("fTitle"), required: true, value: w.title },
-      { name: "status", label: t("fStatus"), type: "select", options: opts("status", WP_STATUS), value: w.status || "todo" },
+      { name: "status", label: t("fStatus"), type: "select", options: wpStatusOptions(existing, WP_STATUS), value: w.status || "todo" },
       { name: "parent_id", label: t("fParent"), type: "select", options: parents, value: w.parent_id ?? parentId ?? "" },
       {
         name: "category",
@@ -285,7 +353,7 @@ export async function wpForm(projectId, existing, tree, parentId = null, milesto
         name: "verification",
         label: t("fVerification"),
         type: "select",
-        options: ["none", "review", "test", "demo", "sign_off"].map((k) => [k, t(`verification.${k}`)]),
+        options: wpVerificationOptions(existing, ["none", "review", "test", "demo", "sign_off"]),
         value: w.verification || "none",
       },
       {

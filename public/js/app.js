@@ -1,6 +1,8 @@
 // Entry point: hash router (#/, #/gantt, #/inbox, #/search?q=…, #/p/<id>[/kontext]), nav and search.
 import config from "../instance/config.js";
-import { t, LOCALE } from "./i18n.js";
+import { t, setLocale } from "./i18n.js";
+import { loadMe } from "./access.js";
+import { renderUserBar } from "./userbar.js";
 import { api } from "./api.js";
 import { h, clear, toastError } from "./dom.js";
 import { renderGrid } from "./grid.js";
@@ -11,16 +13,12 @@ import { openProject } from "./project.js";
 import { renderPeople } from "./people.js";
 import { renderTrash } from "./trash.js";
 
-// Shell texts come from the instance config and the UI locale (index.html carries no brand text).
-document.documentElement.lang = LOCALE;
-document.title = t("appTitle");
-document.getElementById("app-title").textContent = t("appTitle");
 document.getElementById("logo").src = `/instance/${config.app.logo}`;
 document.getElementById("favicon").href = `/instance/${config.app.favicon}`;
 const main = document.getElementById("main");
 const nav = document.getElementById("nav");
-nav.setAttribute("aria-label", t("navMain"));
 const searchForm = document.getElementById("search");
+const userbar = document.getElementById("userbar");
 
 /** Shared state: the project list (cards) is reused by forms, inbox and gantt. */
 export const state = {
@@ -80,15 +78,32 @@ function renderNav() {
   );
 }
 
+/** Shell texts come from the instance config and the UI locale (index.html carries no brand text). Re-run after a language switch. */
+function renderShell() {
+  document.title = t("appTitle");
+  document.getElementById("app-title").textContent = t("appTitle");
+  nav.setAttribute("aria-label", t("navMain"));
+  renderSearch();
+  renderNav();
+  renderUserBar(userbar, onLocaleChange);
+}
+
+/** Runtime language switch: no reload; the shell and the current view render again (open dialogs close). */
+async function onLocaleChange() {
+  renderShell();
+  document.querySelectorAll("dialog[open]").forEach((d) => d.close());
+  await route();
+}
+
 function renderSearch() {
   const input = h("input", { type: "search", name: "q", placeholder: t("searchPlaceholder"), "aria-label": t("searchLabel") });
   clear(searchForm, input, h("button.btn.secondary", { type: "submit" }, t("searchButton")));
-  searchForm.addEventListener("submit", (e) => {
+  searchForm.onsubmit = (e) => {
     e.preventDefault();
     const q = input.value.trim();
     if (q.length < 2) return toastError(new Error(t("searchTooShort")));
     location.hash = `#/search?q=${encodeURIComponent(q)}`;
-  });
+  };
 }
 
 async function renderSearchResults(q) {
@@ -163,11 +178,14 @@ async function route() {
   }
 }
 
-document.title = t("appTitle");
-document.getElementById("app-title").textContent = t("appTitle");
-renderSearch();
-renderNav();
 window.addEventListener("hashchange", route);
+// A language saved in the profile form changes the shell too.
+window.addEventListener("tracker:locale", () => onLocaleChange());
 // Any successful write anywhere (forms, context panel, inbox) → reload cards and the current view.
 window.addEventListener("tracker:changed", () => refresh());
-route().then(updateInboxCount);
+// The person's saved language wins over the browser's remembered one, which wins over the instance default.
+loadMe().then((me) => {
+  if (me?.locale) setLocale(me.locale);
+  renderShell();
+  return route().then(updateInboxCount);
+});

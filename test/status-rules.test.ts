@@ -475,7 +475,7 @@ describe("derived flags and counts", () => {
     expect((await getProjectDetail(db, empty.id)).project.closure_due).toBe(false);
   });
 
-  it("card wp_counts split open, in progress, waiting+blocked, done (started kept as alias)", async () => {
+  it("card wp_counts split open, in progress, waiting+blocked, done", async () => {
     const p = await owned("Counts F3");
     await upsertWorkpackage(db, p.id, { title: "t" }, A);
     await upsertWorkpackage(db, p.id, { title: "d", status: "doing" }, A);
@@ -484,7 +484,7 @@ describe("derived flags and counts", () => {
     await upsertWorkpackage(db, p.id, { title: "x", status: "done" }, A);
     await upsertWorkpackage(db, p.id, { title: "y", status: "dropped", drop_reason: "no" }, A);
     const card = (await listProjects(db)).find((c) => c.id === p.id)!;
-    expect(card.wp_counts).toEqual({ open: 1, in_progress: 1, waiting_blocked: 2, done: 1, started: 1 });
+    expect(card.wp_counts).toEqual({ open: 1, in_progress: 1, waiting_blocked: 2, done: 1 });
     // card hints for the Blocked / Waiting chips
     expect(card.waiting_count).toBe(1);
     expect(card.blocked_since).toMatch(/^\d{4}-\d{2}-\d{2}$/);

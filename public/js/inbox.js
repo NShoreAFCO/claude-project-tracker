@@ -1,5 +1,6 @@
 // Inbox: unmatched hook/webhook events with "assign to project" (SPEC §9).
 import { t, fmtDateTime } from "./i18n.js";
+import { can } from "./access.js";
 import { api } from "./api.js";
 import { h, clear, toast, toastError } from "./dom.js";
 import { changed } from "./forms.js";
@@ -56,7 +57,17 @@ export async function renderInbox(main, state) {
       h("td", fmtDateTime(e.ts)),
       h("td", e.actor),
       h("td", h("strong", e.summary || `${e.entity} ${e.action}`), details(e)),
-      h("td", h("div", { style: { display: "flex", gap: "0.4rem", "flex-wrap": "wrap" } }, h("div", { style: { "min-width": "160px", flex: 1 } }, sel), btn)),
+      h(
+        "td",
+        can("write")
+          ? h(
+              "div",
+              { style: { display: "flex", gap: "0.4rem", "flex-wrap": "wrap" } },
+              h("div", { style: { "min-width": "160px", flex: 1 } }, sel),
+              btn,
+            )
+          : null,
+      ),
     );
   });
   clear(
@@ -64,7 +75,20 @@ export async function renderInbox(main, state) {
     h("h2", t("inboxTitle")),
     h("p.meta", t("inboxHint")),
     events.length
-      ? h("div.table-wrap", h("table", h("thead", h("tr", [t("colWhen"), t("colBy"), t("description"), ""].map((x) => h("th", x)))), h("tbody", rows)))
+      ? h(
+          "div.table-wrap",
+          h(
+            "table",
+            h(
+              "thead",
+              h(
+                "tr",
+                [t("colWhen"), t("colBy"), t("description"), ""].map((x) => h("th", x)),
+              ),
+            ),
+            h("tbody", rows),
+          ),
+        )
       : h("p.empty", t("inboxEmpty")),
   );
 }

@@ -19,7 +19,7 @@ const toDay = (ymd) => {
   const [y, m, d] = ymd.slice(0, 10).split("-").map(Number);
   return Date.UTC(y, m - 1, d) / DAY;
 };
-const months = new Intl.DateTimeFormat(INTL_LOCALE, { month: "short", year: "2-digit", timeZone: "UTC" });
+const monthFmt = () => new Intl.DateTimeFormat(INTL_LOCALE, { month: "short", year: "2-digit", timeZone: "UTC" });
 
 let selected = "";
 let level = "all";
@@ -321,7 +321,7 @@ function chart(rows, visibleByWp, allWps, milestones, { titleOf, issueKeys }) {
     if (day < min || span <= 120) continue;
     svg.append(
       s("line", { class: "grid-line", x1: x(day), x2: x(day), y1: TOP - 6, y2: height }),
-      s("text", { x: x(day) + 4, y: 18 }, months.format(d)),
+      s("text", { x: x(day) + 4, y: 18 }, monthFmt().format(d)),
     );
   }
 

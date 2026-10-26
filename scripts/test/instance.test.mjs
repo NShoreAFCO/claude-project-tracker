@@ -64,8 +64,9 @@ test("renderWrangler fills placeholders and never emits deploy secrets", () => {
 test("publicConfig omits deploy", () => {
   const pc = publicConfig(example, { de: { appTitle: "X" } });
   assert.equal(pc.deploy, undefined);
-  assert.deepEqual(Object.keys(pc).sort(), ["app", "categories", "strings"]);
+  assert.deepEqual(Object.keys(pc).sort(), ["app", "categories", "policy", "strings"]);
   assert.equal(pc.strings.de.appTitle, "X");
+  assert.deepEqual(Object.keys(pc.policy).sort(), ["hide_empty_categories", "locales", "target_date_required_categories"]);
 });
 
 test("buildInstance writes generated files and keeps deploy out of the public config", async () => {

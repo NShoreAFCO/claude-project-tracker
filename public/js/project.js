@@ -5,6 +5,7 @@ import { basisLabel, riskChip, staleChip, lastActivity } from "./progress-view.j
 import { api } from "./api.js";
 import { h, clear, openModal, statusChip, progressBar, copyText, toast, toastError, menuButton, personBadge, ageDays } from "./dom.js";
 import { closureDialog } from "./closure.js";
+import { can, gate as roleGate } from "./access.js";
 import { renderMarkdown } from "./markdown.js";
 import { catChip } from "./categories.js";
 import {
@@ -72,6 +73,9 @@ function reportActions(projectId) {
 }
 
 const smallBtn = (label, onClick, cls = "ghost") => h(`button.btn.small.${cls}`, { type: "button", on: { click: onClick } }, label);
+/** Buttons and menus that change data: hidden below the editor role (the server is the gate, this is convenience). */
+const writeBtn = (label, onClick, cls) => roleGate(smallBtn(label, onClick, cls), "write");
+const writeMenu = (label, items) => roleGate(menuButton(label, items), "write");
 
 export async function openProject(id, { tab = "overview", owner = null, openDoc = null } = {}) {
   let detail;
@@ -170,17 +174,22 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
     } else {
       clear(m.body, overview(detail));
       m.foot.append(
-        menuButton(t("moreActions"), [
-          { label: t("setBaseline"), onClick: () => baselineDialog(p.id) },
-          { label: t("delete"), danger: true, onClick: () => deleteEntity("project", p.id, p.title, p.id).then((ok) => ok && m.close()) },
-        ]),
-        ["done", "abandoned"].includes(p.status)
-          ? null
-          : smallBtn(t("closeProject"), () => closureDialog({ project: p, workpackages: detail.workpackages }), "secondary"),
-        h("a.btn.small.secondary", { href: `#/gantt?project=${encodeURIComponent(p.id)}` }, t("cardGantt")),
-        reportActions(p.id),
-        smallBtn(t("logProgress"), () => logProgressForm(p.id, detail.workpackages), "secondary"),
-        smallBtn(t("edit"), () => projectForm(p, { workpackages: detail.workpackages }), ""),
+        ...[
+          writeMenu(t("moreActions"), [
+            { label: t("setBaseline"), onClick: () => baselineDialog(p.id) },
+            { label: t("delete"), danger: true, onClick: () => deleteEntity("project", p.id, p.title, p.id).then((ok) => ok && m.close()) },
+          ]),
+          ["done", "abandoned"].includes(p.status)
+            ? null
+            : roleGate(
+                smallBtn(t("closeProject"), () => closureDialog({ project: p, workpackages: detail.workpackages }), "secondary"),
+                "close",
+              ),
+          h("a.btn.small.secondary", { href: `#/gantt?project=${encodeURIComponent(p.id)}` }, t("cardGantt")),
+          reportActions(p.id),
+          writeBtn(t("logProgress"), () => logProgressForm(p.id, detail.workpackages), "secondary"),
+          writeBtn(t("edit"), () => projectForm(p, { workpackages: detail.workpackages }), ""),
+        ].filter(Boolean),
       );
     }
   }
@@ -304,13 +313,17 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         slider,
         h(
           "div.actions",
-          leaf && w.status !== "done" && w.status !== "dropped" ? smallBtn(t("adjustProgress"), () => adjustProgressDialog(id, w)) : null,
-          leaf && w.progress >= 100 && w.status !== "done" && w.status !== "dropped"
+          leaf && w.status !== "done" && w.status !== "dropped" ? writeBtn(t("adjustProgress"), () => adjustProgressDialog(id, w)) : null,
+          leaf &&
+            w.progress >= 100 &&
+            w.status !== "done" &&
+            w.status !== "dropped" &&
+            can(w.verification === "sign_off" ? "verify_sign_off" : "write")
             ? smallBtn(t("markComplete"), () => markCompleteDialog(id, w), "secondary")
             : null,
-          smallBtn(t("edit"), () => wpForm(id, w, detail.workpackages, null, detail.milestones)),
-          smallBtn(`+ ${t("addSubWorkpackage")}`, () => wpForm(id, null, detail.workpackages, w.id, detail.milestones)),
-          menuButton(t("moreActions"), [
+          writeBtn(t("edit"), () => wpForm(id, w, detail.workpackages, null, detail.milestones)),
+          writeBtn(`+ ${t("addSubWorkpackage")}`, () => wpForm(id, null, detail.workpackages, w.id, detail.milestones)),
+          writeMenu(t("moreActions"), [
             { label: t("delete"), danger: true, onClick: () => deleteEntity("workpackage", w.id, w.title, id) },
           ]),
         ),
@@ -367,16 +380,18 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
     const expandableWps = allWps.filter((w) => w.children?.length);
     const hasFoldedWp = expandableWps.some((w) => !fold.open.has(w.id));
 
+    // internal fields (session, local path, repo) are for editors and above; viewer reads omit them server-side too
+    const internal = can("write");
     const copies = h(
       "div",
-      p.session_id
+      internal && p.session_id
         ? h(
             "div.copyrow",
             h("code", `claude --resume ${p.session_id}`),
             smallBtn(t("copy"), () => copyText(`claude --resume ${p.session_id}`)),
           )
         : null,
-      p.local_path
+      internal && p.local_path
         ? h(
             "div.copyrow",
             h("code", p.local_path),
@@ -390,7 +405,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       h("span", `${t("originLabel")}: `, h("b", `${STRINGS.originIcon[p.origin] || ""} ${t(`origin.${p.origin}`)}`)),
       h("span", `${t("start")}: `, h("b", fmtDate(p.start_date))),
       h("span", `${t("target")}: `, h("b", fmtDate(p.target_date))),
-      p.repo_url ? h("span", `${t("repo")}: `, safeLink(p.repo_url)) : null,
+      internal && p.repo_url ? h("span", `${t("repo")}: `, safeLink(p.repo_url)) : null,
       (p.tags || []).length
         ? h(
             "span",
@@ -447,7 +462,10 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
           " ",
           t("closureDueHint"),
           " ",
-          smallBtn(t("closeProject"), () => closureDialog({ project: p, workpackages: d.workpackages }), "secondary"),
+          roleGate(
+            smallBtn(t("closeProject"), () => closureDialog({ project: p, workpackages: d.workpackages }), "secondary"),
+            "close",
+          ),
         ),
       );
     if (p.stalled_blocked)
@@ -477,8 +495,8 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
           h(
             "div.actions",
             ctxBadge("branch", b.id),
-            smallBtn(t("edit"), () => branchForm(id, b, d.workpackages)),
-            menuButton(t("moreActions"), [
+            writeBtn(t("edit"), () => branchForm(id, b, d.workpackages)),
+            writeMenu(t("moreActions"), [
               { label: t("delete"), danger: true, onClick: () => deleteEntity("branch", b.id, `${b.repo}@${b.name}`, id) },
             ]),
           ),
@@ -495,10 +513,10 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         titleOf,
         requiresText: ms.requires?.length ? ms.requires.map((wpId) => wpTitle[wpId] || wpId).join(", ") : t("none"),
         unlocksText: ms.unlocks?.length ? ms.unlocks.map((wpId) => wpTitle[wpId] || wpId).join(", ") : t("none"),
-        decide: () => decisionDialog({ project: p, milestone: ms }),
+        decide: can("decide") ? () => decisionDialog({ project: p, milestone: ms }) : undefined,
         actions: [
-          smallBtn(t("edit"), () => milestoneForm(id, ms, detail.workpackages)),
-          menuButton(t("moreActions"), [
+          writeBtn(t("edit"), () => milestoneForm(id, ms, detail.workpackages)),
+          writeMenu(t("moreActions"), [
             { label: t("delete"), danger: true, onClick: () => deleteEntity("milestone", ms.id, ms.title, id) },
           ]),
         ],
@@ -515,7 +533,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         }
         render();
       }),
-      smallBtn(`+ ${t("addWorkpackage")}`, () => wpForm(id, null, d.workpackages, null, d.milestones), "secondary"),
+      writeBtn(`+ ${t("addWorkpackage")}`, () => wpForm(id, null, d.workpackages, null, d.milestones), "secondary"),
     );
 
     return h(
@@ -524,7 +542,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       h(
         "div.meta",
         basisLabel(p.progress_basis),
-        smallBtn(t("adjustProgress"), () => adjustProjectProgressForm(p)),
+        writeBtn(t("adjustProgress"), () => adjustProjectProgressForm(p)),
         riskChip(d.risk_summary),
         staleChip(p.stale),
         lastActivity(p.last_progress_at ?? p.created_at),
@@ -543,12 +561,12 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       copies,
       block(
         t("description"),
-        smallBtn(t("edit"), () => projectForm(p, { workpackages: d.workpackages })),
+        writeBtn(t("edit"), () => projectForm(p, { workpackages: d.workpackages })),
         p.description_md ? mdBlock(p.description_md) : h("p.meta", p.summary || t("noDescription")),
       ),
       block(
         t("scorecard"),
-        smallBtn(t("setScores"), () => scoresForm(id, d.scores), "secondary"),
+        writeBtn(t("setScores"), () => scoresForm(id, d.scores), "secondary"),
         d.scores.length
           ? h(
               "div.table-wrap",
@@ -579,7 +597,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       ),
       block(
         t("milestones"),
-        smallBtn(`+ ${t("addMilestone")}`, () => milestoneForm(id, null, detail.workpackages), "secondary"),
+        writeBtn(`+ ${t("addMilestone")}`, () => milestoneForm(id, null, detail.workpackages), "secondary"),
         d.milestones.length ? h("ul.milestones", milestoneItems) : h("p.empty", t("noMilestones")),
       ),
       block(
@@ -595,7 +613,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       cblock(
         "branches",
         t("branches"),
-        smallBtn(`+ ${t("addBranch")}`, () => branchForm(id, null, d.workpackages), "secondary"),
+        writeBtn(`+ ${t("addBranch")}`, () => branchForm(id, null, d.workpackages), "secondary"),
         d.branches.length
           ? h(
               "div.table-wrap",
@@ -618,7 +636,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       cblock(
         "tokenCost",
         t("tokenCost"),
-        smallBtn(`+ ${t("addTokenCost")}`, () => tokenCostForm(id, d.workpackages), "secondary"),
+        writeBtn(`+ ${t("addTokenCost")}`, () => tokenCostForm(id, d.workpackages), "secondary"),
         d.token_cost.entries.length
           ? h(
               "div.table-wrap",
