@@ -3,7 +3,7 @@ import { t, fmtDate, fmtDateTime, fmtNum, fmtPct, STRINGS } from "./i18n.js";
 import { renderRisks } from "./risks.js";
 import { basisLabel, riskChip, staleChip, lastActivity } from "./progress-view.js";
 import { api } from "./api.js";
-import { h, clear, openModal, statusChip, progressBar, copyText, toastError, menuButton, personBadge, ageDays } from "./dom.js";
+import { h, clear, openModal, statusChip, progressBar, copyText, toast, toastError, menuButton, personBadge, ageDays } from "./dom.js";
 import { closureDialog } from "./closure.js";
 import { renderMarkdown } from "./markdown.js";
 import { catChip } from "./categories.js";
@@ -33,6 +33,44 @@ export function mdBlock(src) {
 }
 
 const block = (title, actions, ...content) => h("section.block", h("header", h("h3", title), actions || null), ...content);
+
+/** Same-origin URL of a project report. */
+const reportUrl = (projectId, format) => `/api/projects/${encodeURIComponent(projectId)}/report?format=${format}`;
+
+/** Click a temporary anchor (new tab, or a download when `download` is set). */
+function clickAnchor(attrs) {
+  const a = h("a", attrs);
+  document.body.append(a);
+  a.click();
+  a.remove();
+}
+
+/** Report button (spec F9): PDF by default (fetched, so a 503 can be shown); the menu opens HTML in a tab and downloads Markdown. */
+function reportActions(projectId) {
+  const openHtml = () => clickAnchor({ href: reportUrl(projectId, "html"), target: "_blank", rel: "noopener" });
+  const downloadMd = () => clickAnchor({ href: reportUrl(projectId, "md"), download: `${projectId}.md` });
+  const downloadPdf = async () => {
+    try {
+      const blob = await api.report(projectId, "pdf");
+      const url = URL.createObjectURL(blob);
+      clickAnchor({ href: url, download: `${projectId}.pdf` });
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (e) {
+      if (e.status === 503 && e.body?.error === "pdf_unavailable")
+        toast(t("reportPdfUnavailable"), true, { label: t("reportOpenHtml"), onClick: openHtml });
+      else toastError(e);
+    }
+  };
+  return h(
+    "span.report-actions",
+    h("button.btn.small.secondary", { type: "button", on: { click: downloadPdf } }, t("report")),
+    menuButton(t("reportFormats"), [
+      { label: t("reportHtml"), onClick: openHtml },
+      { label: t("reportMd"), onClick: downloadMd },
+    ]),
+  );
+}
+
 const smallBtn = (label, onClick, cls = "ghost") => h(`button.btn.small.${cls}`, { type: "button", on: { click: onClick } }, label);
 
 export async function openProject(id, { tab = "overview", owner = null, openDoc = null } = {}) {
@@ -82,9 +120,12 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
     );
   };
 
+  let personNames = new Map();
   async function load() {
     try {
-      detail = await api.project(id);
+      const [d, persons] = await Promise.all([api.project(id), api.persons().catch(() => [])]);
+      detail = d;
+      personNames = new Map(persons.map((x) => [x.id, x.name]));
     } catch (e) {
       if (e.status === 404) return m.close();
       toastError(e);
@@ -137,6 +178,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
           ? null
           : smallBtn(t("closeProject"), () => closureDialog({ project: p, workpackages: detail.workpackages }), "secondary"),
         h("a.btn.small.secondary", { href: `#/gantt?project=${encodeURIComponent(p.id)}` }, t("cardGantt")),
+        reportActions(p.id),
         smallBtn(t("logProgress"), () => logProgressForm(p.id, detail.workpackages), "secondary"),
         smallBtn(t("edit"), () => projectForm(p, { workpackages: detail.workpackages }), ""),
       );
@@ -254,6 +296,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
           w.locked ? h("span.badge.locked", { title: t("lockedBy", { name }) }, "🔒 ", t("locked")) : null,
           issueBadge(w, titleOf),
           w.critical ? h("span.badge.critical", t("criticalMark")) : null,
+          verifyBadge(w),
           !leaf ? h("span.meta", t("subCount", { n: w.children.length })) : null,
           ctxBadge("workpackage", w.id),
           dates,
@@ -284,6 +327,34 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
             w.children.filter((c) => !shown || shown.has(c.id)).map((c) => wpNode(c, shown)),
           )
         : null,
+    );
+  }
+
+  /** Verified (person + date) or done-but-unverified (legacy rows, verification required). */
+  function verifyBadge(w) {
+    if (w.verified_by && w.verified_at) {
+      const tip = t("verifiedTip", {
+        name: personNames.get(w.verified_by) || w.verified_by,
+        date: fmtDate(String(w.verified_at).slice(0, 10)),
+      });
+      return h("span.badge.verified", { title: tip, "aria-label": tip }, "✔");
+    }
+    if (w.status === "done" && w.verification && w.verification !== "none")
+      return h("span.badge.unverified", { title: t("unverifiedTip"), "aria-label": t("unverifiedTip") }, "⚠");
+    return null;
+  }
+
+  function objectivesBlock(p) {
+    const parts = [
+      ["fObjectives", p.objectives_md],
+      ["fScopeIn", p.scope_in_md],
+      ["fScopeOut", p.scope_out_md],
+      ["fSuccess", p.success_criteria_md],
+    ].filter(([, v]) => v);
+    return h(
+      "details.block.objectives",
+      h("summary", h("h3", t("objectivesScope"))),
+      parts.length ? parts.map(([k, v]) => [h("h4", t(k)), mdBlock(v)]) : h("p.empty", t("objectivesEmpty")),
     );
   }
 
@@ -467,6 +538,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
             ),
           )
         : null,
+      objectivesBlock(p),
       closureBlocks,
       copies,
       block(

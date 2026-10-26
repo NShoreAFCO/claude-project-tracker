@@ -4,6 +4,7 @@ import { h, clear, statusChip, progressBar, personBadge, ageDays } from "./dom.j
 import { openProject } from "./project.js";
 import { projectForm } from "./forms.js";
 import { basisLabel, riskChip, staleChip } from "./progress-view.js";
+import { summaryBar } from "./portfolio.js";
 import { PROJECT_CATEGORIES, catVar, catDot, catLabel, knownCategory } from "./categories.js";
 
 const PROJECT_STATUSES = ["idea", "active", "on_hold", "done", "abandoned"];
@@ -133,8 +134,21 @@ export function renderGrid(main, state) {
   );
   tagSel.value = filter.tag;
 
+  // Portfolio filter: a KPI tile or the select narrows the grid to that counter's projects (spec F9).
+  const kpi = filter.kpi || "";
+  const kpiIds = kpi && state.summary?.[kpi] ? new Set(state.summary[kpi].project_ids ?? []) : null;
+  const attentionSel = h(
+    "select",
+    { "aria-label": t("filterAttention"), on: { change: (e) => ((filter.kpi = e.target.value), renderGrid(main, state)) } },
+    h("option", { value: "" }, `${t("filterAttention")}: ${t("filterAll")}`),
+    ["gates_awaiting_decision", "stale"].map((k) => h("option", { value: k }, t(`filterKpi.${k}`))),
+    ["gates_awaiting_decision", "stale"].includes(kpi) ? null : kpi ? h("option", { value: kpi }, t(`kpi.${kpi}`)) : null,
+  );
+  attentionSel.value = kpi;
+
   const shown = state.projects.filter(
     (p) =>
+      (!kpiIds || kpiIds.has(p.id)) &&
       (!filter.status || p.status === filter.status) &&
       (!filter.tag || (p.tags || []).includes(filter.tag)) &&
       (!filter.owner || (filter.owner === "none" ? !p.owner_initials : p.owner_id === filter.owner)) &&
@@ -161,12 +175,14 @@ export function renderGrid(main, state) {
 
   clear(
     main,
+    summaryBar(state.summary || null, kpi, (key) => ((filter.kpi = key), renderGrid(main, state))),
     h(
       "div.toolbar",
       h("div", { style: { "min-width": "160px" } }, categorySel),
       h("div", { style: { "min-width": "180px" } }, statusSel),
       h("div", { style: { "min-width": "160px" } }, tagSel),
       h("div", { style: { "min-width": "160px" } }, ownerSel),
+      h("div", { style: { "min-width": "200px" } }, attentionSel),
       h("span.spacer"),
       h("button.btn", { type: "button", on: { click: () => projectForm(null) } }, `+ ${t("newProject")}`),
     ),

@@ -119,6 +119,21 @@ export async function projectForm(existing, { workpackages = [] } = {}) {
       },
       { name: "summary", label: t("fSummary"), value: p.summary, full: true },
       { name: "description_md", label: t("fDescription"), type: "textarea", value: p.description_md },
+      { name: "objectives_md", label: t("fObjectives"), type: "textarea", rows: 4, value: p.objectives_md },
+      { name: "scope_in_md", label: t("fScopeIn"), type: "textarea", rows: 4, value: p.scope_in_md },
+      { name: "scope_out_md", label: t("fScopeOut"), type: "textarea", rows: 4, value: p.scope_out_md },
+      { name: "success_criteria_md", label: t("fSuccess"), type: "textarea", rows: 4, value: p.success_criteria_md },
+      {
+        name: "language",
+        label: t("fReportLanguage"),
+        type: "select",
+        options: [
+          ["", t("reportLanguageDefault")],
+          ["en", "English"],
+          ["de", "Deutsch"],
+        ],
+        value: p.language ?? "",
+      },
       { name: "repo_url", label: t("fRepoUrl"), type: "url", value: p.repo_url },
       { name: "local_path", label: t("fLocalPath"), value: p.local_path },
       { name: "context_file", label: t("fContextFile"), value: p.context_file },
@@ -156,7 +171,7 @@ export async function projectForm(existing, { workpackages = [] } = {}) {
       { name: "tags", label: t("fTags"), value: (p.tags || []).join(", "), full: true },
     ],
     onSubmit: async (v) => {
-      const body = { ...v, tags: tagsIn(v.tags) };
+      const body = { ...v, language: v.language || null, tags: tagsIn(v.tags) };
       if (!existing) {
         if (!body.id) delete body.id;
         // an omitted owner defaults to the calling person on the server; null would clear it
@@ -264,10 +279,29 @@ export async function wpForm(projectId, existing, tree, parentId = null, milesto
       { name: "sort", label: t("fSort"), type: "number", step: 1, value: w.sort ?? 0 },
       { name: "depends_on", label: t("fDependsOn"), type: "checklist", options: wpOptions(tree, existing?.id), value: deps },
       { name: "description_md", label: t("fDescription"), type: "textarea", value: w.description_md },
+      { name: "deliverable", label: t("fDeliverable"), value: w.deliverable, full: true, hint: t("fDeliverableHint") },
+      { name: "acceptance_criteria_md", label: t("fAcceptance"), type: "textarea", rows: 5, value: w.acceptance_criteria_md },
+      {
+        name: "verification",
+        label: t("fVerification"),
+        type: "select",
+        options: ["none", "review", "test", "demo", "sign_off"].map((k) => [k, t(`verification.${k}`)]),
+        value: w.verification || "none",
+      },
+      {
+        name: "verified_by",
+        label: t("fVerifiedBy"),
+        type: "select",
+        options: [["", t("verifierDefault")], ...persons],
+        value: w.verified_by ?? "",
+        hint: t("verifiedByHint"),
+        showWhen: { field: "status", values: ["done"] },
+      },
     ],
     onSubmit: async (v) => {
       const body = {
         ...v,
+        verified_by: v.status === "done" && v.verified_by ? v.verified_by : undefined,
         project_id: projectId,
         depends_on: v.depends_on || [],
         parent_id: v.parent_id || null,
