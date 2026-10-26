@@ -338,3 +338,40 @@ describe("risk log", () => {
     expect(monitoringIssues.map((item) => item.title)).toEqual(["Monitoring issue"]);
   });
 });
+
+describe("risk log trash", () => {
+  it("trashed risk is excluded from risk_summary, bundle, derived score and list_risks", async () => {
+    const project = await proj();
+    const risk = await upsertRisk(db, project.id, { title: "Gone soon", probability: 5, impact: 5 }, A);
+    await setScores(db, project.id, [{ criterion: "risk", value: 3 }], A);
+    expect((await getProjectDetail(db, project.id)).risk_summary.open).toBe(1);
+
+    await deleteEntity(db, "risk", risk.id, A);
+
+    const detail = await getProjectDetail(db, project.id);
+    expect(detail.risk_summary).toEqual({ open: 0, max_score: null, high_without_action: 0 });
+    const score = detail.scores.find((s) => s.criterion === "risk");
+    expect(score?.value).toBe(3);
+    expect((score as { derived?: boolean }).derived).toBeUndefined();
+    expect((await getContextBundle(db, { project_id: project.id })).markdown).not.toContain("Gone soon");
+    expect((await listRisks(db, { project_id: project.id })).length).toBe(0);
+    expect((await listRisks(db, {})).some((r) => r.id === risk.id)).toBe(false);
+  });
+
+  it("risks of a trashed project are hidden from list_risks and come back on restore", async () => {
+    const project = await proj();
+    const risk = await upsertRisk(db, project.id, { title: "Follows project", probability: 4, impact: 4 }, A);
+    const own = await upsertRisk(db, project.id, { title: "Trashed on its own", probability: 2, impact: 2 }, A);
+    await deleteEntity(db, "risk", own.id, A);
+
+    await deleteEntity(db, "project", project.id, A);
+
+    expect((await listRisks(db, {})).some((r) => r.id === risk.id)).toBe(false);
+    expect((await listRisks(db, { project_id: project.id })).length).toBe(0);
+
+    await restoreEntity(db, "project", project.id, A);
+
+    expect((await listRisks(db, {})).some((r) => r.id === risk.id)).toBe(true);
+    expect((await listRisks(db, {})).some((r) => r.id === own.id)).toBe(false);
+  });
+});

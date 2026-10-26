@@ -477,7 +477,7 @@ export async function upsertRisk(
 }
 
 export async function listRisks(db: D1Database, filter: { project_id?: string; status?: string; type?: RiskType }): Promise<RiskOut[]> {
-  const where: string[] = [LIVE()];
+  const where: string[] = [LIVE(), "project_id IN (SELECT id FROM project WHERE deleted_at IS NULL)"];
   const values: unknown[] = [];
 
   if (filter.project_id !== undefined) {

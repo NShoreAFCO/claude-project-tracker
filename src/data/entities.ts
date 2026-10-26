@@ -22,7 +22,7 @@ export type EntityKind = "project" | "workpackage" | "branch" | "milestone" | "c
 export const ENTITY_KINDS: readonly EntityKind[] = ["project", "workpackage", "branch", "milestone", "context_doc", "person", "risk"];
 
 /** Ids that follow an item into (or out of) the trash. */
-export type Children = { workpackages: string[]; milestones: string[]; context_docs: string[] };
+export type Children = { workpackages: string[]; milestones: string[]; context_docs: string[]; risks: string[] };
 
 export type TrashItem = {
   kind: EntityKind;
@@ -64,7 +64,7 @@ const DOC_COLS = [
   "updated_by",
 ] as const;
 
-const total = (c: Children): number => c.workpackages.length + c.milestones.length + c.context_docs.length;
+const total = (c: Children): number => c.workpackages.length + c.milestones.length + c.context_docs.length + c.risks.length;
 const titleOf = (kind: EntityKind, r: Row): string =>
   kind === "person" ? String(r.name) : kind === "branch" ? `${String(r.repo)}@${String(r.name)}` : String(r.title);
 const projectOf = (kind: EntityKind, r: Row): string | null =>
@@ -108,7 +108,7 @@ function payloadDiff(kind: EntityKind, r: Row): Diff {
 type Mode = "live" | "purge" | { stamp: string };
 
 async function collectChildren(db: D1Database, kind: EntityKind, r: Row, mode: Mode): Promise<Children> {
-  const out: Children = { workpackages: [], milestones: [], context_docs: [] };
+  const out: Children = { workpackages: [], milestones: [], context_docs: [], risks: [] };
   if (kind !== "project" && kind !== "workpackage") {
     if (kind === "branch") {
       const { results } = await db
@@ -136,6 +136,7 @@ async function collectChildren(db: D1Database, kind: EntityKind, r: Row, mode: M
     out.workpackages = await ids(`SELECT id FROM workpackage WHERE project_id = ? AND ${c}`, r.id, ...p);
     out.milestones = await ids(`SELECT id FROM milestone WHERE project_id = ? AND ${c}`, r.id, ...p);
     out.context_docs = await ids(`SELECT id FROM context_doc WHERE project_id = ? AND ${c}`, r.id, ...p);
+    out.risks = await ids(`SELECT id FROM risk WHERE project_id = ? AND ${c}`, r.id, ...p);
     return out;
   }
 
@@ -195,6 +196,7 @@ const CHILD_TABLES: Array<[keyof Children, string]> = [
   ["workpackages", "workpackage"],
   ["milestones", "milestone"],
   ["context_docs", "context_doc"],
+  ["risks", "risk"],
 ];
 
 /** Hard delete of a branch (it mirrors git) and the docs it owns; the events keep both payloads. */
@@ -441,6 +443,7 @@ export async function purgeEntity(
     workpackages: await rowsOf("workpackage", children.workpackages),
     milestones: await rowsOf("milestone", children.milestones),
     context_docs: children.context_docs,
+    risks: await rowsOf("risk", children.risks),
   };
   const ts = now();
   // Every statement applies only while the item is still in the trash with the stamp read above.
@@ -467,6 +470,8 @@ export async function purgeEntity(
       docEventsStmt(db, children.context_docs, "purge", by, ts, guard, g),
       db.prepare(`DELETE FROM context_doc WHERE id ${IN_IDS}${guard}`).bind(JSON.stringify(children.context_docs), ...g),
     );
+  if (children.risks.length)
+    stmts.push(db.prepare(`DELETE FROM risk WHERE id ${IN_IDS}${guard}`).bind(JSON.stringify(children.risks), ...g));
   if (children.milestones.length)
     stmts.push(db.prepare(`DELETE FROM milestone WHERE id ${IN_IDS}${guard}`).bind(JSON.stringify(children.milestones), ...g));
   if (children.workpackages.length)
@@ -518,7 +523,11 @@ export async function listTrash(db: D1Database): Promise<TrashItem[]> {
   const push = (kind: EntityKind, x: T, children: number) => out.push({ kind, ...x, children });
   for (const x of projects) {
     const same = (y: T) => y.project_id === x.id && y.deleted_at === x.deleted_at;
-    push("project", x, wps.filter(same).length + ms.filter(same).length + docs.filter(same).length);
+    push(
+      "project",
+      x,
+      wps.filter(same).length + ms.filter(same).length + docs.filter(same).length + (ri.results as T[]).filter(same).length,
+    );
   }
   for (const x of wps) {
     if (withProject(x) || withWp(x.parent_id, x.deleted_at)) continue;
