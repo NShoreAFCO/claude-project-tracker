@@ -10,6 +10,7 @@ import { writeContext, appendContext, deleteContext, setContextMeta } from "../d
 import { search } from "../data/search";
 import { upsertMilestone } from "../data/milestones";
 import { createBaseline } from "../data/baselines";
+import { recordGateDecision, type DecisionInput } from "../data/gates";
 import { moveWorkpackages } from "../data/rules";
 import { HUMAN_DEFAULT, PROJECT_CATEGORIES, WP_CATEGORIES } from "../data/categories";
 import { ConflictError, ValidationError } from "../data/util";
@@ -257,7 +258,7 @@ export function registerTools(reg: Reg): void {
     "upsert_workpackage",
     {
       title: "Upsert work package",
-      description: `Create or update a work package. category: ${WP_CATEGORIES.join("|")} (null = inherit from the parent). WPs with human=true${HUMAN_DEFAULT.length ? ` (default for ${HUMAN_DEFAULT.join(", ")})` : ""} are done off the computer: log progress the user reports, and set them to done only when the user says so. Set owner when someone other than the project owner is responsible (effective_owner falls back to the project owner); priority_stakeholders lists persons to keep informed. Status: use blocked only for a real blocker (blocked_by wp:<id>, ms:<id> or ext:<text>; blocked_since defaults to today) and waiting for a deliberate deferral (optional waiting_reason). dropped requires drop_reason. A todo WP whose progress rises above 0 becomes doing unless you set status in the same call. The result lists schedule issues in warnings (start before a predecessor ends or before an unlocking milestone is due, child outside its parent); fix them or tell the user. In a schedule_strict project a write that adds issues fails with a conflict listing them.`,
+      description: `Create or update a work package. category: ${WP_CATEGORIES.join("|")} (null = inherit from the parent). WPs with human=true${HUMAN_DEFAULT.length ? ` (default for ${HUMAN_DEFAULT.join(", ")})` : ""} are done off the computer: log progress the user reports, and set them to done only when the user says so. Set owner when someone other than the project owner is responsible (effective_owner falls back to the project owner); priority_stakeholders lists persons to keep informed. Status: use blocked only for a real blocker (blocked_by wp:<id>, ms:<id> or ext:<text>; blocked_since defaults to today) and waiting for a deliberate deferral (optional waiting_reason). dropped requires drop_reason. A todo WP whose progress rises above 0 becomes doing unless you set status in the same call. The result lists schedule issues in warnings (start before a predecessor ends or before an unlocking milestone is due, child outside its parent); fix them or tell the user. In a schedule_strict project a write that adds issues fails with a conflict listing them. A WP behind an undecided gate milestone is gate-locked: setting it to doing or done, or setting its progress, fails with 409 GATE_LOCKED naming the gate; tell the user (the decision maker decides, or a person overrides in the dashboard).`,
       inputSchema: z.object({
         project_id: z.string().describe("Identify the owning project."),
         id: z.string().optional().describe("Identify an existing work package (omit to create)."),
@@ -321,7 +322,7 @@ export function registerTools(reg: Reg): void {
     {
       title: "Upsert milestone",
       description:
-        "Create or update a milestone (zero duration). It is reached automatically when all 'requires' WPs are done and reopens if one is reopened; 'unlocks' WPs stay locked until it is first reached. requires/unlocks replace the stored lists. The result lists schedule issues in warnings (due before a required WP ends, unlocked WPs starting before the due date); a schedule_strict project refuses writes that add issues.",
+        "Create or update a milestone (zero duration). It is reached automatically when all 'requires' WPs are done and reopens if one is reopened; 'unlocks' WPs stay locked until it is first reached. A gate (gate=true) unlocks only on a go / go_with_conditions decision: until then its unstarted 'unlocks' WPs are gate-locked and you cannot start them, and you cannot clear the gate flag, drop its unlocks or delete it. requires/unlocks replace the stored lists. The result lists schedule issues in warnings (due before a required WP ends, unlocked WPs starting before the due date); a schedule_strict project refuses writes that add issues.",
       inputSchema: z.object({
         project_id: z.string().describe("Identify the owning project."),
         id: z.string().optional().describe("Identify an existing milestone (omit to create)."),
@@ -332,6 +333,7 @@ export function registerTools(reg: Reg): void {
         sort: z.number().int().optional().describe("Set the sort order."),
         requires: z.array(z.string()).optional().describe("Set the work packages that close this milestone."),
         unlocks: z.array(z.string()).optional().describe("Set the work packages this milestone unlocks."),
+        gate: z.boolean().optional().describe("Mark as a gate that needs a recorded decision to unlock its work packages."),
         expected_version: z.number().int().optional().describe("Require the expected milestone version."),
         on_behalf_of: onBehalfOf,
       }),
@@ -339,6 +341,35 @@ export function registerTools(reg: Reg): void {
     async (args, tc) => {
       const { project_id, expected_version, ...input } = args;
       return upsertMilestone(tc.db, project_id, omitUndefined(input), tc.by, expected_version);
+    },
+  );
+
+  reg(
+    "record_gate_decision",
+    {
+      title: "Record gate decision",
+      description:
+        "Record a decision (go | go_with_conditions | hold | stop) on a gate milestone. Call this ONLY when the user states the decision in this conversation; never decide yourself. Otherwise draft a note (e.g. append_context) and let the decision maker record it. The decision is always recorded for your OAuth login's person, who must be the project's decision maker (or, for a free-text decision maker such as a board, any decider; note_md must then name the body). go / go_with_conditions unlock the gate and take a baseline; conditions become todo work packages; stop puts the project on hold.",
+      inputSchema: z.object({
+        milestone_id: z.string().describe("Identify the gate milestone."),
+        decision: z.enum(["go", "go_with_conditions", "hold", "stop"]).describe("Set the decision the user stated."),
+        note_md: optionalText("Record the decision note (who decided, why)."),
+        evidence: z.array(z.string()).max(50).optional().describe("Link evidence: http(s) URLs or context document ids of the project."),
+        conditions: z
+          .array(z.string().min(1).max(200))
+          .max(20)
+          .optional()
+          .describe("List the conditions of a go_with_conditions decision; each becomes a todo work package."),
+        on_behalf_of_decision_maker: z
+          .boolean()
+          .optional()
+          .describe("Admins only: record for the named decision maker (note_md required)."),
+        on_behalf_of: onBehalfOf,
+      }),
+    },
+    async (args, tc) => {
+      const { milestone_id, ...input } = args;
+      return recordGateDecision(tc.db, milestone_id, omitUndefined(input) as DecisionInput, tc.by);
     },
   );
 
@@ -400,7 +431,7 @@ export function registerTools(reg: Reg): void {
     {
       title: "Log progress",
       description:
-        "Log what was done in this session. Main logging tool. With workpackage_id, a todo work package moves to doing; progress 100 marks it done.",
+        "Log what was done in this session. Main logging tool. With workpackage_id, a todo work package moves to doing; progress 100 marks it done. A gate-locked work package (behind an undecided gate) is not started, and setting its progress is refused (409 GATE_LOCKED).",
       inputSchema: z.object({
         project_id: z.string().describe("Identify the project."),
         summary: z.string().min(1).describe("Summarize the completed work."),

@@ -12,6 +12,7 @@ import type { Caller } from "../types";
 import { POLICY } from "../policy";
 import { isAgent } from "../auth/caller";
 import { reachStmts } from "./milestones";
+import { agentGateRemovalError, gateClosedSql, gatesEnforced } from "./gates";
 import { REDACTED_FIELDS } from "./persons";
 import { TransitionError } from "./rules";
 import { recomputeScheduleStmts, scheduleBatch, storeSchedule } from "./schedule";
@@ -237,14 +238,26 @@ export async function deleteEntity(
     if (by.personId === id) throw new ValidationError("you cannot delete your own person");
   }
   const children = await collectChildren(db, kind, row, "live");
+  // F5: an agent may not trash an undecided gate (alone, or as the milestone of a deleted WP): that would
+  // lift its lock. Checked here for the error and again in the UPDATE (a decision may change meanwhile).
+  const gateIds = isAgent(by) && gatesEnforced() ? (kind === "milestone" ? [id] : kind === "workpackage" ? children.milestones : []) : [];
+  const closedGate = gateIds.length
+    ? `SELECT gx.title FROM milestone gx JOIN json_each(?) gj ON gx.id = gj.value WHERE ${gateClosedSql("gx")}`
+    : null;
+  if (closedGate) {
+    const hit = await db.prepare(`${closedGate} LIMIT 1`).bind(JSON.stringify(gateIds)).first<{ title: string }>();
+    if (hit) throw agentGateRemovalError(hit.title);
+  }
   const ts = now();
   const projectId = projectOf(kind, row);
   const slug = kind === "context_doc" ? `${String(row.slug)}${SLUG_MARK}${Date.parse(ts)}` : null;
   const stamped = `EXISTS (SELECT 1 FROM ${kind} WHERE id = ? AND deleted_at = ?)`;
   const stmts: D1PreparedStatement[] = [
     db
-      .prepare(`UPDATE ${kind} SET deleted_at = ?, deleted_by = ?${slug ? ", slug = ?" : ""} WHERE id = ? AND deleted_at IS NULL`)
-      .bind(ts, by.actor, ...(slug ? [slug] : []), id),
+      .prepare(
+        `UPDATE ${kind} SET deleted_at = ?, deleted_by = ?${slug ? ", slug = ?" : ""} WHERE id = ? AND deleted_at IS NULL${closedGate ? ` AND NOT EXISTS (${closedGate})` : ""}`,
+      )
+      .bind(ts, by.actor, ...(slug ? [slug] : []), id, ...(closedGate ? [JSON.stringify(gateIds)] : [])),
     eventStmtIfChanged(db, {
       by,
       project_id: projectId,
