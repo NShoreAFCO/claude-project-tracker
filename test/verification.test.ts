@@ -101,10 +101,17 @@ describe("verification of work packages (F2)", () => {
     expect(r3.isError).toBe(true);
     expect(body(r3).error).toBe("forbidden");
     expect((await wpRow(wp.id)).status).toBe("todo");
-    // with the login's person (the default) it succeeds
-    const ok = body(await mcp("upsert_workpackage", { project_id: p.id, id: wp.id, status: "done" }));
+    // with the login's person (the default) it succeeds once the login is a decider (F11: sign_off needs one)
     const login = await ensureUserPerson(db, "user@example.com");
-    expect([ok.status, ok.verified_by]).toEqual(["done", login.id]);
+    const asEditor = await mcp("upsert_workpackage", { project_id: p.id, id: wp.id, status: "done" });
+    expect([asEditor.isError, body(asEditor).error]).toEqual([true, "forbidden"]);
+    await db.prepare("UPDATE person SET access_role = 'decider' WHERE id = ?").bind(login.id).run();
+    try {
+      const ok = body(await mcp("upsert_workpackage", { project_id: p.id, id: wp.id, status: "done" }));
+      expect([ok.status, ok.verified_by]).toEqual(["done", login.id]);
+    } finally {
+      await db.prepare("UPDATE person SET access_role = 'editor' WHERE id = ?").bind(login.id).run();
+    }
   });
 
   it("service caller without on_behalf_of cannot complete a verified WP", async () => {
@@ -213,7 +220,13 @@ describe("verification of work packages (F2)", () => {
     const bot = await agent();
     for (const up of ["review", "test", "sign_off"])
       expect((await upsertWorkpackage(db, p2.id, { id: w2.id, verification: up }, bot)).verification).toBe(up);
-    expect((await upsertWorkpackage(db, p2.id, { id: w2.id, verification: "none" }, await dash())).verification).toBe("none");
+    // lowering from sign_off waives the sign-off: a decider's call (F11), an editor is refused
+    await expect(upsertWorkpackage(db, p2.id, { id: w2.id, verification: "none" }, await dash())).rejects.toMatchObject({ status: 403 });
+    const decider = await ensureUserPerson(db, "decider@example.com");
+    await db.prepare("UPDATE person SET access_role = 'decider' WHERE id = ?").bind(decider.id).run();
+    expect((await upsertWorkpackage(db, p2.id, { id: w2.id, verification: "none" }, await dash("decider@example.com"))).verification).toBe(
+      "none",
+    );
   });
 
   it("agent cannot lower and complete in one write", async () => {

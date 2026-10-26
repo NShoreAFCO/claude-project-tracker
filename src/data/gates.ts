@@ -6,7 +6,8 @@
  * decision maker) is evaluated inside the write's own batch, not only read before it: a failing guard
  * aborts the whole batch (a NOT NULL violation, as with schedule_rev), so nothing is half-written.
  */
-import type { Caller, ProjectRow, Role, WorkpackageRow } from "../types";
+import type { Caller, ProjectRow, WorkpackageRow } from "../types";
+import { hasRole, requireAction } from "../auth/permissions";
 import { POLICY } from "../policy";
 import { activitySet, isSystem, touchProject } from "./activity";
 import { createBaselineStmts } from "./baselines";
@@ -39,8 +40,6 @@ export type DecisionInput = {
   on_behalf_of_decision_maker?: boolean;
 };
 
-const DECIDER_ROLES: readonly Role[] = ["decider", "admin"];
-const OVERRIDE_ROLES: readonly Role[] = ["editor", "decider", "admin"];
 const NOTE_MAX = 20000;
 const REASON_MAX = 2000;
 const EVIDENCE_MAX = 50;
@@ -227,7 +226,8 @@ export const agentGateRemovalError = (title: string): ForbiddenError =>
 export async function overrideGateLock(db: D1Database, wpId: string, reason: string, by: Caller): Promise<WorkpackageRow> {
   if (by.channel !== "dashboard" || !by.personId)
     throw new ForbiddenError("a gate lock can only be overridden by a person in the dashboard, not by an agent");
-  if (!by.role || !OVERRIDE_ROLES.includes(by.role)) throw new ForbiddenError("overriding a gate lock needs the editor role or above");
+  // The route maps to "write" (editor or above); checked here too for direct callers.
+  requireAction(by, "write");
   const text = typeof reason === "string" ? reason.trim() : "";
   if (!text) throw new ValidationError("reason is required");
   if (text.length > REASON_MAX) throw new ValidationError(`reason must be at most ${REASON_MAX} characters`);
@@ -347,9 +347,10 @@ export async function recordGateDecision(
   input: DecisionInput,
   by: Caller,
 ): Promise<{ decision_id: string; baseline_id?: string; created_wps?: string[] }> {
-  if (by.channel === "service") throw new ForbiddenError("service tokens cannot record gate decisions; a person records them");
+  // F11: decider or above; service tokens never decide (also with on_behalf_of). A person records it:
+  // decided_by is the caller's person (the OAuth login for MCP), never an agent or the system.
+  requireAction(by, "decide");
   if (!by.personId) throw new ForbiddenError("gate decisions are recorded by a person (the logged-in user)");
-  if (!by.role || !DECIDER_ROLES.includes(by.role)) throw new ForbiddenError("recording a gate decision needs the decider role");
 
   const raw = (input ?? {}) as Record<string, unknown>;
   const decision = raw.decision as Decision;
@@ -380,7 +381,7 @@ export async function recordGateDecision(
       "the project has no decision maker; set decision_maker (a person, or a body such as a steering board) before deciding a gate",
       { code: "DECISION_MAKER_MISSING", missing: ["decision_maker"] },
     );
-  if (onBehalfFlag === true && by.role !== "admin" && by.personId !== dmPerson)
+  if (onBehalfFlag === true && !hasRole(by, "admin") && by.personId !== dmPerson)
     throw new ForbiddenError("only admins may record a decision on behalf of the decision maker");
   let onBehalf = false;
   if (dmPerson) {

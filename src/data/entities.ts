@@ -11,12 +11,13 @@
 import type { Caller } from "../types";
 import { POLICY } from "../policy";
 import { isAgent } from "../auth/caller";
+import { requireAction } from "../auth/permissions";
 import { reachStmts } from "./milestones";
 import { agentGateRemovalError, gateClosedSql, gatesEnforced } from "./gates";
 import { REDACTED_FIELDS } from "./persons";
 import { TransitionError } from "./rules";
 import { recomputeScheduleStmts, scheduleBatch, storeSchedule } from "./schedule";
-import { ForbiddenError, NotFoundError, ValidationError, eventStmt, eventStmtIfChanged, eventStmtWhere, now, type Diff } from "./util";
+import { NotFoundError, ValidationError, eventStmt, eventStmtIfChanged, eventStmtWhere, now, type Diff } from "./util";
 
 export type EntityKind = "project" | "workpackage" | "branch" | "milestone" | "context_doc" | "person" | "risk";
 export const ENTITY_KINDS: readonly EntityKind[] = ["project", "workpackage", "branch", "milestone", "context_doc", "person", "risk"];
@@ -185,11 +186,13 @@ function docEventsStmt(db: D1Database, ids: string[], action: string, by: Caller
     .bind(ts, by.actor, by.personId, action, JSON.stringify(ids), ...guardParams);
 }
 
-/** Users (persons with an access role) are deleted and restored by admins only, never by agents (spec §4.1/§4.2). */
-function checkPersonAccess(by: Caller, person: Row, action: "delete" | "restore"): void {
+/**
+ * Users (persons with an access role) are deleted (deactivated) and restored by admins only, never by
+ * agents (spec §4.1/§4.2, Ruling 23): that is managing access ("manage_roles").
+ */
+function checkPersonAccess(by: Caller, person: Row): void {
   if (person.access_role === null || person.access_role === undefined) return;
-  if (isAgent(by)) throw new ForbiddenError(`agents cannot ${action} users`);
-  if (by.role !== "admin") throw new ForbiddenError(`only admins can ${action} users`);
+  requireAction(by, "manage_roles");
 }
 
 const CHILD_TABLES: Array<[keyof Children, string]> = [
@@ -236,7 +239,7 @@ export async function deleteEntity(
   if (kind === "branch") return deleteBranch(db, id, by);
   const row = await liveRow(db, kind, id);
   if (kind === "person") {
-    checkPersonAccess(by, row, "delete");
+    checkPersonAccess(by, row);
     if (by.personId === id) throw new ValidationError("you cannot delete your own person");
   }
   const children = await collectChildren(db, kind, row, "live");
@@ -341,7 +344,7 @@ export async function restoreEntity(
   checkKind(kind);
   if (kind === "branch") throw new ValidationError("branches are deleted permanently; link the branch again");
   const row = await trashedRow(db, kind, id);
-  if (kind === "person") checkPersonAccess(by, row, "restore");
+  if (kind === "person") checkPersonAccess(by, row);
   await checkParents(db, kind, row);
   const stamp = row.deleted_at;
   const children = await collectChildren(db, kind, row, { stamp });
@@ -425,8 +428,8 @@ export async function purgeEntity(
   at: Date = new Date(),
 ): Promise<{ purged: string }> {
   checkKind(kind);
-  // Central role enforcement arrives with R5; purging is a manual admin action in the dashboard.
-  if (by.role !== "admin" || isAgent(by)) throw new ForbiddenError("only admins can purge items from the trash");
+  // Purging is a manual admin action in the dashboard, never an agent's (the route maps to "purge" too).
+  requireAction(by, "purge");
   if (kind === "branch") throw new NotFoundError(`branch ${id} is not in the trash`);
   const row = await trashedRow(db, kind, id);
   const stamp = row.deleted_at;

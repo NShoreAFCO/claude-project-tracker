@@ -24,8 +24,10 @@ import { moveWorkpackages } from "../data/rules";
 import { ConflictError, ValidationError } from "../data/util";
 import { handleUpload } from "./upload";
 import { userCaller } from "../auth/caller";
-import { ensureUserPerson, getPerson, listPersons, upsertPerson } from "../data/persons";
-import { handleClaudeCodeHook, type HookBody } from "./hooks";
+import { REST_ACTIONS, requireAction, restAction, type Action } from "../auth/permissions";
+import { GITHUB_WEBHOOK_ROUTE } from "../webhook/github";
+import { getPerson, listPersons, upsertPerson } from "../data/persons";
+import { HOOK_ROUTE, handleClaudeCodeHook, type HookBody } from "./hooks";
 import { printCssResponse, reportResponse } from "../report/respond";
 import { isAuditConfigured, runAuditExport } from "../audit/export";
 
@@ -77,11 +79,19 @@ const reqStr = (v: unknown, name: string): string => {
   return v;
 };
 
-type Ctx = { req: Request; url: URL; env: Env; db: D1Database; by: Caller; params: string[] };
+type Ctx = { req: Request; url: URL; env: Env; db: D1Database; by: Caller; identity: Identity; params: string[] };
 type Handler = (c: Ctx) => Promise<unknown>;
-const routes: Array<[string, RegExp, Handler]> = [];
-const route = (method: string, pattern: string, h: Handler) =>
-  routes.push([method, new RegExp(`^${pattern.replace(/:[a-z]+/g, "([^/]+)")}$`), h]);
+/** [method, path regex, handler, route key "METHOD pattern", action (undefined = unmapped → refused)]. */
+const routes: Array<[string, RegExp, Handler, string, Action | undefined]> = [];
+/** Registers a route; its Action comes from the central table (src/auth/permissions.ts), checked before the handler. */
+const route = (method: string, pattern: string, h: Handler) => {
+  const key = `${method} ${pattern}`;
+  routes.push([method, new RegExp(`^${pattern.replace(/:[a-z]+/g, "([^/]+)")}$`), h, key, restAction(key)]);
+};
+
+// ---- session (registered first: these paths would otherwise match /api/context/:id)
+route("GET", "/api/whoami", async ({ db, by, identity }) => ({ identity, person: by.personId ? await getPerson(db, by.personId) : null }));
+route("GET", "/api/context/bundle", async ({ db, url }) => bundle(url, db));
 
 // ---- projects
 route("GET", "/api/projects", async ({ db, url }) =>
@@ -354,15 +364,16 @@ export async function handleApi(request: Request, env: Env, identity: Identity &
   const path = url.pathname.replace(/\/+$/, "");
   const db = env.DB;
   try {
-    // Person resolution happens once per request (creates the person on first login).
+    // Person resolution happens once per request (creates the person on first login); the role is read
+    // from the person row here, so a role change applies from the next request on (nothing is cached).
     const by = await userCaller(db, identity.email);
-    if (path === "/api/whoami") return json({ identity, person: by.personId ? await getPerson(db, by.personId) : null });
-    if (path === "/api/context/bundle" && request.method === "GET") return await bundle(url, db);
-    for (const [method, re, h] of routes) {
+    for (const [method, re, h, , action] of routes) {
       const m = re.exec(path);
       if (m && method === request.method) {
+        // F11: one Action per route, checked before the handler runs; an unmapped route is refused.
+        requireAction(by, action as Action);
         const params = m.slice(1).map(decodeURIComponent);
-        const out = await h({ req: request, url, env, db, by, params });
+        const out = await h({ req: request, url, env, db, by, identity, params });
         const created =
           request.method === "POST" &&
           path !== "/api/context/upload" &&
@@ -384,10 +395,16 @@ export async function handleApi(request: Request, env: Env, identity: Identity &
 export async function handleHooks(request: Request, env: Env, identity?: Identity): Promise<Response> {
   const path = new URL(request.url).pathname;
   try {
-    if (path === "/api/hooks/claude-code" && request.method === "POST") {
+    if (`${request.method} ${path}` === HOOK_ROUTE) {
       const body = (await readJson(request, true)) as HookBody;
-      // on_behalf_of is for service tokens; a logged-in user posting here acts for themselves only.
-      if (identity?.kind === "user") body.on_behalf_of = (await ensureUserPerson(env.DB, identity.email)).id;
+      // on_behalf_of is for service tokens; a logged-in user posting here acts for themselves only, and
+      // needs the route's role (a viewer must not write through the hook's service caller). Service
+      // tokens are checked in handleClaudeCodeHook (they act as editor).
+      if (identity?.kind === "user") {
+        const user = await userCaller(env.DB, identity.email);
+        requireAction(user, REST_ACTIONS[HOOK_ROUTE]);
+        body.on_behalf_of = user.personId;
+      }
       return json(await handleClaudeCodeHook(body, env));
     }
     return json({ error: "not_found" }, 404);
@@ -395,3 +412,6 @@ export async function handleHooks(request: Request, env: Env, identity?: Identit
     return errorResponse(e);
   }
 }
+
+/** Every REST route key ("METHOD pattern"), for the permission coverage test. */
+export const restRouteKeys = (): string[] => [...routes.map(([, , , key]) => key), HOOK_ROUTE, GITHUB_WEBHOOK_ROUTE];
