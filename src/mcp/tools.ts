@@ -9,6 +9,7 @@ import { listContext, readContext, getContextBundle } from "../data/context-read
 import { writeContext, appendContext, deleteContext, setContextMeta } from "../data/context-write";
 import { search } from "../data/search";
 import { upsertMilestone } from "../data/milestones";
+import { listRisks, upsertRisk } from "../data/risks";
 import { createBaseline } from "../data/baselines";
 import { recordGateDecision, type DecisionInput } from "../data/gates";
 import { moveWorkpackages } from "../data/rules";
@@ -29,8 +30,8 @@ const branchKindSchema = z.enum(["branch", "fork", "worktree"]);
 
 const branchStatusSchema = z.enum(["open", "merged", "closed", "abandoned", "stale"]);
 
-const entityKindSchema = z.enum(["project", "workpackage", "branch", "milestone", "context_doc", "person"]);
-const trashKindSchema = z.enum(["project", "workpackage", "milestone", "context_doc", "person"]);
+const entityKindSchema = z.enum(["project", "workpackage", "branch", "milestone", "context_doc", "person", "risk"]);
+const trashKindSchema = z.enum(["project", "workpackage", "milestone", "context_doc", "person", "risk"]);
 const docStatusSchema = z.enum(["draft", "released", "obsolete"]);
 const projectCategorySchema = z.enum(PROJECT_CATEGORIES);
 const wpCategorySchema = z.enum(WP_CATEGORIES);
@@ -386,6 +387,57 @@ export function registerTools(reg: Reg): void {
       }),
     },
     async (args, tc) => createBaseline(tc.db, args.project_id, args.label, tc.by),
+  );
+
+  reg(
+    "upsert_risk",
+    {
+      title: "Upsert risk",
+      description:
+        "Create or update an entry of the risk and nonconformity log. type: risk|issue|opportunity|nc. Rate probability and impact 1 to 5; the score (probability x impact) is derived. Always name an owner, a response (avoid|reduce|transfer|accept|exploit) and an action: a risk scored 15 or higher without an action is a portfolio warning. status: open|monitoring|closed. For type nc you may set nc_detected_in_wp, nc_cause, nc_correction, nc_corrective_action and nc_effectiveness_check_date (refused for other types). The scorecard criterion risk is derived from the highest open score while open risks exist.",
+      inputSchema: z.object({
+        project_id: z.string().describe("Identify the owning project."),
+        id: z.string().optional().describe("Identify an existing entry (omit to create)."),
+        type: z.enum(["risk", "issue", "opportunity", "nc"]).optional().describe("Set the entry type."),
+        title: optionalText("Set the title."),
+        description_md: optionalText("Set the Markdown description."),
+        probability: z.number().int().min(1).max(5).optional().describe("Set the probability from 1 to 5."),
+        impact: z.number().int().min(1).max(5).optional().describe("Set the impact from 1 to 5."),
+        owner: personRef("Set the owner."),
+        response: z.enum(["avoid", "reduce", "transfer", "accept", "exploit"]).nullable().optional().describe("Set the response."),
+        action: optionalText("Set the action."),
+        due_date: optionalDate("Set the due date as YYYY-MM-DD."),
+        status: z.enum(["open", "monitoring", "closed"]).optional().describe("Set the status."),
+        workpackage_id: optionalText("Link a work package."),
+        milestone_id: optionalText("Link a milestone."),
+        nc_detected_in_wp: optionalText("Set the work package where the nonconformity was detected (type nc)."),
+        nc_cause: optionalText("Set the cause (type nc)."),
+        nc_correction: optionalText("Set the correction (type nc)."),
+        nc_corrective_action: optionalText("Set the corrective action (type nc)."),
+        nc_effectiveness_check_date: optionalDate("Set the effectiveness check date as YYYY-MM-DD (type nc)."),
+        expected_version: z.number().int().optional().describe("Require the expected entry version."),
+        on_behalf_of: onBehalfOf,
+      }),
+    },
+    async (args, tc) => {
+      const { project_id, expected_version, ...input } = args;
+      return upsertRisk(tc.db, project_id, omitUndefined(input), tc.by, expected_version);
+    },
+  );
+
+  reg(
+    "list_risks",
+    {
+      title: "List risks",
+      description: "List risk log entries, highest score first, optionally filtered by project, status and type.",
+      inputSchema: z.object({
+        project_id: optionalText("Filter by project."),
+        status: z.enum(["open", "monitoring", "closed"]).optional().describe("Filter by status."),
+        type: z.enum(["risk", "issue", "opportunity", "nc"]).optional().describe("Filter by type."),
+      }),
+      readOnly: true,
+    },
+    async (args, tc) => listRisks(tc.db, { ...omitUndefined(args), project_id: args.project_id ?? undefined }),
   );
 
   reg(

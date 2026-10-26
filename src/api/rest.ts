@@ -2,6 +2,7 @@ import type { Caller, Env, Identity, OwnerKind } from "../types";
 import { createProject, getProjectDetail, listProjects, updateProject } from "../data/projects";
 import { listWorkpackagesOut, upsertWorkpackage } from "../data/workpackages";
 import { listMilestones, upsertMilestone } from "../data/milestones";
+import { listRisks, upsertRisk, type RiskType } from "../data/risks";
 import { createBaseline } from "../data/baselines";
 import { overrideGateLock, recordGateDecision, type DecisionInput } from "../data/gates";
 import { linkBranch } from "../data/branches";
@@ -106,6 +107,24 @@ route("POST", "/api/projects/:id/baselines", async ({ db, req, by, params }) => 
   const { label } = await readJson(req);
   return createBaseline(db, params[0], reqStr(label, "label"), by);
 });
+
+// ---- risk and nonconformity log (F6)
+route("GET", "/api/risks", async ({ db, url }) =>
+  listRisks(db, {
+    project_id: url.searchParams.get("project_id") ?? undefined,
+    status: url.searchParams.get("status") ?? undefined,
+    type: (url.searchParams.get("type") ?? undefined) as RiskType | undefined,
+  }),
+);
+route("POST", "/api/risks", async ({ db, req, by }) => {
+  const { project_id, expected_version, ...input } = await readJson(req);
+  return upsertRisk(db, reqStr(project_id, "project_id"), input, by, optNum(expected_version));
+});
+route("PATCH", "/api/risks/:id", async ({ db, req, by, params }) => {
+  const { project_id, expected_version, ...input } = await readJson(req);
+  return upsertRisk(db, reqStr(project_id, "project_id"), { ...input, id: params[0] }, by, optNum(expected_version));
+});
+route("DELETE", "/api/risks/:id", async ({ db, by, params }) => deleteEntity(db, "risk", params[0], by));
 
 // ---- work packages
 route("GET", "/api/workpackages", async ({ db, url }) => listWorkpackagesOut(db, reqStr(url.searchParams.get("project_id"), "project_id")));

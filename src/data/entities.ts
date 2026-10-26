@@ -18,8 +18,8 @@ import { TransitionError } from "./rules";
 import { recomputeScheduleStmts, scheduleBatch, storeSchedule } from "./schedule";
 import { ForbiddenError, NotFoundError, ValidationError, eventStmt, eventStmtIfChanged, eventStmtWhere, now, type Diff } from "./util";
 
-export type EntityKind = "project" | "workpackage" | "branch" | "milestone" | "context_doc" | "person";
-export const ENTITY_KINDS: readonly EntityKind[] = ["project", "workpackage", "branch", "milestone", "context_doc", "person"];
+export type EntityKind = "project" | "workpackage" | "branch" | "milestone" | "context_doc" | "person" | "risk";
+export const ENTITY_KINDS: readonly EntityKind[] = ["project", "workpackage", "branch", "milestone", "context_doc", "person", "risk"];
 
 /** Ids that follow an item into (or out of) the trash. */
 export type Children = { workpackages: string[]; milestones: string[]; context_docs: string[] };
@@ -305,6 +305,7 @@ async function checkParents(db: D1Database, kind: EntityKind, r: Row): Promise<v
     !!(await db.prepare(`SELECT 1 FROM ${table} WHERE id = ? AND deleted_at IS NULL`).bind(String(id)).first());
   if (kind === "person" || kind === "project") return;
   if (!(await isLive("project", r.project_id))) throw parentDeleted(`project ${String(r.project_id)} is in the trash; restore it first`);
+  if (kind === "risk") return;
   const parent: [string, unknown] | null =
     kind === "workpackage"
       ? r.parent_id
@@ -483,12 +484,13 @@ export async function purgeEntity(
  */
 export async function listTrash(db: D1Database): Promise<TrashItem[]> {
   type T = { id: string; title: string; project_id: string | null; deleted_at: string; deleted_by: string };
-  const [p, w, m, d, pe] = await db.batch([
+  const [p, w, m, d, pe, ri] = await db.batch([
     db.prepare("SELECT id, title, id AS project_id, deleted_at, deleted_by FROM project WHERE deleted_at IS NOT NULL"),
     db.prepare("SELECT id, title, project_id, parent_id, deleted_at, deleted_by FROM workpackage WHERE deleted_at IS NOT NULL"),
     db.prepare("SELECT id, title, project_id, workpackage_id, deleted_at, deleted_by FROM milestone WHERE deleted_at IS NOT NULL"),
     db.prepare("SELECT id, title, project_id, owner_kind, owner_id, deleted_at, deleted_by FROM context_doc WHERE deleted_at IS NOT NULL"),
     db.prepare("SELECT id, name AS title, NULL AS project_id, deleted_at, deleted_by FROM person WHERE deleted_at IS NOT NULL"),
+    db.prepare("SELECT id, title, project_id, deleted_at, deleted_by FROM risk WHERE deleted_at IS NOT NULL"),
   ]);
   const projects = p.results as T[];
   const wps = w.results as Array<T & { parent_id: string | null }>;
@@ -535,6 +537,7 @@ export async function listTrash(db: D1Database): Promise<TrashItem[]> {
   for (const x of docs)
     if (!withProject(x) && !(x.owner_kind === "workpackage" && withWp(x.owner_id, x.deleted_at))) push("context_doc", x, 0);
   for (const x of pe.results as T[]) push("person", x, 0);
+  for (const x of ri.results as T[]) if (!withProject(x)) push("risk", x, 0);
   return out.sort((a, b) => (a.deleted_at < b.deleted_at ? 1 : a.deleted_at > b.deleted_at ? -1 : a.id.localeCompare(b.id)));
 }
 

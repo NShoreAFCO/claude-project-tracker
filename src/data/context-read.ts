@@ -1,6 +1,7 @@
 import type { ContextDocRow, OwnerKind } from "../types";
 import { LIVE, NotFoundError, ValidationError, utf8Bytes } from "./util";
 import { ensureSchedule } from "./schedule";
+import { openRisksMarkdown } from "./risks";
 
 export type OwnerRef = { owner_kind: OwnerKind; owner_id: string };
 export type OwnerInfo = OwnerRef & { project_id: string; title: string };
@@ -196,6 +197,9 @@ export async function getContextBundle(
     parts.push("## Not included (size limit)\n\n");
     for (const d of omitted) parts.push(`- ${d.owner_kind}:${d.owner_id}/${d.slug} (${d.bytes} bytes, doc_id ${d.id})\n`);
   }
+  // F6: open risks of the project, after the documents (data, not instructions).
+  const risks = await openRisksMarkdown(db, args.project_id);
+  if (risks) parts.push(risks);
   const markdown = parts.join("");
   return { markdown, included: ids, omitted, bytes: utf8Bytes(markdown) };
 }
