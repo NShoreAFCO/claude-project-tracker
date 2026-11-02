@@ -12,7 +12,7 @@ The one rule: **do not edit core files in your repository.** If core needs a fix
 A fork already has it. For a repository created from the template:
 
 ```powershell
-git remote add upstream https://github.com/<owner>/<package-repo>.git
+git remote add upstream https://github.com/NShoreAFCO/claude-project-tracker.git
 git fetch upstream
 git merge upstream/main --allow-unrelated-histories -m "Track the package as upstream"
 ```
@@ -47,8 +47,8 @@ git push
 
 ## Sending a fix to the package
 
-1. Fork the package repository (`gh repo fork <owner>/<package-repo> --clone`) if you don't have one.
-2. Make the change there, with a test, and run `npm test` and `npm run check`. In the package itself, `checks.denylist` is `true`: your organisation's names must not appear in core.
+1. Fork the package repository (`gh repo fork NShoreAFCO/claude-project-tracker --clone`) if you don't have one.
+2. Make the change there, with a test, and run `npm test` and `npm run check`. Keep your organisation's names out of core: the maintainers check pull requests for organisation names before merging.
 3. Open a pull request against the package.
 
 ## For the package maintainers: bringing changes from a branded deployment

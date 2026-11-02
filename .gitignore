@@ -19,3 +19,6 @@ public/instance/
 .superpowers/
 seed/seed.sql
 wrangler.jsonc
+
+# identity denylist for npm run check (maintainers only; CI reads IDENTITY_DENYLIST)
+.denylist

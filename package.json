@@ -1,6 +1,11 @@
 {
   "name": "project-tracker",
   "version": "0.2.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NShoreAFCO/claude-project-tracker.git"
+  },
   "private": true,
   "type": "module",
   "scripts": {

@@ -122,3 +122,9 @@ npx wrangler dev --var DEV_AUTH_EMAIL:you@example.com --var ALLOWED_EMAILS:you@e
 ```
 
 `DEV_AUTH_EMAIL` stands in for the Access login, and only for requests to `localhost` / `127.0.0.1`.
+
+The identity check in `npm run check` uses a denylist that is kept out of the repository. CI reads it from the secret `IDENTITY_DENYLIST`. Locally, maintainers keep it in an untracked `.denylist` file: one regular-expression fragment per line, `#` for comments. Without either, the check is skipped.
+
+## License
+
+Apache License 2.0. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
