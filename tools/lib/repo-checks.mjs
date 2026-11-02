@@ -25,13 +25,44 @@ export function migrationProblems(names) {
 }
 
 /**
+ * Builds the identity denylist. The terms are kept out of the repository: they come from the
+ * IDENTITY_DENYLIST environment variable (a CI secret) or, locally, from an untracked `.denylist` file.
+ * One regular-expression fragment per line; blank lines and lines starting with `#` are ignored.
+ * @param {string | undefined} envValue value of IDENTITY_DENYLIST
+ * @param {string | null} fileText contents of `.denylist`, or null when there is none
+ * @returns {RegExp | null} case-insensitive pattern, or null when no terms are configured
+ */
+export function loadDenylist(envValue, fileText) {
+  const text = envValue && envValue.trim() ? envValue : (fileText ?? "");
+  const terms = text
+    .split(/\r?\n/)
+    .map((t) => t.trim())
+    .filter((t) => t && !t.startsWith("#"));
+  return terms.length ? new RegExp(terms.join("|"), "i") : null;
+}
+
+/**
+ * `owner/name` of the published repository, from package.json `repository` (string or { url }).
+ * @returns {string | null}
+ */
+export function ownRepoSlug(pkg) {
+  const url = typeof pkg?.repository === "string" ? pkg.repository : pkg?.repository?.url;
+  const m = url && /github\.com[/:]([^/\s]+\/[^/\s#]+?)(?:\.git)?(?:#.*)?$/i.exec(url);
+  return m ? m[1] : null;
+}
+
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
  * Lines of text files matching the denylist, as "path:line". Unreadable files are skipped.
  * @param {string[]} files tracked paths to scan
  * @param {(path: string) => string} read returns the file text (throws when unreadable)
  * @param {RegExp} deny
- * @param {string[]} [skip] paths that hold the pattern itself
+ * @param {string[]} [skip] paths not to scan
+ * @param {string[]} [allow] literal strings removed from each line before matching (the repo's own address)
  */
-export function denylistHits(files, read, deny, skip = []) {
+export function denylistHits(files, read, deny, skip = [], allow = []) {
+  const allowRe = allow.length ? new RegExp(allow.map(escapeRe).join("|"), "gi") : null;
   const hits = [];
   for (const f of files.filter((f) => !skip.includes(f))) {
     let s;
@@ -40,7 +71,7 @@ export function denylistHits(files, read, deny, skip = []) {
     } catch {
       continue;
     }
-    s.split("\n").forEach((line, i) => deny.test(line) && hits.push(`${f}:${i + 1}`));
+    s.split("\n").forEach((line, i) => deny.test(allowRe ? line.replace(allowRe, "") : line) && hits.push(`${f}:${i + 1}`));
   }
   return hits;
 }

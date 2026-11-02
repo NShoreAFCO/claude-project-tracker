@@ -108,19 +108,19 @@ Answer: `GitHub.com` → `HTTPS` → `Yes` (authenticate Git) → `Login with a 
 
 You will work in your **own** repository, so you can commit your settings and still receive updates.
 
-Ask the person who gave you this package for the repository address, for example `some-org/claude-project-tracker`. Then choose one of these:
+The package is published at `NShoreAFCO/claude-project-tracker`. If someone gave you a copy from a different address, use theirs in the commands below. Then choose one of these:
 
 **A. Your own repository from the template (recommended):**
 
 ```powershell
 cd $HOME\Documents
-gh repo create my-project-tracker --private --template some-org/claude-project-tracker --clone
+gh repo create my-project-tracker --private --template NShoreAFCO/claude-project-tracker --clone
 cd my-project-tracker
 ```
 
-**B. A fork** (choose this if you want to send improvements back easily): `gh repo fork some-org/claude-project-tracker --clone`, then `cd claude-project-tracker`.
+Your repository stays private. Replace `my-project-tracker` with any name you like.
 
-Replace `some-org/claude-project-tracker` with the address you were given and `my-project-tracker` with any name you like.
+**B. A fork** (choose this if you want to send improvements back easily): `gh repo fork NShoreAFCO/claude-project-tracker --clone`, then `cd claude-project-tracker`. A fork of a public repository is public too, so don't commit anything private to it. Your secrets stay in the ignored `secrets/` folder either way.
 
 **You should see:** a new folder with files such as `README.md`, `package.json` and `instance.example`.
 

@@ -1,13 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { migrationProblems, denylistHits, commitLogHits } from "../../tools/lib/repo-checks.mjs";
+import { migrationProblems, denylistHits, commitLogHits, loadDenylist, ownRepoSlug } from "../../tools/lib/repo-checks.mjs";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-// The word is assembled here so it never appears literally in a tracked file outside tools/check-repo.mjs.
-const WORD = "fixture-" + "label";
 const DENY = /(^|[^a-z])fixture-denied-word/i;
 const mem = (files) => (p) => {
   if (!(p in files)) throw new Error("ENOENT");
@@ -45,18 +39,33 @@ test("denylisted word in .github fails", () => {
   assert.deepEqual(denylistHits(Object.keys(files), mem(files), DENY), [".github/workflows/ci.yml:4"]);
 });
 
-test("denylist skips the file that holds the pattern and unreadable files", () => {
-  const files = { "tools/check-repo.mjs": "fixture-denied-word" };
-  assert.deepEqual(denylistHits(["tools/check-repo.mjs", "missing.txt"], mem(files), DENY, ["tools/check-repo.mjs"]), []);
+test("denylist skips listed and unreadable files", () => {
+  const files = { "skipped.txt": "fixture-denied-word" };
+  assert.deepEqual(denylistHits(["skipped.txt", "missing.txt"], mem(files), DENY, ["skipped.txt"]), []);
 });
 
-test("the real denylist in check-repo.mjs catches the media-category label", () => {
-  const src = readFileSync(join(root, "tools", "check-repo.mjs"), "utf8");
-  const m = /const DENY = \/(.+)\/i;/.exec(src);
-  assert.ok(m, "DENY not found");
-  const deny = new RegExp(m[1], "i");
-  const files = { ".github/workflows/ci.yml": `label: ${WORD}\n` };
-  assert.deepEqual(denylistHits(Object.keys(files), mem(files), deny), [".github/workflows/ci.yml:1"]);
+test("denylist ignores the repo's own address but not the word elsewhere", () => {
+  const deny = /fixture-owner/i;
+  const files = { "docs/INSTALL.md": "gh repo fork Fixture-Owner/claude-project-tracker\nfixture-owner elsewhere\n" };
+  assert.deepEqual(denylistHits(Object.keys(files), mem(files), deny, [], ["fixture-owner/claude-project-tracker"]), ["docs/INSTALL.md:2"]);
+});
+
+test("loadDenylist: environment first, then file; comments, blanks and commas inside a fragment", () => {
+  assert.equal(loadDenylist(undefined, null), null);
+  assert.equal(loadDenylist("  ", "# only a comment, with a comma\n\n"), null);
+  const fromFile = loadDenylist(undefined, "# comment, with a comma\n(^|[^a-z])fixture-a\r\nb{1,2}c\n");
+  assert.equal(fromFile.source, "(^|[^a-z])fixture-a|b{1,2}c");
+  assert.ok(fromFile.test("FIXTURE-A") && !fromFile.test("xfixture-a") && fromFile.test("abbc"));
+  assert.equal(loadDenylist("fixture-env", "fixture-file").source, "fixture-env");
+});
+
+test("ownRepoSlug reads package.json repository", () => {
+  assert.equal(
+    ownRepoSlug({ repository: { type: "git", url: "git+https://github.com/some-owner/some-repo.git" } }),
+    "some-owner/some-repo",
+  );
+  assert.equal(ownRepoSlug({ repository: "https://github.com/some-owner/some-repo" }), "some-owner/some-repo");
+  assert.equal(ownRepoSlug({}), null);
 });
 
 test("commit log: GitHub merge subjects are skipped, real content is not", () => {
