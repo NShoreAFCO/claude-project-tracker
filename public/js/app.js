@@ -12,11 +12,14 @@ import { renderInbox } from "./inbox.js";
 import { openProject } from "./project.js";
 import { renderPeople } from "./people.js";
 import { renderTrash } from "./trash.js";
+import { sidebarModel, resetGridFilter } from "./sidebar.js";
+import { PROJECT_CATEGORIES, catLabel } from "./categories.js";
 
 document.getElementById("logo").src = `/instance/${config.app.logo}`;
 document.getElementById("favicon").href = `/instance/${config.app.favicon}`;
 const main = document.getElementById("main");
 const nav = document.getElementById("nav");
+const navToggle = document.getElementById("nav-toggle");
 const searchForm = document.getElementById("search");
 const userbar = document.getElementById("userbar");
 
@@ -60,23 +63,68 @@ async function updateInboxCount() {
 }
 
 function renderNav() {
-  const link = (view, href, label, extra) => h("a", { href, "aria-current": state.view === view ? "page" : null }, label, extra || null);
+  const model = sidebarModel({
+    view: state.view,
+    categories: PROJECT_CATEGORIES,
+    filterCategory: state.filter.category,
+    inboxCount: state.inboxCount,
+    hostname: location.hostname,
+  });
+  const link = (e, label, extra) =>
+    h("a", { href: e.href, "aria-current": e.current ? "page" : null, on: e.category ? { click: (ev) => pickCategory(ev, e.category) } : {} }, label, extra || null);
+  const count = (n) => (n ? h("span.count", { "aria-label": String(n) }, String(n)) : null);
   clear(
     nav,
-    link("grid", "#/", t("navProjects")),
-    link("gantt", "#/gantt", t("navGantt")),
-    link("upcoming", "#/upcoming", t("navUpcoming")),
-    link("mine", "#/mine", t("navMine")),
-    link("people", "#/people", t("navPeople")),
-    link("trash", "#/trash", t("navTrash")),
-    link(
-      "inbox",
-      "#/inbox",
-      t("navInbox"),
-      state.inboxCount ? h("span.count", { "aria-label": String(state.inboxCount) }, String(state.inboxCount)) : null,
-    ),
+    ...model.top.map((e) => link(e, t(e.labelKey))),
+    h("div.nav-group", h("h2.nav-heading", t("navCategories")), ...model.categories.map((e) => link(e, catLabel("p", e.category)))),
+    h("hr.nav-rule"),
+    ...model.views.map((e) => link(e, t(e.labelKey), count(e.count))),
+    model.logout ? h("a.nav-logout", { href: model.logout.href }, t(model.logout.labelKey)) : null,
   );
+  navToggle.textContent = t("navMenu");
 }
+
+/** Category entry: set the grid category filter and show the grid. */
+function pickCategory(ev, key) {
+  ev.preventDefault();
+  state.filter.category = key;
+  closeDrawer();
+  if (location.hash === "#/" || location.hash === "" || location.hash === "#") route();
+  else location.hash = "#/";
+}
+
+function setDrawer(open) {
+  document.body.classList.toggle("nav-open", open);
+  navToggle.setAttribute("aria-expanded", String(open));
+}
+function closeDrawer() {
+  setDrawer(false);
+}
+navToggle.addEventListener("click", (e) => {
+  e.stopPropagation();
+  setDrawer(navToggle.getAttribute("aria-expanded") !== "true");
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && document.body.classList.contains("nav-open")) {
+    closeDrawer();
+    navToggle.focus();
+  }
+});
+document.addEventListener("click", (e) => {
+  if (document.body.classList.contains("nav-open") && !nav.contains(e.target)) closeDrawer();
+});
+nav.addEventListener("click", (e) => {
+  if (e.target.closest("a")) closeDrawer();
+});
+
+// Logo/title: home. Reset filters, close dialogs, scroll to top (also when already on #/).
+document.getElementById("home").addEventListener("click", () => {
+  resetGridFilter(state.filter, localStorage);
+  document.querySelectorAll("dialog[open]").forEach((d) => d.close());
+  window.scrollTo(0, 0);
+  closeDrawer();
+  if (location.hash === "#/" || location.hash === "" || location.hash === "#") route();
+});
 
 /** Shell texts come from the instance config and the UI locale (index.html carries no brand text). Re-run after a language switch. */
 function renderShell() {
@@ -142,13 +190,14 @@ function parseHash() {
 
 async function renderView() {
   const { parts, params } = parseHash();
-  const view = ["gantt", "inbox", "search", "people", "trash", "upcoming", "mine"].includes(parts[0]) ? parts[0] : "grid";
+  const view = ["gantt", "inbox", "search", "people", "trash", "upcoming", "mine", "my"].includes(parts[0]) ? parts[0] : "grid";
   state.view = view;
   renderNav();
   if (view === "people") await renderPeople(main, state);
   else if (view === "trash") await renderTrash(main, state);
   else if (view === "upcoming") await renderUpcoming(main);
   else if (view === "mine") await renderMyWps(main);
+  else if (view === "my") clear(main, h("h2", t("navMy"))); // placeholder, filled by the my-dashboard task
   else if (view === "gantt") await renderGantt(main, state);
   else if (view === "inbox") await renderInbox(main, state);
   else if (view === "search") await renderSearchResults(params.get("q") || "");

@@ -94,3 +94,29 @@ export function commitLogHits(log, deny, ownSlug = null) {
     .filter((l) => !(ownerTrailer && ownerTrailer.test(l.trim())))
     .filter((l) => deny.test(l.replace(/^Merge pull request #\d+ from [^/\s]+\//, "")));
 }
+
+export const UNDERLAY_TOKENS = ["underlay-wp", "underlay-milestone", "underlay-gate"];
+
+const channel = (hex, i) => {
+  const v = parseInt(hex.slice(i, i + 2), 16) / 255;
+  return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+};
+const luminance = (hex) => 0.2126 * channel(hex, 1) + 0.7152 * channel(hex, 3) + 0.0722 * channel(hex, 5);
+
+/** Problems of the underlay tokens in a parsed theme ({ name: value }): missing, not #rrggbb, or --color-text-strong below 7:1. */
+export function underlayProblems(vars, min = 7) {
+  const fg = vars["color-text-strong"];
+  const hexRe = /^#[0-9a-fA-F]{6}$/;
+  const problems = [];
+  for (const k of UNDERLAY_TOKENS) {
+    const bg = vars[k];
+    if (bg === undefined) problems.push(`${k}: missing`);
+    else if (!hexRe.test(bg) || !hexRe.test(fg ?? "")) problems.push(`${k}: not a #rrggbb colour`);
+    else {
+      const [x, y] = [luminance(fg), luminance(bg)].sort((p, q) => q - p);
+      const ratio = (x + 0.05) / (y + 0.05);
+      if (ratio < min - 0.02) problems.push(`${k}: text-strong ${ratio.toFixed(2)}:1 < ${min}:1`);
+    }
+  }
+  return problems;
+}

@@ -625,4 +625,11 @@ export default {
   gateNotReached:
     "Die Entscheidung kann jetzt erfasst werden, das Gate bleibt aber geschlossen, bis diese Arbeitspakete abgeschlossen oder verworfen sind: {list}.",
   // /qol:t09
+  // qol:t06
+  navDashboard: "Übersicht",
+  navMy: "Mein Dashboard",
+  navCategories: "Kategorien",
+  navLogout: "Abmelden",
+  navMenu: "Menü",
+  // /qol:t06
 };

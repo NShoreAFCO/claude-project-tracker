@@ -51,6 +51,10 @@ Card chips for the status rules: `--status-blocked` (the red "Blocked" chip of a
 
 Fills for the risk heat map, the score chips and the risk type chips: `--risk-low`, `--risk-medium`, `--risk-high`, `--risk-critical` (score bands 1–4, 5–9, 10–14, 15–25) and `--risk-nc` (nonconformity) and `--risk-opportunity`. Text sits on these fills, so `--color-text-strong` on each must reach ≥ 7:1 (light to mid tones). Existing instance themes must add all six tokens (`npm run check` reports them as missing).
 
+### Underlays
+
+Soft fills that sit behind work packages, milestones and gates: `--underlay-wp`, `--underlay-milestone`, `--underlay-gate` (utility classes `.underlay-wp`, `.underlay-milestone`, `.underlay-gate`). Use three clearly different hues. Text sits on these fills, so `--color-text-strong` on each must reach ≥ 7:1. Existing instance themes must add all three tokens (`npm run check` reports them as missing or too weak).
+
 ### Type and shape
 
 | Token | Example | Notes |
@@ -107,6 +111,9 @@ Example Corp's style guide says: navy `#14213d`, signal orange `#e4572e` as acce
   --risk-critical: #ef8f8f;
   --risk-nc: #c7b6e8;
   --risk-opportunity: #9cd0ec;
+  --underlay-wp: #dbe9f4;
+  --underlay-milestone: #fbe8c4;
+  --underlay-gate: #e0f0d4;
   --font: "Source Sans 3", system-ui, sans-serif;
   --font-heading: var(--font);
   --font-size-base: 16px;

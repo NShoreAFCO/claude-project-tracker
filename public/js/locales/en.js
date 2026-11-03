@@ -620,4 +620,11 @@ export default {
   gateNotReached:
     "You can record the decision now, but the gate stays closed until these work packages are complete or dropped: {list}.",
   // /qol:t09
+  // qol:t06
+  navDashboard: "Dashboard",
+  navMy: "My dashboard",
+  navCategories: "Categories",
+  navLogout: "Log out",
+  navMenu: "Menu",
+  // /qol:t06
 };
