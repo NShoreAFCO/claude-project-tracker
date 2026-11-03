@@ -67,6 +67,17 @@ describe("hook host and HANDOFF.md", () => {
     const r2 = await hook({ context_file: { name: "session.md", content: "# Old form" } });
     expect(r2.body.context_file).toBe("unchanged");
   });
+  it("ignores inherited property names and nameless context_files entries", async () => {
+    const r = await hook({
+      context_files: [
+        { name: "__proto__", content: "x" },
+        { name: "constructor", content: "x" },
+        { content: "no name" },
+      ],
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.context_files).toBeUndefined();
+  });
   it("ignores unknown names and refuses an oversize entry on its own", async () => {
     const big = "a".repeat(256 * 1024 + 1);
     const r = await hook({

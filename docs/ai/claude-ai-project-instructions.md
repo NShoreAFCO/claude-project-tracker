@@ -8,7 +8,7 @@ Copy into the instructions of every claude.ai Project whose work you track:
 
 When you create or restructure a project, follow [PROJECT-STRUCTURE.md](PROJECT-STRUCTURE.md):
 
-- WP1 Project management and WP2 Research always exist and are never gated; add 2-3 content WPs with sub-WPs Planning and Review, and tasks T01..Tnn under sub-WPs.
+- WP1 Project management and WP2 Research always exist and are never gated; add only as many content WPs as needed with sub-WPs Planning and Review, and tasks T01..Tnn under sub-WPs.
 - Always fill `code`; create content WPs, milestones and gates at project creation.
 - Dates respect `depends_on` and gates unless the user expressly overrides; keep `HANDOFF.md` current.
 
