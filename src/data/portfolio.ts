@@ -154,6 +154,7 @@ export type PortfolioWp = {
   id: string;
   project_id: string;
   project_title: string;
+  code: string | null;
   title: string;
   status: string;
   progress: number;
@@ -166,6 +167,7 @@ type PortfolioWpRow = {
   id: string;
   project_id: string;
   project_title: string;
+  code: string | null;
   title: string;
   status: string;
   progress: number;
@@ -187,6 +189,7 @@ async function toPortfolioWps(db: D1Database, rows: PortfolioWpRow[]): Promise<P
     id: row.id,
     project_id: row.project_id,
     project_title: row.project_title,
+    code: row.code ?? null,
     title: row.title,
     status: row.status,
     progress: row.progress,
@@ -219,6 +222,7 @@ export async function upcomingWorkpackages(db: D1Database, opts: { project_id?: 
         w.id,
         w.project_id,
         p.title AS project_title,
+        w.code,
         w.title,
         w.status,
         w.progress,
@@ -302,6 +306,7 @@ export async function mineWorkpackages(
         w.id,
         w.project_id,
         p.title AS project_title,
+        w.code,
         w.title,
         w.status,
         w.progress,

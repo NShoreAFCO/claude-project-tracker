@@ -353,7 +353,7 @@ describe("work package rules", () => {
     const r = await logProgress(db, { project_id: p.id, workpackage_id: w.id, summary: "started reading" }, A);
     expect(r.workpackage!.status).toBe("doing");
     const ev = (await listEvents(db, { project_id: p.id })).find((e) => e.id === r.event_id)!;
-    expect(JSON.parse(ev.diff_json!)).toEqual({ status: ["todo", "doing"] });
+    expect(JSON.parse(ev.diff_json!)).toEqual({ status: ["todo", "doing"], actual_start: [null, today()] });
     // a WP that is not todo is left alone
     const b = await upsertWorkpackage(db, p.id, { title: "b", status: "waiting" }, A);
     const r2 = await logProgress(db, { project_id: p.id, workpackage_id: b.id, summary: "note" }, A);

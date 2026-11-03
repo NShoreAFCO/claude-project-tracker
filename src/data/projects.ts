@@ -65,6 +65,7 @@ export const PROJECT_FIELDS = [
   "origin",
   "repo_url",
   "local_path",
+  "local_host",
   "context_file",
   "session_id",
   "start_date",
@@ -105,6 +106,7 @@ const ORIGINS = ["claude-web", "claude-code", "manual", "mixed"];
 const MODES = ["derived", "manual"];
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const LOCAL_HOST_MAX = 100;
 
 export type ProjectCard = {
   /** Open risks, highest open score, and open risks scored 15+ without an action (spec F6). */
@@ -141,6 +143,7 @@ export type ProjectCard = {
   blocked: string[];
   repo_url: string | null;
   local_path: string | null;
+  local_host: string | null;
   session_id: string | null;
   version: number;
 };
@@ -156,6 +159,11 @@ function normalise(input: ProjectInput): Partial<Record<ProjectField, unknown>> 
       // true/false, or null to follow the policy default (spec F4)
       if (v !== null && typeof v !== "boolean") throw new ValidationError("schedule_strict must be true, false or null");
       v = v === null ? null : v ? 1 : 0;
+    } else if (f === "local_host") {
+      // Host name of the machine that holds local_path (spec D3): trimmed, max 100 characters, "" or null clears.
+      if (v !== null && typeof v !== "string") throw new ValidationError("local_host must be a string");
+      v = typeof v === "string" ? v.trim() || null : null;
+      if (typeof v === "string" && v.length > LOCAL_HOST_MAX) throw new ValidationError(`local_host must be at most ${LOCAL_HOST_MAX} characters`);
     } else if (f === "language") {
       // Report language (spec F2, §4.4): one of the instance's offered locales, null = instance default.
       if (v === "") v = null;
@@ -377,6 +385,7 @@ export async function listProjects(
           .map((w) => w.blocked_by!.trim()),
         repo_url: p.repo_url,
         local_path: p.local_path,
+        local_host: p.local_host ?? null,
         session_id: p.session_id,
         version: p.version,
       };
@@ -514,6 +523,7 @@ export async function createProject(db: D1Database, input: ProjectInput, by: Cal
     origin: "manual",
     repo_url: null,
     local_path: null,
+    local_host: null,
     context_file: null,
     session_id: null,
     start_date: null,

@@ -5,6 +5,9 @@ import { openRisksMarkdown } from "./risks";
 import { gateStatusMarkdown } from "./gates";
 
 export type OwnerRef = { owner_kind: OwnerKind; owner_id: string };
+/** "<code> <title>" when the work package has a code (spec D1). */
+const withCode = (w: { code: string | null; title: string }): string => (w.code ? `${w.code} ${w.title}` : w.title);
+
 export type OwnerInfo = OwnerRef & { project_id: string; title: string };
 export type DocMeta = Omit<ContextDocRow, "content_md" | "deleted_at" | "deleted_by">;
 
@@ -28,11 +31,11 @@ export async function resolveOwner(db: D1Database, ref: OwnerRef): Promise<Owner
   }
   if (ref.owner_kind === "workpackage") {
     const w = await db
-      .prepare(`SELECT project_id, title FROM workpackage WHERE id = ? AND ${LIVE()}`)
+      .prepare(`SELECT project_id, title, code FROM workpackage WHERE id = ? AND ${LIVE()}`)
       .bind(ref.owner_id)
-      .first<{ project_id: string; title: string }>();
+      .first<{ project_id: string; title: string; code: string | null }>();
     if (!w) throw new NotFoundError(`workpackage ${ref.owner_id} not found`);
-    return { ...ref, project_id: w.project_id, title: w.title };
+    return { ...ref, project_id: w.project_id, title: withCode(w) };
   }
   // Branches are never soft-deleted; one of a project in the trash is gone with it.
   const b = await db
@@ -63,9 +66,9 @@ export async function ownerChain(db: D1Database, ref: OwnerRef): Promise<OwnerIn
   if (ref.owner_kind !== "project") {
     // One query for all WPs of the project, then walk the parent chain in memory.
     const { results } = await db
-      .prepare("SELECT id, parent_id, title, deleted_at FROM workpackage WHERE project_id = ?")
+      .prepare("SELECT id, parent_id, title, code, deleted_at FROM workpackage WHERE project_id = ?")
       .bind(start.project_id)
-      .all<{ id: string; parent_id: string | null; title: string; deleted_at: string | null }>();
+      .all<{ id: string; parent_id: string | null; title: string; code: string | null; deleted_at: string | null }>();
     const byId = new Map(results.map((w) => [w.id, w]));
     const seen = new Set<string>(ref.owner_kind === "workpackage" ? [ref.owner_id] : []);
     for (let depth = 0; wpId && depth < MAX_DEPTH && !seen.has(wpId); depth++) {
@@ -73,7 +76,7 @@ export async function ownerChain(db: D1Database, ref: OwnerRef): Promise<OwnerIn
       if (!w) break;
       seen.add(w.id);
       // A branch linked to a WP in the trash keeps working: the deleted WP adds nothing, its live ancestors still do.
-      if (!w.deleted_at) chain.push({ owner_kind: "workpackage", owner_id: w.id, project_id: start.project_id, title: w.title });
+      if (!w.deleted_at) chain.push({ owner_kind: "workpackage", owner_id: w.id, project_id: start.project_id, title: withCode(w) });
       wpId = w.parent_id;
     }
     const p = await db.prepare("SELECT title FROM project WHERE id = ?").bind(start.project_id).first<{ title: string }>();
