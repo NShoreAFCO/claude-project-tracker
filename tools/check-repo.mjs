@@ -165,7 +165,7 @@ if (inst.checks?.denylist !== false) {
       log = execFileSync("git", ["log", "--format=%s%n%b"], { encoding: "utf8" });
     } catch {}
     // GitHub writes "Merge pull request #N from <owner>/<branch>" and "Merge branch 'main' into <branch>" itself
-    const logHits = commitLogHits(log, DENY);
+    const logHits = commitLogHits(log, DENY, slug);
     check("denylist: no identity in commit messages", logHits.length === 0, logHits.slice(0, 5).join(" | "));
   }
   const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
