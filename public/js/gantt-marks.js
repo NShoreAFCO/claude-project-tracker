@@ -148,3 +148,63 @@ export function barParts(wp, today) {
   parts.extent = { from: Math.min(...spans.map((p) => p.from)), to: Math.max(...spans.map((p) => p.to)) };
   return parts;
 }
+
+// qol:t11
+const linkId = (x) => (typeof x === "string" ? x : (x?.workpackage_id ?? x?.id ?? null));
+
+/** Date a milestone is drawn at: due date, else the reached date of a done one. */
+export function markDate(m) {
+  return m.due_date || (m.done && m.reached_at ? m.reached_at.slice(0, 10) : null);
+}
+
+/**
+ * Decide on which Gantt row each milestone / gate is drawn (pure).
+ * `rows`: the visible work package rows (`{ w: { id } }`); `topOf`: Map wpId -> top-level wpId;
+ * `entries`: `{ m, p }` per milestone (m.requires / m.unlocks are WP ids, m.workpackage_id the attached WP).
+ * Milestones go on the row of their main WP (attached, else last `requires`); gates on the row of the WP they
+ * unlock (that WP's row, else its main WP's row), falling back to the milestone rule. Labels `M<n>` / `G<n>` count
+ * per project by date (ties keep input order). Returns `{ placed: Map(row -> marks[]), unplaced: marks[] }`,
+ * a mark being `{ m, p, kind, label, date, row }`.
+ */
+export function placeMarks(rows, entries, topOf = new Map()) {
+  const rowOf = new Map();
+  for (const r of rows) if (r.w) rowOf.set(r.w.id, r);
+  const ownOrMain = (id) => rowOf.get(id) ?? rowOf.get(topOf.get(id)) ?? null;
+  const mainRow = (id) => rowOf.get(topOf.get(id) ?? id) ?? null;
+
+  const counters = new Map();
+  const order = entries
+    .map((e, i) => ({ e, i, date: markDate(e.m) }))
+    .sort((a, b) => (a.date === b.date ? a.i - b.i : a.date === null ? 1 : b.date === null ? -1 : a.date < b.date ? -1 : 1));
+
+  const placed = new Map();
+  const unplaced = [];
+  for (const { e, date } of order) {
+    const { m, p } = e;
+    const kind = m.gate ? "gate" : "milestone";
+    const key = `${p?.id ?? m.project_id ?? ""}|${kind}`;
+    const n = (counters.get(key) ?? 0) + 1;
+    counters.set(key, n);
+    const base = { m, p, kind, label: `${kind === "gate" ? "G" : "M"}${n}`, date };
+
+    const requires = (m.requires || []).map(linkId).filter(Boolean);
+    let target = null;
+    if (kind === "gate") {
+      for (const id of (m.unlocks || []).map(linkId)) {
+        target = id ? ownOrMain(id) : null;
+        if (target) break;
+      }
+    }
+    if (!target && m.workpackage_id) target = mainRow(m.workpackage_id);
+    if (!target && requires.length) target = mainRow(requires[requires.length - 1]);
+
+    if (!target) {
+      unplaced.push({ ...base, row: null });
+      continue;
+    }
+    if (!placed.has(target)) placed.set(target, []);
+    placed.get(target).push({ ...base, row: target });
+  }
+  return { placed, unplaced };
+}
+// /qol:t11

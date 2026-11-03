@@ -647,4 +647,7 @@ export default {
   filterTagsClear: "Zurücksetzen",
   filterTagsNone: "Noch keine Tags.",
   // /qol:t07
+  // qol:t11
+  ganttUnplaced: "Nicht zugeordnet",
+  // /qol:t11
 };

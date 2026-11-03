@@ -642,4 +642,7 @@ export default {
   filterTagsClear: "Clear",
   filterTagsNone: "No tags yet.",
   // /qol:t07
+  // qol:t11
+  ganttUnplaced: "Unplaced",
+  // /qol:t11
 };

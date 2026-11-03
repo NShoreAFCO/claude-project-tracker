@@ -58,3 +58,54 @@ describe("barParts", () => {
     expect(barParts({ status: "todo" }, "2026-03-05")).toBeNull();
   });
 });
+
+// @ts-expect-error untyped JS module
+const { placeMarks } = (await import("../public/js/gantt-marks.js")) as unknown as { placeMarks: (...a: any[]) => any };
+
+describe("placeMarks", () => {
+  const rowA = { w: { id: "a" } };
+  const rowA1 = { w: { id: "a1" } };
+  const rowB = { w: { id: "b" } };
+  const topOf = new Map([
+    ["a", "a"],
+    ["a1", "a"],
+    ["b", "b"],
+    ["b1", "b"],
+  ]);
+  const p = { id: "p" };
+  const ms = (o: Record<string, unknown>) => ({ m: { id: "x", title: "t", ...o }, p });
+
+  it("attached milestone sits on its main WP's row", () => {
+    const { placed } = placeMarks([rowA, rowB], [ms({ due_date: "2026-01-01", workpackage_id: "a1" })], topOf);
+    expect(placed.get(rowA)[0].label).toBe("M1");
+  });
+
+  it("falls back to the last requires WP's main row", () => {
+    const { placed } = placeMarks([rowA, rowB], [ms({ due_date: "2026-01-01", requires: ["a", "b1"] })], topOf);
+    expect(placed.get(rowB)).toHaveLength(1);
+    expect(placed.has(rowA)).toBe(false);
+  });
+
+  it("gate goes on the unlocked sub-WP row when visible, else on its main row", () => {
+    const gate = ms({ gate: 1, due_date: "2026-01-01", unlocks: ["a1"] });
+    expect(placeMarks([rowA, rowA1], [gate], topOf).placed.get(rowA1)[0].label).toBe("G1");
+    expect(placeMarks([rowA], [gate], topOf).placed.get(rowA)[0].kind).toBe("gate");
+  });
+
+  it("unlinked or unplaceable marks are unplaced", () => {
+    const { placed, unplaced } = placeMarks([rowA], [ms({ due_date: "2026-01-01" }), ms({ requires: ["b"] })], topOf);
+    expect(placed.size).toBe(0);
+    expect(unplaced).toHaveLength(2);
+  });
+
+  it("numbers by due date per project and kind, undated last", () => {
+    const e = [
+      ms({ id: "1", due_date: "2026-05-01", workpackage_id: "a" }),
+      ms({ id: "2", workpackage_id: "a" }),
+      ms({ id: "3", due_date: "2026-02-01", workpackage_id: "a" }),
+    ];
+    const marks = placeMarks([rowA], e, topOf).placed.get(rowA);
+    const byId = Object.fromEntries(marks.map((k: any) => [k.m.id, k.label]));
+    expect(byId).toEqual({ "3": "M1", "1": "M2", "2": "M3" });
+  });
+});
