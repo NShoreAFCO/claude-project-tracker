@@ -1917,3 +1917,44 @@ details.cat-empty[open] > summary.cat-head::before {
   opacity: 0.85;
 }
 /* /qol:t07 */
+
+/* qol:t11 */
+.gantt .gate-mark .gate-pole {
+  fill: none;
+  stroke: var(--color-text-strong);
+  stroke-width: 2;
+}
+.gantt .gate-mark .gate-flag {
+  fill: var(--color-surface);
+  stroke: var(--color-text-strong);
+  stroke-width: 1.5;
+}
+.gantt .gate-mark.decision-pending .gate-flag,
+.gantt .gate-mark.decision-none .gate-flag {
+  stroke-dasharray: 3 2;
+}
+.gantt .gate-mark.decision-go .gate-flag,
+.gantt .gate-mark.decision-go_with_conditions .gate-flag {
+  fill: var(--ms-done);
+  stroke: var(--ms-done);
+}
+.gantt .gate-mark.decision-hold .gate-flag,
+.gantt .gate-mark.decision-stop .gate-flag {
+  fill: var(--ms-overdue);
+  stroke: var(--ms-overdue);
+}
+.gantt .mark-label {
+  font-size: 10px;
+  font-weight: 700;
+}
+.gantt-marklist {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.85em;
+}
+/* /qol:t11 */
