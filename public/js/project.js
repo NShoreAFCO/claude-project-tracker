@@ -24,7 +24,7 @@ import {
 } from "./forms.js";
 import { renderContextPanel, openDocViewer } from "./context.js";
 import { collectIssues, issuesByEntity } from "./schedule-ui.js";
-import { issueList, issueBadge, scheduleMeta, milestoneItem } from "./schedule-view.js";
+import { issueList, issueBadge, scheduleMeta, milestoneItem, placeMilestones } from "./schedule-view.js";
 import { decisionDialog, baselineDialog } from "./gates-ui.js";
 
 /** Render sanitised markdown into a container (the only innerHTML use in the app). */
@@ -81,7 +81,7 @@ const writeMenu = (label, items) => roleGate(menuButton(label, items), "write");
 export async function openProject(id, { tab = "overview", owner = null, openDoc = null } = {}) {
   let detail;
   let current = { tab, owner };
-  const fold = { open: new Set(), issuesOnly: false, blocks: { branches: true, tokenCost: false, timeline: true } };
+  const fold = { open: new Set(), issuesOnly: false, blocks: { branches: false, tokenCost: false, timeline: true } };
   const tabs = h("div.tabs", { role: "tablist" });
   const m = openModal({
     title: t("loading"),
@@ -164,6 +164,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
           name === "overview" ? t("tabOverview") : name === "risks" ? t("tabRisks") : t("tabContext"),
         ),
       ),
+      h("a.gantt-link", { href: `#/gantt?project=${encodeURIComponent(p.id)}`, on: { click: () => setTimeout(() => m.close(), 0) } }, t("cardGantt")),
     );
     clear(m.foot);
     if (current.tab === "context") {
@@ -186,7 +187,6 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
                 smallBtn(t("closeProject"), () => closureDialog({ project: p, workpackages: detail.workpackages }), "secondary"),
                 "close",
               ),
-          h("a.btn.small.secondary", { href: `#/gantt?project=${encodeURIComponent(p.id)}` }, t("cardGantt")),
           reportActions(p.id),
           writeBtn(t("logProgress"), () => logProgressForm(p.id, detail.workpackages), "secondary"),
           writeBtn(t("edit"), () => projectForm(p, { workpackages: detail.workpackages }), ""),
@@ -217,15 +217,21 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
     if (!m) return raw;
     if (m[1] === "ext") return m[2].trim();
     const list = m[1] === "wp" ? flatten(detail.workpackages) : detail.milestones;
-    return list.find((x) => x.id === m[2].trim())?.title ?? m[2].trim();
+    const hit = list.find((x) => x.id === m[2].trim());
+    return (hit && (m[1] === "wp" ? wpName(hit) : hit.title)) ?? m[2].trim();
   }
   function blockedAge(w) {
     const n = w.status === "blocked" ? ageDays(w.blocked_since) : null;
     return n === null ? null : ` · ${t("blockedSince", { n, date: fmtDate(w.blocked_since) })}`;
   }
 
+  const wpName = (w) => (w.code ? `${w.code} ${w.title}` : w.title);
+
   /** Title of a work package or milestone of this project (schedule issue texts name the other party). */
-  const titleOf = (x) => flatten(detail.workpackages).find((w) => w.id === x)?.title ?? detail.milestones.find((ms) => ms.id === x)?.title;
+  const titleOf = (x) => {
+    const wp = flatten(detail.workpackages).find((w) => w.id === x);
+    return wp ? wpName(wp) : detail.milestones.find((ms) => ms.id === x)?.title;
+  };
 
   /** Work packages shown in the list: all, or (issues filter) those with issues and their ancestors. */
   function issueWpIds(d) {
@@ -241,7 +247,14 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
     return keep;
   }
 
-  function wpNode(w, shown) {
+  /** Rows of one tree level: gate rows before, milestone rows after their WP (running context). */
+  function levelRows(list, shown, plan, rowOf) {
+    return list
+      .filter((c) => !shown || shown.has(c.id))
+      .flatMap((c) => [...(plan.before.get(c.id) ?? []).map(rowOf), wpNode(c, shown, plan, rowOf), ...(plan.after.get(c.id) ?? []).map(rowOf)]);
+  }
+
+  function wpNode(w, shown, plan, rowOf) {
     const leaf = !w.children?.length;
     const open = !leaf && (fold.open.has(w.id) || (shown && fold.issuesOnly));
     let slider = null;
@@ -298,7 +311,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
                 open ? "▾" : "▸",
               )
             : null,
-          h("strong", w.title),
+          h("strong", w.code ? [h("span.wp-code", w.code), " ", w.title] : w.title),
           statusChip(w.status),
           w.effective_category ? catChip("w", w.effective_category, !w.category && !!w.effective_category) : null,
           personBadge(w.effective_owner, { inherited: !w.owner, label: w.owner ? t("fOwner") : t("inheritedOwner") }),
@@ -338,7 +351,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       !leaf && open
         ? h(
             "ul",
-            w.children.filter((c) => !shown || shown.has(c.id)).map((c) => wpNode(c, shown)),
+            levelRows(w.children, shown, plan, rowOf),
           )
         : null,
     );
@@ -375,7 +388,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
   function overview(d) {
     const p = d.project;
     const allWps = flatten(d.workpackages);
-    const wpTitle = Object.fromEntries(allWps.map((w) => [w.id, w.title]));
+    const wpTitle = Object.fromEntries(allWps.map((w) => [w.id, wpName(w)]));
     const allIssues = collectIssues(d);
     const shownWps = fold.issuesOnly && allIssues.length ? issueWpIds(d) : null;
     const expandableWps = allWps.filter((w) => w.children?.length);
@@ -395,7 +408,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       internal && p.local_path
         ? h(
             "div.copyrow",
-            h("code", p.local_path),
+            h("code", p.local_host ? `${p.local_host} · ${p.local_path}` : p.local_path),
             smallBtn(t("copy"), () => copyText(p.local_path)),
           )
         : null,
@@ -507,7 +520,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
 
     const today = utcDateString();
 
-    const milestoneItems = d.milestones.map((ms) =>
+    const rowOf = (ms) =>
       milestoneItem(ms, {
         today,
         titleOf,
@@ -520,8 +533,10 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
             { label: t("delete"), danger: true, onClick: () => deleteEntity("milestone", ms.id, ms.title, id) },
           ]),
         ],
-      }),
-    );
+      });
+
+    const shownTree = d.workpackages.filter((w) => !shownWps || shownWps.has(w.id));
+    const plan = placeMilestones(shownTree, d.milestones, (w) => fold.open.has(w.id) || (!!shownWps && fold.issuesOnly));
 
     const workpackageActions = h(
       "div.actions",
@@ -534,6 +549,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         render();
       }),
       writeBtn(`+ ${t("addWorkpackage")}`, () => wpForm(id, null, d.workpackages, null, d.milestones), "secondary"),
+      writeBtn(`+ ${t("addMilestone")}`, () => milestoneForm(id, null, detail.workpackages), "secondary"),
     );
 
     return h(
@@ -596,18 +612,10 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
           : h("p.empty", t("noScores")),
       ),
       block(
-        t("milestones"),
-        writeBtn(`+ ${t("addMilestone")}`, () => milestoneForm(id, null, detail.workpackages), "secondary"),
-        d.milestones.length ? h("ul.milestones", milestoneItems) : h("p.empty", t("noMilestones")),
-      ),
-      block(
         t("workpackages"),
         workpackageActions,
-        d.workpackages.length
-          ? h(
-              "ul.tree",
-              d.workpackages.filter((w) => !shownWps || shownWps.has(w.id)).map((w) => wpNode(w, shownWps)),
-            )
+        d.workpackages.length || d.milestones.length
+          ? h("ul.tree", [...levelRows(d.workpackages, shownWps, plan, rowOf), ...plan.tail.map(rowOf)])
           : h("p.empty", t("noWorkpackages")),
       ),
       cblock(
