@@ -140,8 +140,8 @@ export async function handleClaudeCodeHook(body: HookBody, env: Env): Promise<Re
   const results: Record<string, string> = {};
   for (const file of files) {
     if (!file || typeof file.content !== "string") continue;
-    const rawName = str(file.name, 200) ?? "session.md";
-    const spec = HOOK_FILES[rawName] ?? (body.context_file === file ? HOOK_FILES["session.md"] : undefined);
+    const rawName = str(file.name, 200) ?? (body.context_file === file ? "session.md" : "");
+    const spec = (Object.hasOwn(HOOK_FILES, rawName) ? HOOK_FILES[rawName] : undefined) ?? (body.context_file === file ? HOOK_FILES["session.md"] : undefined);
     if (!spec) continue; // unknown name: ignored
     const name = rawName;
     const unchanged = await db

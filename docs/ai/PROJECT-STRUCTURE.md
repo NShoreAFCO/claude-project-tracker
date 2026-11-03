@@ -110,8 +110,8 @@ Its `unlocks` field lists the WPs controlled by the gate.
 
 A gate remains closed until both conditions are satisfied:
 
-1. Every WP in `requires` is done.
-2. A person records a go decision.
+1. Every WP in `requires` is done or dropped.
+2. A person records a go or go_with_conditions decision.
 
 Use `record_gate_decision` only to record the person's decision.
 An agent may prepare evidence and report readiness, but the decision belongs to a person.
