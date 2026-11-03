@@ -613,4 +613,11 @@ export default {
   verifiedByHint: "Who verified the result. Needed when verification is not none.",
   verifiedTip: "Verified by {name} on {date}",
   unverifiedTip: "Done, but verification is missing",
+  // qol:t09
+  gateRequires: "Required for completion",
+  gateOpens: "Opens",
+  gateProgressOf: "Progress of {name}",
+  gateNotReached:
+    "You can record the decision now, but the gate stays closed until these work packages are complete or dropped: {list}.",
+  // /qol:t09
 };

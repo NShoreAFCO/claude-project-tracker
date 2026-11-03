@@ -618,4 +618,11 @@ export default {
   verifiedByHint: "Wer das Ergebnis geprüft hat. Nötig, wenn die Verifizierung nicht „none“ ist.",
   verifiedTip: "Geprüft von {name} am {date}",
   unverifiedTip: "Erledigt, aber die Verifizierung fehlt",
+  // qol:t09
+  gateRequires: "Voraussetzung für den Abschluss",
+  gateOpens: "Schaltet frei",
+  gateProgressOf: "Fortschritt von {name}",
+  gateNotReached:
+    "Die Entscheidung kann jetzt erfasst werden, das Gate bleibt aber geschlossen, bis diese Arbeitspakete abgeschlossen oder verworfen sind: {list}.",
+  // /qol:t09
 };

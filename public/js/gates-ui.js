@@ -1,7 +1,62 @@
 import { t } from "./i18n.js";
 import { api } from "./api.js";
-import { h, formDialog, toast } from "./dom.js";
+import { h, formDialog, toast, statusChip, progressBar } from "./dom.js";
 import { isGateLocked, overrideTarget, gateNames, decisionLabel } from "./schedule-ui.js";
+
+const isClosedWp = (wp) => wp.status === "done" || wp.status === "dropped";
+const wpName = (wp) => (wp.code ? `${wp.code} ${wp.title}` : wp.title);
+
+function wpStatusLabel(wp) {
+  return wp.status === "dropped" ? h("span.chip.st-dropped.outline", t("status.dropped")) : statusChip(wp.status);
+}
+
+/** Required / opened work packages of a gate, plus the "gate stays closed" callout (qol:t09). */
+export function gateLinksBlock(milestone) {
+  const requires = milestone.requires_status || [];
+  const unlocks = milestone.unlocks_status || [];
+  const open = requires.filter((wp) => !isClosedWp(wp));
+  const nodes = [];
+
+  if (requires.length) {
+    nodes.push(
+      h(
+        "section.gate-links",
+        h("h4", t("gateRequires")),
+        h(
+          "ul.gate-wps",
+          requires.map((wp) =>
+            h(
+              "li",
+              { class: wp.status === "dropped" ? "dropped" : "" },
+              h("span.gate-wp-name", wpName(wp)),
+              wpStatusLabel(wp),
+              wp.status === "dropped" ? null : progressBar(wp.status === "done" ? 100 : wp.progress, t("gateProgressOf", { name: wpName(wp) })),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  if (unlocks.length) {
+    nodes.push(
+      h(
+        "section.gate-links",
+        h("h4", t("gateOpens")),
+        h(
+          "ul.gate-wps",
+          unlocks.map((wp) => h("li", h("span.gate-wp-name", wpName(wp)), wpStatusLabel(wp))),
+        ),
+      ),
+    );
+  }
+
+  if (milestone.reached === false || open.length) {
+    nodes.push(h("div.callout.gate-warn", { role: "note" }, t("gateNotReached", { list: open.map(wpName).join(", ") || "-" })));
+  }
+
+  return nodes.length ? h("div.gate-dialog-info", nodes) : null;
+}
 
 /** Opens the milestone decision dialog. */
 export async function decisionDialog({ project, milestone }) {
@@ -15,9 +70,11 @@ export async function decisionDialog({ project, milestone }) {
       : t("decisionRuleNone"),
   );
 
+  const links = gateLinksBlock(milestone);
+
   return formDialog({
     title: t("decisionTitle", { name: milestone.title }),
-    intro,
+    intro: links ? h("div", intro, links) : intro,
     submitLabel: t("recordDecision"),
     fields: [
       {

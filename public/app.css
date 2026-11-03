@@ -1650,3 +1650,35 @@ details.cat-empty[open] > summary.cat-head::before {
     margin-left: 0;
   }
 }
+
+/* qol:t09 */
+.gate-dialog-info {
+  margin: 0 0 1rem;
+}
+.gate-dialog-info h4 {
+  margin: 0.6rem 0 0.3rem;
+}
+.gate-wps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.gate-wps li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+}
+.gate-wps li.dropped .gate-wp-name {
+  text-decoration: line-through;
+}
+.gate-wps .progress-row {
+  flex: 1 1 8rem;
+  min-width: 8rem;
+}
+.callout.gate-warn {
+  border-left-color: var(--status-waiting, var(--status-hold));
+  margin: 0.6rem 0 0;
+}
+/* /qol:t09 */
