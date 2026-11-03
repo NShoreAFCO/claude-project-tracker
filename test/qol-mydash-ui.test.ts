@@ -372,4 +372,64 @@ describe("My dashboard", () => {
     expect(text(error)).toBe('mydSaveFailed{"error":"save down"}');
     expect(text(find(main, (node) => matches(node, "button", "mydash-open")))).toBe("A");
   });
+
+  it("serialises overlapping preference writes so no change is lost or restored stale", async () => {
+    const views = [
+      { id: "a", name: "A", kind: "my_tasks", project_id: null },
+      { id: "b", name: "B", kind: "my_tasks", project_id: null },
+    ];
+    const main = await render(returnedPrefs({ version: 1, views, active_projects: [] }));
+    const resolvers: Array<(v: any) => void> = [];
+    mocks.putDashboardPrefs.mockImplementation(
+      (prefs) => new Promise((resolve) => resolvers.push(() => resolve(returnedPrefs(prefs)))),
+    );
+
+    mocks.prompt.mockReturnValueOnce("A2");
+    const first = button(main, "mydRename").attrs.on.click();
+    const second = find(main, (node) => matches(node, "button", "mydash-down"))!.attrs.on.click();
+    await flush();
+
+    // only one PUT in flight until the first is acknowledged
+    expect(mocks.putDashboardPrefs).toHaveBeenCalledTimes(1);
+    resolvers[0](null);
+    await first;
+    await flush();
+    expect(mocks.putDashboardPrefs).toHaveBeenCalledTimes(2);
+    resolvers[1](null);
+    await second;
+    await flush();
+
+    const last = mocks.putDashboardPrefs.mock.calls[1][0];
+    expect(last.views.map((v: any) => v.name)).toEqual(["B", "A2"]);
+    const names = findAll(main, (node) => matches(node, "button", "mydash-open")).map(text);
+    expect(names).toEqual(["B", "A2"]);
+  });
+
+  it("rolls a failed queued write back to the last acknowledged prefs without dropping later ones", async () => {
+    const views = [
+      { id: "a", name: "A", kind: "my_tasks", project_id: null },
+      { id: "b", name: "B", kind: "my_tasks", project_id: null },
+    ];
+    const main = await render(returnedPrefs({ version: 1, views, active_projects: [] }));
+    const settle: Array<(fail: boolean, prefs?: any) => void> = [];
+    mocks.putDashboardPrefs.mockImplementation(
+      (prefs) =>
+        new Promise((resolve, reject) =>
+          settle.push((fail) => (fail ? reject(new Error("boom")) : resolve(returnedPrefs(prefs)))),
+        ),
+    );
+    mocks.prompt.mockReturnValueOnce("Bad");
+    const first = button(main, "mydRename").attrs.on.click();
+    const second = find(main, (node) => matches(node, "button", "mydash-down"))!.attrs.on.click();
+    await flush();
+    settle[0](true);
+    await first;
+    await flush();
+    settle[1](false);
+    await second;
+    await flush();
+
+    const sent = mocks.putDashboardPrefs.mock.calls[1][0];
+    expect(sent.views.map((v: any) => v.name)).toEqual(["B", "A"]);
+  });
 });
