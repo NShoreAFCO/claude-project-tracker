@@ -1958,3 +1958,44 @@ details.cat-empty[open] > summary.cat-head::before {
   font-size: 0.85em;
 }
 /* /qol:t11 */
+
+/* qol:t08 */
+.tabs .gantt-link {
+  margin-left: auto;
+  align-self: center;
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: var(--button-transform);
+  letter-spacing: var(--button-letter-spacing);
+  padding: 0.5rem 0.8rem;
+  color: var(--color-primary-strong);
+}
+.chev,
+.fold-toggle {
+  min-width: 32px;
+  min-height: 32px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1em;
+  line-height: 1;
+}
+.fold-toggle {
+  justify-content: flex-start;
+  gap: 0.35em;
+}
+.chev {
+  width: auto;
+}
+.wp-code {
+  font-family: ui-monospace, Consolas, monospace;
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+.tree > li.ms,
+.tree ul > li.ms {
+  list-style: none;
+  margin: 0.25rem 0;
+}
+/* /qol:t08 */
