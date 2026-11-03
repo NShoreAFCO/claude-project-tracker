@@ -132,3 +132,11 @@ Verified 2026-10-26 on developers.cloudflare.com.
 - The report page is Access-protected, so the browser cannot fetch it by `url`; the Worker passes the report HTML and the print CSS (`addStyleTag`) inline.
 - Local dev: `wrangler dev` has no local browser; a real one needs `"remote": true` on the binding (which uses a Cloudflare account). The template does not set it. Tests use a binding stub.
 - Limits, Workers Free (https://developers.cloudflare.com/browser-rendering/limits/): 10 browser minutes per day, 3 concurrent browsers, new browser 1 per 20 s (Browser Sessions), **quick action requests 1 per 10 s**, browser timeout 60 s; exceeding returns HTTP 429 (daily cap until the next UTC day). The endpoint maps a 429 or any failure to 503.
+
+## Logout path, host name and MCP instructions (v0.3.0)
+
+Checked 2026-11-03.
+
+- Logout: a link to the app's own `/cdn-cgi/access/logout` ends the current app session (https://developers.cloudflare.com/cloudflare-one/identity/users/session-management/). The team-domain path is for the App Launcher session. Not confirmed: whether other apps of the same team stay signed in. Logout does not block a new login while the identity provider session is valid.
+- Host name: `os.hostname()` returns the OS host name; Node documents no length limit (https://nodejs.org/api/os.html). The package truncates to 64 characters on store. Per-OS limits are from memory and unverified. The host name can reveal a real name; the user's own tracker is the only recipient.
+- MCP instructions: Claude Code is reported to truncate each server's instructions at 2,048 characters (secondary sources, not the official docs); the guide stays under 1,800 and is ASCII. claude.ai connector behaviour is not verified.

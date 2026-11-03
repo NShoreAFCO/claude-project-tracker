@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.3.0 - usability release
+
+Read "Breaking" and "Upgrade from v0.2.0" before you deploy. Details: `docs/SPEC.md` section 25.
+
+### Added
+
+- Migration 0007 (additive): work package `code`, `actual_start`, `actual_end`; project `local_host`; person `dashboard_prefs`.
+- Work package codes (max 12 characters), shown before the title everywhere.
+- Actual dates, set automatically on first start, progress or `log_progress`, and on done; settable explicitly.
+- Project `local_host`: the session hook sends the host name; hidden from viewers.
+- The hook also syncs `HANDOFF.md` (slug `handoff`, pinned) next to `session.md`; the old `context_file` still works.
+- Gate lists: milestone reads carry `reached`, `requires_status`, `unlocks_status`; the decision dialog shows them with a warning for a gate not yet reached; bundle "Gates" lines show `reached: yes|no`.
+- Project cards carry `current_gate`.
+- My-dashboard API (`/api/persons/me/dashboard`, `human_only` and `project_id` on `mine`, `/api/workpackages/open`, `/api/gates/open`) and the `#/my` view with saved views.
+- UI shell: home link, left sidebar with categories, logout link (hidden on localhost), drawer below 900 px.
+- Grid: completed filter (hide / only / all), tag filter with AND, filters kept in `localStorage`, redesigned cards.
+- Theme tokens `--underlay-wp`, `--underlay-milestone`, `--underlay-gate` (7:1 contrast checked).
+- Project page: Gantt link, host in the scope line, milestones and gates inside the work package tree, larger chevrons, branches folded.
+- Gantt: planned, actual, progress and overdue bars; milestones (`M<n>`) and gates (`G<n>`) on work package rows; codes in labels.
+- MCP usage guide: server instructions, `docs/ai/PROJECT-STRUCTURE.md`, tool description hints.
+
+### Changed
+
+- Version 0.3.0 (package and MCP server).
+- Milestone dependency arrows are gone from the Gantt chart.
+
+### Breaking
+
+- **Gate lock.** A work package stays locked until its gate is reached (all `requires` work packages done or dropped) and has a go or go_with_conditions decision. A decision recorded before the gate is reached no longer unlocks early. Gates without any non-dropped `requires` work package never reach; their work packages stay locked until an override. `policy.gates.require_decision=false` is unchanged. Check the live data for gates with a go decision that are not yet reached before you deploy.
+- New theme tokens: `npm run check` fails until `instance/theme.css` defines the three `--underlay-*` tokens.
+
+### Upgrade from v0.2.0
+
+1. Back up first: `npm run backup`.
+2. Before deploying, list gates with a go decision whose `requires` work packages are not all done or dropped; they will lock their work packages.
+3. Apply migration 0007: `npm run db:migrate:remote` (additive).
+4. Add `--underlay-wp`, `--underlay-milestone` and `--underlay-gate` to `instance/theme.css` (values in `instance.example/theme.css`, rules in `docs/THEMING.md`).
+5. Re-run `npm run hook:install` on every machine that uses the session hook (host and `HANDOFF.md`).
+6. Reconnect MCP clients (new instructions and descriptions).
+7. Run `npm test` and `npm run check`, then deploy.
+
 ## v0.2.0 — 2026-10-26
 
 v0.2.0 bundles the conformity releases R1 to R5 below plus the fixes from the final review. Read "Breaking" and "Upgrade from v0.1.0" before you deploy.

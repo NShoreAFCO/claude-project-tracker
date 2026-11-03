@@ -4,6 +4,7 @@ One Cloudflare Worker that tracks projects you work on with Claude, across claud
 
 - **Dashboard** (`/`): projects, work packages, milestones, branches, scorecards, token cost, Gantt chart, inbox, and a context repository per project, work package and branch.
 - **People and rules**: every change is attributed to a person (owner, sponsor, decision maker, priority stakeholders); projects close only with a closure note and no open work packages; blocked and waiting work packages are told apart; deletes go to a trash with restore; context documents carry a draft / released / obsolete status.
+- **Usability (v0.3.0)**: sidebar shell, grid filters and redesigned cards, a personal dashboard (`#/my`), work package codes and actual dates, gates inside the work package tree, and a Gantt chart with planned, actual and overdue bars.
 - **Remote MCP server** (`/mcp`): 28 tools plus `tracker://context/{doc_id}` resources, for claude.ai connectors and Claude Code.
 - **REST API** (`/api/*`): used by the dashboard and the Claude Code SessionEnd hook.
 - **GitHub webhook** (`/webhooks/github`): branches, pushes, pull requests and forks (HMAC-checked).
