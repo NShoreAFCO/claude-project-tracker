@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { loadInstance } from "../scripts/lib/instance.mjs";
-import { migrationProblems, denylistHits, commitLogHits, loadDenylist, ownRepoSlug } from "./lib/repo-checks.mjs";
+import { migrationProblems, denylistHits, commitLogHits, loadDenylist, ownRepoSlug, underlayProblems } from "./lib/repo-checks.mjs";
 
 const failures = [];
 const ok = [];
@@ -68,6 +68,9 @@ const CONTRACT = [
   "risk-critical",
   "risk-nc",
   "risk-opportunity",
+  "underlay-wp",
+  "underlay-milestone",
+  "underlay-gate",
   "font",
   "font-heading",
   "font-size-base",
@@ -141,6 +144,7 @@ pairCheck(
   "risk fills carry text-strong ≥ 7:1",
   CONTRACT.filter((k) => k.startsWith("risk-")).map((k) => ["color-text-strong", k, 7]),
 );
+check("underlay tokens present, text-strong ≥ 7:1", underlayProblems(themeVars).length === 0, underlayProblems(themeVars).join("; "));
 const surface = hexOf("color-surface");
 const weakCat = [...inst.categories.project, ...inst.categories.workpackage].filter(
   (c) => surface && contrast(c.color.toLowerCase(), surface) < 3,

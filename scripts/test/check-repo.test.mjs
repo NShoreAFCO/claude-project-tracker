@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { migrationProblems, denylistHits, commitLogHits, loadDenylist, ownRepoSlug } from "../../tools/lib/repo-checks.mjs";
+import { migrationProblems, denylistHits, commitLogHits, loadDenylist, ownRepoSlug, underlayProblems } from "../../tools/lib/repo-checks.mjs";
 
 const DENY = /(^|[^a-z])fixture-denied-word/i;
 const mem = (files) => (p) => {
@@ -86,4 +86,26 @@ test("commit log: the owner's GitHub noreply co-author trailer is skipped, other
   ];
   assert.deepEqual(commitLogHits(log.join("\n"), DENY, "fixture-denied-word/some-repo"), log.slice(1));
   assert.equal(commitLogHits(log.join("\n"), DENY).length, 3);
+});
+
+const GOOD_THEME = {
+  "color-text-strong": "#111c24",
+  "underlay-wp": "#dbe9f4",
+  "underlay-milestone": "#fbe8c4",
+  "underlay-gate": "#e0f0d4",
+};
+
+test("underlay tokens pass with the example values", () => {
+  assert.deepEqual(underlayProblems(GOOD_THEME), []);
+});
+
+test("missing underlay token fails", () => {
+  const { "underlay-gate": _omit, ...vars } = GOOD_THEME;
+  assert.ok(underlayProblems(vars).some((p) => p.includes("underlay-gate") && p.includes("missing")));
+});
+
+test("underlay below 7:1 fails", () => {
+  const p = underlayProblems({ ...GOOD_THEME, "underlay-wp": "#2b5d8a" });
+  assert.equal(p.length, 1);
+  assert.match(p[0], /underlay-wp/);
 });
