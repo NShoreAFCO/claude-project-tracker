@@ -341,6 +341,24 @@ describe("My dashboard", () => {
     expect(rows).toHaveLength(2);
   });
 
+  it("reloads project rows after a view mutation and after a failed toggle", async () => {
+    const views = [{ id: "v1", name: "Active", kind: "active_projects", project_id: null }];
+    const main = await render(returnedPrefs({ version: 1, views, active_projects: ["p1"] }));
+    mocks.prompt.mockReturnValueOnce("Renamed");
+    find(main, (node) => matches(node, "button", "mydash-rename"))!.attrs.on.click();
+    await flush();
+    expect(findAll(main, (node) => matches(node, "tr", "mydash-row"))).toHaveLength(1);
+
+    mocks.putDashboardPrefs.mockRejectedValueOnce(new Error("down"));
+    const beta = findAll(main, (node) => matches(node, "input", "mydash-pick")).find((pick) => pick.attrs.value === "p2")!;
+    beta.attrs.on.change({ target: { checked: true } });
+    await flush();
+    const picks = findAll(main, (node) => matches(node, "input", "mydash-pick"));
+    expect(picks.find((pick) => pick.attrs.value === "p2")!.attrs.checked).toBe(false);
+    expect(findAll(main, (node) => matches(node, "tr", "mydash-row"))).toHaveLength(1);
+    expect(find(main, (node) => matches(node, "p", "mydash-error"))).toBeTruthy();
+  });
+
   it("shows a save error and keeps the previous views when persistence fails", async () => {
     const original = [{ id: "a", name: "A", kind: "my_tasks", project_id: null }];
     const main = await render(returnedPrefs({ version: 1, views: original, active_projects: [] }));
