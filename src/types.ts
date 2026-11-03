@@ -54,6 +54,8 @@ export interface ProjectRow {
   origin: ProjectOrigin;
   repo_url: string | null;
   local_path: string | null;
+  /** Host name of the machine that holds local_path (sent by the hook); internal like local_path. */
+  local_host?: string | null;
   context_file: string | null;
   session_id: string | null;
   start_date: string | null;
@@ -102,6 +104,8 @@ export interface WorkpackageRow {
   id: string;
   project_id: string;
   parent_id: string | null;
+  /** Short code shown before the title (spec D1); null = none. */
+  code?: string | null;
   title: string;
   description_md: string | null;
   status: WpStatus;
@@ -114,6 +118,9 @@ export interface WorkpackageRow {
   effort_actual_pd?: number | null;
   start_date: string | null;
   end_date: string | null;
+  /** Actual start and end (YYYY-MM-DD, UTC): set on the first start / on done (spec D2). */
+  actual_start?: string | null;
+  actual_end?: string | null;
   depends_on: string | null;
   sort: number;
   category: string | null;

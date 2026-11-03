@@ -190,6 +190,7 @@ export function registerTools(reg: Reg): void {
         origin: projectOriginSchema.optional().describe("Set the project origin."),
         repo_url: optionalText("Set the repository URL."),
         local_path: optionalText("Set the local repository path."),
+        local_host: optionalText("Set the host name of the machine that holds local_path (max 100 characters)."),
         context_file: optionalText("Set the context file path."),
         start_date: optionalDate("Set the start date as YYYY-MM-DD."),
         target_date: optionalDate("Set the target date as YYYY-MM-DD."),
@@ -216,6 +217,7 @@ export function registerTools(reg: Reg): void {
           origin: args.origin,
           repo_url: args.repo_url,
           local_path: args.local_path,
+          local_host: args.local_host,
           context_file: args.context_file,
           session_id: null,
           start_date: args.start_date,
@@ -256,6 +258,7 @@ export function registerTools(reg: Reg): void {
             origin: projectOriginSchema.optional().describe("Set the project origin."),
             repo_url: optionalText("Set the repository URL."),
             local_path: optionalText("Set the local repository path."),
+            local_host: optionalText("Set the host name of the machine that holds local_path (max 100 characters)."),
             context_file: optionalText("Set the context file path."),
             session_id: optionalText("Set the session identifier."),
             start_date: optionalDate("Set the start date as YYYY-MM-DD."),
@@ -296,6 +299,7 @@ export function registerTools(reg: Reg): void {
         project_id: z.string().describe("Identify the owning project."),
         id: z.string().optional().describe("Identify an existing work package (omit to create)."),
         parent_id: optionalText("Set the parent work package."),
+        code: optionalText("Set the short code shown before the title (max 12 characters: letters, digits, dot, hyphen; null clears)."),
         title: optionalText("Set the work package title."),
         description_md: optionalText("Set the Markdown description."),
         status: workpackageStatusSchema.optional().describe("Set the work package status."),
@@ -314,6 +318,8 @@ export function registerTools(reg: Reg): void {
           .describe("Set the actual effort in person-days (log_progress effort_pd adds to it)."),
         start_date: optionalDate("Set the start date as YYYY-MM-DD."),
         end_date: optionalDate("Set the end date as YYYY-MM-DD."),
+        actual_start: optionalDate("Set the actual start as YYYY-MM-DD (set automatically on the first start; not in the future; null clears)."),
+        actual_end: optionalDate("Set the actual end as YYYY-MM-DD (set automatically on done; not in the future, not before actual_start; null clears)."),
         depends_on: z
           .array(z.string())
           .optional()

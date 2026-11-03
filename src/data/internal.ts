@@ -1,5 +1,5 @@
 /**
- * Spec F12: a project's `local_path`, `session_id` and `repo_url` are internal. Editors and above (agents
+ * Spec F12: a project's `local_path`, `local_host`, `session_id` and `repo_url` are internal. Editors and above (agents
  * included: MCP and service callers act as editor or above) see them; viewers get reads without them.
  * Applied at the read layer (project list and detail, event history, inbox), for REST and MCP alike.
  * Reports and context bundles never contain them.
@@ -7,7 +7,7 @@
 import type { Caller, EventOut } from "../types";
 import { hasRole } from "../auth/permissions";
 
-export const INTERNAL_FIELDS = ["local_path", "session_id", "repo_url"] as const;
+export const INTERNAL_FIELDS = ["local_path", "local_host", "session_id", "repo_url"] as const;
 /** Keys dropped from nested event payloads (the hook event records the session's working directory). */
 const INTERNAL_NESTED = new Set<string>([...INTERNAL_FIELDS, "cwd"]);
 

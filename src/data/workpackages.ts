@@ -24,6 +24,7 @@ import { isAgent } from "../auth/caller";
 
 export const WP_FIELDS = [
   "parent_id",
+  "code",
   "title",
   "description_md",
   "status",
@@ -34,6 +35,8 @@ export const WP_FIELDS = [
   "effort_actual_pd",
   "start_date",
   "end_date",
+  "actual_start",
+  "actual_end",
   "depends_on",
   "sort",
   "category",
@@ -69,6 +72,49 @@ const ID_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/;
 const DELIVERABLE_MAX = 500;
+const CODE_RE = /^[A-Za-z0-9][A-Za-z0-9.-]{0,11}$/;
+
+/** Calendar day, validated: YYYY-MM-DD naming a real date. */
+const isDay = (s: string): boolean => {
+  if (!DATE_RE.test(s)) return false;
+  const t = Date.parse(`${s}T00:00:00Z`);
+  return Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === s;
+};
+
+/**
+ * Actual dates (spec D2). Explicit values are validated in normalise(); this fills the automatic ones
+ * (mutates `fields`; run after applyWpRules, which has already turned progress > 0 on a todo WP into doing):
+ * - actual_start is set once, when the WP starts (status becomes doing or done, or progress rises above 0)
+ *   and has none yet; it is never overwritten or cleared automatically.
+ * - actual_end is set when the status becomes done and cleared when a done WP is reopened.
+ * Explicit values win. The final pair must not be inverted or in the future (400).
+ */
+export function applyActualDates(before: Pick<WorkpackageRow, "status" | "progress" | "actual_start" | "actual_end"> | null, fields: Record<string, unknown>, today = new Date().toISOString().slice(0, 10)): void {
+  const prev = before?.status ?? "todo";
+  const next = String(fields.status ?? prev);
+  const started =
+    (next === "doing" || next === "done") && next !== prev
+      ? true
+      : typeof fields.progress === "number" && fields.progress > 0 && fields.progress !== (before?.progress ?? 0);
+  if (!("actual_start" in fields) && started && !before?.actual_start) fields.actual_start = today;
+  if (!("actual_end" in fields)) {
+    if (next === "done" && prev !== "done") fields.actual_end = today;
+    else if (next !== "done" && prev === "done" && before?.actual_end) fields.actual_end = null;
+  }
+  const start = (("actual_start" in fields ? fields.actual_start : before?.actual_start) ?? null) as string | null;
+  const end = (("actual_end" in fields ? fields.actual_end : before?.actual_end) ?? null) as string | null;
+  if (("actual_start" in fields || "actual_end" in fields) && start && end && end < start)
+    throw new ValidationError("actual_end cannot be before actual_start");
+}
+
+/** actual_start / actual_end: YYYY-MM-DD (a real day), not in the future (UTC today + 1 day, as verified_at); "" or null clears. */
+function actualDayInput(f: string, v: unknown): string | null {
+  if (v === null || v === "") return null;
+  const s = typeof v === "string" ? v.trim() : "";
+  if (!isDay(s)) throw new ValidationError(`${f} must be YYYY-MM-DD`);
+  if (s > new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)) throw new ValidationError(`${f} cannot be in the future`);
+  return s;
+}
 
 /**
  * In-batch project guard (F3, Ruling 20): a WP is created, or reopened to an open status, only while its
@@ -261,6 +307,16 @@ function normalise(input: Record<string, unknown>): Partial<Record<WpField, unkn
       case "verified_at":
         v = verifiedAtInput(v);
         break;
+      case "code":
+        if (v === "") v = null;
+        if (v !== null && (typeof v !== "string" || !CODE_RE.test(v.trim())))
+          throw new ValidationError("code must be 1 to 12 characters: letters, digits, dot or hyphen, starting with a letter or digit");
+        if (typeof v === "string") v = v.trim();
+        break;
+      case "actual_start":
+      case "actual_end":
+        v = actualDayInput(f, v);
+        break;
       case "deliverable":
         if (v !== null && typeof v !== "string") throw new ValidationError("deliverable must be a string");
         if (typeof v === "string") v = v.trim() || null;
@@ -332,6 +388,7 @@ export async function upsertWorkpackage(
     if (typeof expectedVersion === "number" && expectedVersion !== existing.version) throw new ConflictError("version conflict", existing);
     applyWpRules(existing, fields);
     applyVerificationRules(existing, fields, by);
+    applyActualDates(existing, fields);
     // F5: a gate-locked WP (or sub-WP) is not started without an override (pre-check here, guard in the batch).
     const gateGuard = await startGuard(db, by, existing, fields);
     // A done/abandoned project gets no open work back (edits that keep the status stay possible).
@@ -418,6 +475,7 @@ export async function upsertWorkpackage(
   await checkParent(db, projectId, null, fields.parent_id);
   applyWpRules(null, fields);
   applyVerificationRules(null, fields, by);
+  applyActualDates(null, fields);
   // F5: no started WP below a gate-locked one (pre-check here, guard on the parent in the batch).
   const gateGuard = await startGuard(db, by, null, fields);
 
@@ -440,6 +498,9 @@ export async function upsertWorkpackage(
     effort_actual_pd: null,
     start_date: null,
     end_date: null,
+    actual_start: null,
+    actual_end: null,
+    code: null,
     depends_on: null,
     sort: 0,
     category: null,
