@@ -639,4 +639,12 @@ export default {
   ganttLegendOverdue: "Überfällig",
   ganttOngoing: "laufend",
   // /qol:t10
+  // qol:t07
+  noDate: "kein Datum",
+  filterCompleted: "Abgeschlossene Projekte",
+  completed: { hide: "Abgeschlossene ausblenden", only: "Nur abgeschlossene", all: "Alle" },
+  filterTagsBtn: "Tags ({n})",
+  filterTagsClear: "Zurücksetzen",
+  filterTagsNone: "Noch keine Tags.",
+  // /qol:t07
 };

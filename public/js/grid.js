@@ -6,9 +6,75 @@ import { openProject } from "./project.js";
 import { projectForm } from "./forms.js";
 import { basisLabel, riskChip, staleChip } from "./progress-view.js";
 import { summaryBar } from "./portfolio.js";
+import { GRID_FILTER_KEY } from "./sidebar.js";
 import { PROJECT_CATEGORIES, catVar, catDot, catLabel, knownCategory } from "./categories.js";
 
 const PROJECT_STATUSES = ["idea", "active", "on_hold", "done", "abandoned"];
+const COMPLETED = ["done", "abandoned"];
+const COMPLETED_MODES = ["hide", "only", "all"];
+const PERSISTED = ["completed", "tags", "status", "owner"];
+
+/** Completed mode of a filter; anything unknown (incl. the home reset's empty string) is the default `hide`. */
+export function completedMode(filter) {
+  return COMPLETED_MODES.includes(filter.completed) ? filter.completed : "hide";
+}
+
+/** Checked tags as an array (tolerates the home reset's empty string). */
+export function checkedTags(filter) {
+  return Array.isArray(filter.tags) ? filter.tags : [];
+}
+
+/** Status select options that cannot contradict the completed mode. */
+export function statusOptions(mode) {
+  return PROJECT_STATUSES.filter((s) => (mode === "all" ? true : mode === "only" ? COMPLETED.includes(s) : !COMPLETED.includes(s)));
+}
+
+/** Tags with the checked ones first, then the rest; each group alphabetical. */
+export function orderTags(all, checked) {
+  const set = new Set(checked);
+  const sorted = [...new Set(all)].sort((a, b) => a.localeCompare(b));
+  return [...sorted.filter((x) => set.has(x)), ...sorted.filter((x) => !set.has(x))];
+}
+
+/** Pure grid filter. `kpiIds` is a Set of project ids or null. Tags use AND semantics. */
+export function filterProjects(projects, filter, kpiIds = null) {
+  const mode = completedMode(filter);
+  const tags = checkedTags(filter);
+  const category = filter.category || "";
+  return projects.filter(
+    (p) =>
+      (!kpiIds || kpiIds.has(p.id)) &&
+      (mode === "all" || (mode === "only") === COMPLETED.includes(p.status)) &&
+      (!filter.status || p.status === filter.status) &&
+      tags.every((x) => (p.tags || []).includes(x)) &&
+      (!filter.owner || (filter.owner === "none" ? !p.owner_initials : p.owner_id === filter.owner)) &&
+      (!category || (category === "none" ? p.category === null : p.category === category)),
+  );
+}
+
+export function saveGridFilter(filter, storage = globalThis.localStorage) {
+  try {
+    storage?.setItem(GRID_FILTER_KEY, JSON.stringify(Object.fromEntries(PERSISTED.map((k) => [k, filter[k]]))));
+  } catch {
+    // storage unavailable: the filter just is not remembered
+  }
+}
+
+/** Merge the saved filter into `filter` (only keys still unset). Returns the filter. */
+export function loadGridFilter(filter, storage = globalThis.localStorage) {
+  try {
+    const saved = JSON.parse(storage?.getItem(GRID_FILTER_KEY) || "null");
+    if (saved && typeof saved === "object") {
+      if (COMPLETED_MODES.includes(saved.completed) && !filter.completed) filter.completed = saved.completed;
+      if (Array.isArray(saved.tags) && !checkedTags(filter).length) filter.tags = saved.tags.filter((x) => typeof x === "string");
+      for (const k of ["status", "owner"]) if (typeof saved[k] === "string" && !filter[k]) filter[k] = saved[k];
+    }
+  } catch {
+    // unreadable saved filter: ignore
+  }
+  return filter;
+}
+let hydrated = false;
 
 /** Red "Blocked" (with age), amber "Waiting (n)" and "Closure due" chips of a card (spec F3). */
 function flagChips(p) {
@@ -19,13 +85,26 @@ function flagChips(p) {
   }
   if (p.waiting_count) chips.push(h("span.chip.flag-waiting", t("chipWaiting", { n: p.waiting_count })));
   if (p.closure_due) chips.push(h("span.chip.flag-closure", { title: t("closureDueHint") }, t("closureDue")));
-  chips.push(noTargetChip(p), riskChip(p.risk_summary), staleChip(p.stale));
+  chips.push(riskChip(p.risk_summary), staleChip(p.stale));
   const shown = chips.filter(Boolean);
   return shown.length ? h("div.flags", shown) : null;
 }
 
+function gateBox(g) {
+  if (!g) return null;
+  return h(
+    "div.underlay-gate.card-box.card-gate",
+    h("div.box-label", t("gateMark")),
+    h("div.box-title", g.title),
+    h("div.box-sub", g.due_date ? fmtDate(g.due_date) : t("noDate"), " · ", t(`decisionState.${g.decision_state}`)),
+  );
+}
+
 function card(p, persons) {
   const owner = p.owner_initials ? { initials: p.owner_initials, name: persons.get(p.owner_id) || p.owner_initials } : null;
+  const noTarget = noTargetChip(p);
+  const ms = p.next_milestone;
+  const wp = p.wp_counts;
   return h(
     "article.card",
     {
@@ -36,44 +115,50 @@ function card(p, persons) {
     h(
       "div.head",
       h("h2", h("button.card-link", { type: "button" }, p.title)),
+      statusChip(p.status),
       h(
         "span",
         { title: t(`origin.${p.origin}`), "aria-label": `${t("originLabel")}: ${t(`origin.${p.origin}`)}` },
         STRINGS.originIcon[p.origin] || "",
       ),
     ),
-    h("div.status-row", statusChip(p.status), personBadge(owner, { label: t("fOwner") })),
-    flagChips(p),
-    p.summary ? h("p.summary", p.summary) : null,
-    progressBar(p.progress),
-    h("div.meta", basisLabel(p.progress_basis)),
+    h("div.card-target", noTarget || [t("target"), ": ", h("b", fmtDate(p.target_date))]),
     h(
-      "div.meta",
-      h("span", t("target"), ": ", h("b", fmtDate(p.target_date))),
-      h("span", t("openBranches"), ": ", h("b", String(p.open_branches))),
+      "div.underlay-wp.card-box.wp-counts",
+      h("div.box-label", t("wpCountsLabel")),
       h(
-        "span.wp-counts",
-        t("wpCountsLabel"),
-        ": ",
+        "div.box-sub",
         [
-          ["wpOpen", p.wp_counts.open],
-          ["wpInProgress", p.wp_counts.in_progress],
-          ["wpWaitingBlocked", p.wp_counts.waiting_blocked],
-          ["wpDone", p.wp_counts.done],
+          ["wpOpen", wp.open],
+          ["wpInProgress", wp.in_progress],
+          ["wpWaitingBlocked", wp.waiting_blocked],
+          ["wpDone", wp.done],
         ].map(([key, n]) => h("span.wp-count", t(key), " ", h("b", String(n)))),
       ),
-      h("span", t("contextDocs"), ": ", h("b", String(p.context_docs))),
-      h("span", t("lastActivity"), ": ", h("b", fmtDateTime(p.last_activity))),
     ),
-    p.next_milestone
+    ms
       ? h(
-          "p.next-ms",
-          t("nextMilestone"),
-          ": ",
-          h("b", p.next_milestone.title),
-          p.next_milestone.due_date ? ` (${fmtDate(p.next_milestone.due_date)})` : null,
+          "div.underlay-milestone.card-box.next-ms",
+          h("div.box-label", t("nextMilestone")),
+          h("div.box-title", ms.title),
+          h("div.box-sub", ms.due_date ? fmtDate(ms.due_date) : t("noDate")),
         )
       : null,
+    gateBox(p.current_gate),
+    h(
+      "div.card-minor",
+      h("div.status-row", personBadge(owner, { label: t("fOwner") })),
+      flagChips(p),
+      p.summary ? h("p.summary", p.summary) : null,
+      progressBar(p.progress),
+      h("div.meta", basisLabel(p.progress_basis)),
+      h(
+        "div.meta",
+        h("span", t("openBranches"), ": ", h("b", String(p.open_branches))),
+        h("span", t("contextDocs"), ": ", h("b", String(p.context_docs))),
+        h("span", t("lastActivity"), ": ", h("b", fmtDateTime(p.last_activity))),
+      ),
+    ),
     p.blocked?.length
       ? h(
           "div",
@@ -136,8 +221,23 @@ function categoryBlocks(shown, persons, filter, all = shown) {
 
 export function renderGrid(main, state) {
   const { filter } = state;
+  if (!hydrated) {
+    hydrated = true;
+    loadGridFilter(filter);
+  }
+  const mode = completedMode(filter);
+  const checked = checkedTags(filter);
+  const change = (fn) => {
+    fn();
+    if (filter.status && !statusOptions(completedMode(filter)).includes(filter.status)) filter.status = "";
+    saveGridFilter(filter);
+    renderGrid(main, state);
+  };
   const category = filter.category || "";
-  const tags = [...new Set(state.projects.flatMap((p) => p.tags || []))].sort();
+  const tags = orderTags(
+    state.projects.flatMap((p) => p.tags || []),
+    checked,
+  );
 
   const categorySel = h(
     "select",
@@ -150,11 +250,23 @@ export function renderGrid(main, state) {
 
   const statusSel = h(
     "select",
-    { "aria-label": t("filterStatus"), on: { change: (e) => ((filter.status = e.target.value), renderGrid(main, state)) } },
+    { "aria-label": t("filterStatus"), on: { change: (e) => change(() => (filter.status = e.target.value)) } },
     h("option", { value: "" }, `${t("filterStatus")}: ${t("filterAll")}`),
-    PROJECT_STATUSES.map((s) => h("option", { value: s }, t(`status.${s}`))),
+    statusOptions(mode).map((s) => h("option", { value: s }, t(`status.${s}`))),
   );
   statusSel.value = filter.status;
+
+  const completedCtl = h(
+    "div.seg-control",
+    { role: "group", "aria-label": t("filterCompleted") },
+    COMPLETED_MODES.map((m) =>
+      h(
+        "button.seg",
+        { type: "button", "aria-pressed": String(m === mode), on: { click: () => change(() => (filter.completed = m)) } },
+        t(`completed.${m}`),
+      ),
+    ),
+  );
 
   // Owner filter: people who own at least one project, plus "no owner"
   const persons = new Map((state.persons || []).map((p) => [p.id, p.name]));
@@ -163,20 +275,64 @@ export function renderGrid(main, state) {
   );
   const ownerSel = h(
     "select",
-    { "aria-label": t("filterOwner"), on: { change: (e) => ((filter.owner = e.target.value), renderGrid(main, state)) } },
+    { "aria-label": t("filterOwner"), on: { change: (e) => change(() => (filter.owner = e.target.value)) } },
     h("option", { value: "" }, `${t("filterOwner")}: ${t("filterAll")}`),
     ownerIds.map((id) => h("option", { value: id }, persons.get(id) || id)),
     h("option", { value: "none" }, t("noOwner")),
   );
   ownerSel.value = filter.owner || "";
 
-  const tagSel = h(
-    "select",
-    { "aria-label": t("filterTag"), on: { change: (e) => ((filter.tag = e.target.value), renderGrid(main, state)) } },
-    h("option", { value: "" }, `${t("filterTag")}: ${t("filterAll")}`),
-    tags.map((x) => h("option", { value: x }, x)),
+  const tagBtn = h(
+    "button.btn.secondary.tag-filter-btn",
+    { type: "button", "aria-haspopup": "true", "aria-expanded": "false" },
+    t("filterTagsBtn", { n: checked.length }),
   );
-  tagSel.value = filter.tag;
+  const tagPop = h("div.tag-pop", { hidden: true, role: "group", "aria-label": t("filterTag") });
+  const onKey = (e) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      closePop();
+      tagBtn.focus();
+    }
+  };
+  const closePop = () => {
+    tagPop.hidden = true;
+    tagBtn.setAttribute("aria-expanded", "false");
+    document.removeEventListener("keydown", onKey, true);
+  };
+  tagBtn.addEventListener("click", () => {
+    if (!tagPop.hidden) return closePop();
+    tagPop.hidden = false;
+    tagBtn.setAttribute("aria-expanded", "true");
+    document.addEventListener("keydown", onKey, true);
+    tagPop.querySelector("input")?.focus();
+  });
+  clear(
+    tagPop,
+    checked.length
+      ? h(
+          "button.btn.small.secondary.tag-clear",
+          { type: "button", on: { click: () => change(() => (filter.tags = [])) } },
+          t("filterTagsClear"),
+        )
+      : null,
+    tags.length ? null : h("p.meta", t("filterTagsNone")),
+    tags.map((x) =>
+      h(
+        "label.tag-opt",
+        h("input", {
+          type: "checkbox",
+          checked: checked.includes(x),
+          on: {
+            change: (e) => change(() => (filter.tags = e.target.checked ? [...checked, x] : checked.filter((c) => c !== x))),
+          },
+        }),
+        " ",
+        x,
+      ),
+    ),
+  );
+  const tagWrap = h("div.tag-filter", tagBtn, tagPop);
 
   // Portfolio filter: a KPI tile or the select narrows the grid to that counter's projects (spec F9).
   const kpi = filter.kpi || "";
@@ -190,23 +346,17 @@ export function renderGrid(main, state) {
   );
   attentionSel.value = kpi;
 
-  const shown = state.projects.filter(
-    (p) =>
-      (!kpiIds || kpiIds.has(p.id)) &&
-      (!filter.status || p.status === filter.status) &&
-      (!filter.tag || (p.tags || []).includes(filter.tag)) &&
-      (!filter.owner || (filter.owner === "none" ? !p.owner_initials : p.owner_id === filter.owner)) &&
-      (!category || (category === "none" ? p.category === null : p.category === category)),
-  );
+  const shown = filterProjects(state.projects, filter, kpiIds);
 
   clear(
     main,
     summaryBar(state.summary || null, kpi, (key) => ((filter.kpi = key), renderGrid(main, state))),
     h(
       "div.toolbar",
+      completedCtl,
       h("div", { style: { "min-width": "160px" } }, categorySel),
       h("div", { style: { "min-width": "180px" } }, statusSel),
-      h("div", { style: { "min-width": "160px" } }, tagSel),
+      tagWrap,
       h("div", { style: { "min-width": "160px" } }, ownerSel),
       h("div", { style: { "min-width": "200px" } }, attentionSel),
       h("span.spacer"),
