@@ -120,7 +120,13 @@ nav.addEventListener("click", (e) => {
 
 // Logo/title: home. Reset filters, close dialogs, scroll to top (also when already on #/).
 document.getElementById("home").addEventListener("click", () => {
-  resetGridFilter(state.filter, localStorage);
+  let store = null;
+  try {
+    store = localStorage;
+  } catch {
+    // storage blocked: filters are reset in memory only
+  }
+  resetGridFilter(state.filter, store);
   document.querySelectorAll("dialog[open]").forEach((d) => d.close());
   window.scrollTo(0, 0);
   closeDrawer();

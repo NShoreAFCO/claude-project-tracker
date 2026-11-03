@@ -115,7 +115,7 @@ export function underlayProblems(vars, min = 7) {
     else {
       const [x, y] = [luminance(fg), luminance(bg)].sort((p, q) => q - p);
       const ratio = (x + 0.05) / (y + 0.05);
-      if (ratio < min - 0.02) problems.push(`${k}: text-strong ${ratio.toFixed(2)}:1 < ${min}:1`);
+      if (ratio < min) problems.push(`${k}: text-strong ${ratio.toFixed(2)}:1 < ${min}:1`);
     }
   }
   return problems;

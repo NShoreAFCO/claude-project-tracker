@@ -52,18 +52,18 @@ export function filterProjects(projects, filter, kpiIds = null) {
   );
 }
 
-export function saveGridFilter(filter, storage = globalThis.localStorage) {
+export function saveGridFilter(filter, storage) {
   try {
-    storage?.setItem(GRID_FILTER_KEY, JSON.stringify(Object.fromEntries(PERSISTED.map((k) => [k, filter[k]]))));
+    (storage ?? globalThis.localStorage)?.setItem(GRID_FILTER_KEY, JSON.stringify(Object.fromEntries(PERSISTED.map((k) => [k, filter[k]]))));
   } catch {
     // storage unavailable: the filter just is not remembered
   }
 }
 
 /** Merge the saved filter into `filter` (only keys still unset). Returns the filter. */
-export function loadGridFilter(filter, storage = globalThis.localStorage) {
+export function loadGridFilter(filter, storage) {
   try {
-    const saved = JSON.parse(storage?.getItem(GRID_FILTER_KEY) || "null");
+    const saved = JSON.parse((storage ?? globalThis.localStorage)?.getItem(GRID_FILTER_KEY) || "null");
     if (saved && typeof saved === "object") {
       if (COMPLETED_MODES.includes(saved.completed) && !filter.completed) filter.completed = saved.completed;
       if (Array.isArray(saved.tags) && !checkedTags(filter).length) filter.tags = saved.tags.filter((x) => typeof x === "string");

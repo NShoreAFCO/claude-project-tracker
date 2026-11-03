@@ -45,7 +45,7 @@ export function gateLinksBlock(milestone) {
         h("h4", t("gateOpens")),
         h(
           "ul.gate-wps",
-          unlocks.map((wp) => h("li", h("span.gate-wp-name", wpName(wp)), wpStatusLabel(wp))),
+          unlocks.map((wp) => h("li", { class: wp.status === "dropped" ? "dropped" : "" }, h("span.gate-wp-name", wpName(wp)), wpStatusLabel(wp))),
         ),
       ),
     );
