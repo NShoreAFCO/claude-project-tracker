@@ -6,6 +6,12 @@ Copy into the instructions of every claude.ai Project whose work you track:
 
 > Before working on a tracked project, call tracker `get_context_bundle` for it. At the end of substantive work, call `log_progress` and `append_context` (slug `handover`) with what was done, decisions and open points.
 
+When you create or restructure a project, follow [PROJECT-STRUCTURE.md](PROJECT-STRUCTURE.md):
+
+- WP1 Project management and WP2 Research always exist and are never gated; add 2-3 content WPs with sub-WPs Planning and Review, and tasks T01..Tnn under sub-WPs.
+- Always fill `code`; create content WPs, milestones and gates at project creation.
+- Dates respect `depends_on` and gates unless the user expressly overrides; keep `HANDOFF.md` current.
+
 For Claude Code, put the same two sentences into your personal `~/.claude/CLAUDE.md`.
 
 ## Context for Claude (optional project knowledge)
