@@ -42,6 +42,18 @@ describe("hook host and HANDOFF.md", () => {
     expect(r.body.host).toMatch(/ignored/);
     expect(await host()).toBe("devbox");
   });
+  it("stores the host in the same batch as the session id (one session update, one host event)", async () => {
+    await db.prepare("UPDATE project SET local_host = NULL, session_id = NULL WHERE id = 'qolhook'").run();
+    const before = (await db.prepare("SELECT COUNT(*) AS n FROM event WHERE project_id = 'qolhook' AND diff_json LIKE '%local_host%'").first<any>()).n;
+    const r = await hook({ host: "samebox", session_id: "q-batch" });
+    expect(r.status).toBe(200);
+    const p = await db.prepare("SELECT local_host, session_id FROM project WHERE id = 'qolhook'").first<any>();
+    expect(p).toMatchObject({ local_host: "samebox", session_id: "q-batch" });
+    const after = (await db.prepare("SELECT COUNT(*) AS n FROM event WHERE project_id = 'qolhook' AND diff_json LIKE '%local_host%'").first<any>()).n;
+    expect(after).toBe(before + 1);
+    await hook({ host: "samebox", session_id: "q-batch" });
+    expect((await db.prepare("SELECT COUNT(*) AS n FROM event WHERE project_id = 'qolhook' AND diff_json LIKE '%local_host%'").first<any>()).n).toBe(before + 1);
+  });
   it("stores HANDOFF.md as a pinned sync doc; identical repeat is unchanged", async () => {
     const files = [
       { name: "session.md", content: "# S" },
@@ -78,16 +90,16 @@ describe("hook host and HANDOFF.md", () => {
     expect(r.status).toBe(200);
     expect(r.body.context_files).toBeUndefined();
   });
-  it("ignores unknown names and refuses an oversize entry on its own", async () => {
+  it("refuses an oversize entry on its own and still stores the valid companion file", async () => {
     const big = "a".repeat(256 * 1024 + 1);
     const r = await hook({
       context_files: [
-        { name: "notes.txt", content: "nope" },
         { name: "HANDOFF.md", content: big },
+        { name: "session.md", content: "# Session\nstored alongside" },
       ],
     });
     expect(r.status).toBe(200);
-    expect(await doc("notes-txt")).toBeNull();
+    expect((await doc("session-md")).content_md).toBe("# Session\nstored alongside");
     expect(r.body.context_files.handoff).toMatch(/skipped/);
     expect((await doc("handoff")).content_md).toBe("# Handoff\nchanged");
   });

@@ -192,6 +192,45 @@ describe("actual dates", () => {
     expect(JSON.parse(ev!.diff_json)).toEqual({ actual_start: ["2026-02-01", null], actual_end: ["2026-02-09", null] });
   });
 
+  it("auto-start: first progress log sets actual_start once, kept after a restart", async () => {
+    const p = await proj();
+    const w = await upsertWorkpackage(db, p.id, { title: "auto" }, SYS);
+    await logProgress(db, { project_id: p.id, workpackage_id: w.id, summary: "first" }, SYS);
+    expect(await row(w.id)).toMatchObject({ status: "doing", actual_start: today() });
+    await db.prepare("UPDATE workpackage SET actual_start = '2026-01-05' WHERE id = ?").bind(w.id).run();
+    await upsertWorkpackage(db, p.id, { id: w.id, status: "todo" }, SYS);
+    await logProgress(db, { project_id: p.id, workpackage_id: w.id, summary: "again" }, SYS);
+    expect(await row(w.id)).toMatchObject({ status: "doing", actual_start: "2026-01-05" });
+  });
+
+  it("log_progress refuses an automatic start that would follow the existing actual_end, writing nothing", async () => {
+    const p = await proj();
+    const w = await upsertWorkpackage(db, p.id, { title: "inv", actual_end: "2026-01-05" }, SYS);
+    expect(await row(w.id)).toMatchObject({ status: "todo", actual_start: null, actual_end: "2026-01-05" });
+    const events = async () => (await db.prepare("SELECT COUNT(*) AS n FROM event WHERE project_id = ?").bind(p.id).first<any>()).n;
+    const n0 = await events();
+    await expect(logProgress(db, { project_id: p.id, workpackage_id: w.id, summary: "x", session_id: "s-inv" }, SYS)).rejects.toThrow(ValidationError);
+    await expect(logProgress(db, { project_id: p.id, workpackage_id: w.id, summary: "x", progress: 40 }, SYS)).rejects.toThrow(ValidationError);
+    expect(await row(w.id)).toMatchObject({ status: "todo", actual_start: null, progress: 0, actual_end: "2026-01-05" });
+    expect(await events()).toBe(n0);
+    expect((await db.prepare("SELECT session_id FROM project WHERE id = ?").bind(p.id).first<any>()).session_id).not.toBe("s-inv");
+  });
+
+  it("REST and MCP: actual_end round-trips; an invalid code is 400", async () => {
+    const p = await proj();
+    const ok = await rest(EDITOR, "POST", "/api/workpackages", { project_id: p.id, title: "e", actual_start: "2026-03-01", actual_end: "2026-03-05" });
+    expect(ok.status).toBe(201);
+    const w = (await ok.json()) as any;
+    expect(w).toMatchObject({ actual_end: "2026-03-05" });
+    const list = (await (await rest(EDITOR, "GET", `/api/workpackages?project_id=${p.id}`)).json()) as any[];
+    expect(list.find((x) => x.id === w.id)).toMatchObject({ actual_end: "2026-03-05" });
+    const m = await mcpTool(EDITOR, "upsert_workpackage", { project_id: p.id, title: "m", actual_start: "2026-03-01", actual_end: "2026-03-07" });
+    expect(m.isError).toBeFalsy();
+    expect(m.body).toMatchObject({ actual_end: "2026-03-07" });
+    const bad = await rest(EDITOR, "POST", "/api/workpackages", { project_id: p.id, title: "c", code: "bad code" });
+    expect(bad.status).toBe(400);
+  });
+
   it("REST: invalid and inverted dates are 400, valid values round-trip", async () => {
     const p = await proj();
     const bad = await rest(EDITOR, "POST", "/api/workpackages", { project_id: p.id, title: "r", actual_start: "2999-01-01" });
