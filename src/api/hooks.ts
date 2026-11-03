@@ -3,8 +3,7 @@ import { CONTEXT_DOC_MAX_BYTES } from "../types";
 import { linkBranch } from "../data/branches";
 import { writeContext } from "../data/context-write";
 import { logProgress } from "../data/logs";
-import { activitySet } from "../data/activity";
-import { eventStmt, eventStmtIfChanged, utf8Bytes } from "../data/util";
+import { eventStmt, utf8Bytes } from "../data/util";
 import { serviceCaller } from "../auth/caller";
 import { REST_ACTIONS, requireAction } from "../auth/permissions";
 import { findProjectByPath, findProjectByRepo, normalisePath, repoFullName } from "./match";
@@ -101,38 +100,24 @@ export async function handleClaudeCodeHook(body: HookBody, env: Env): Promise<Re
     result.branch_id = b.id;
   }
 
-  await logProgress(
-    db,
-    { project_id: project.id, summary: `Claude Code session ended (${reason})${branch ? ` on ${branch}` : ""}`, session_id: sessionId },
-    by,
-  );
-
+  let hostToStore: string | null = null;
   if (body.host !== undefined && body.host !== null) {
     const host = typeof body.host === "string" ? body.host.trim() : "";
-    if (host && host.length <= HOST_MAX) {
-      const ts = new Date().toISOString();
-      const act = activitySet(by, ts, false);
-      const before = await db.prepare("SELECT local_host FROM project WHERE id = ?").bind(project.id).first<{ local_host: string | null }>();
-      if (before?.local_host !== host) {
-        await db.batch([
-          db
-            .prepare(`UPDATE project SET local_host = ?, version = version + 1, updated_at = ?${act.sql} WHERE id = ?`)
-            .bind(host, ts, ...act.params, project.id),
-          eventStmtIfChanged(db, {
-            by,
-            project_id: project.id,
-            entity: "project",
-            entity_id: project.id,
-            action: "update",
-            summary: "Host name updated by session hook",
-            diff: { local_host: [before?.local_host ?? null, host] },
-          }),
-        ]);
-      }
-    } else {
-      result.host = host ? `ignored: longer than ${HOST_MAX} characters` : "ignored: not a non-empty string";
-    }
+    if (host && host.length <= HOST_MAX) hostToStore = host;
+    else result.host = host ? `ignored: longer than ${HOST_MAX} characters` : "ignored: not a non-empty string";
   }
+
+  // The host is stored in the same batch as the session id.
+  await logProgress(
+    db,
+    {
+      project_id: project.id,
+      summary: `Claude Code session ended (${reason})${branch ? ` on ${branch}` : ""}`,
+      session_id: sessionId,
+      local_host: hostToStore,
+    },
+    by,
+  );
 
   // The old single context_file is session.md-style input; context_files (max 2) is the current form.
   const files: { name?: string; content?: string }[] = Array.isArray(body.context_files) ? body.context_files.slice(0, 2) : [];
