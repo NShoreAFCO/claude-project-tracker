@@ -1999,3 +1999,46 @@ details.cat-empty[open] > summary.cat-head::before {
   margin: 0.25rem 0;
 }
 /* /qol:t08 */
+/* qol:t12 */
+.mydash-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4em;
+  margin: 0.5em 0;
+}
+.mydash-kinds button.active {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+.mydash-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6em;
+  align-items: center;
+  margin: 0.5em 0;
+}
+.mydash-views {
+  margin: 0.5em 0;
+  padding: 0;
+  list-style: none;
+}
+.mydash-views li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4em;
+  align-items: center;
+  padding: 0.2em 0;
+}
+.mydash-views .is-default {
+  font-weight: 600;
+}
+.mydash-projects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2em 1em;
+  margin: 0.5em 0;
+}
+.mydash-error {
+  color: var(--color-danger);
+}
+/* /qol:t12 */
