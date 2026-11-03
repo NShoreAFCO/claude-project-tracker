@@ -5,7 +5,7 @@ import { h, clear, statusChip, toastError } from "./dom.js";
 import { openProject } from "./project.js";
 import { WP_CATEGORIES, catVar, catDot, catLabel } from "./categories.js";
 import { collectIssues } from "./schedule-ui.js";
-import { issueEdgeKeys, ghostBar, ghostDiamond, gateRing, issueMark, slipMark, barTooltip } from "./gantt-marks.js";
+import { issueEdgeKeys, ghostBar, ghostDiamond, gateRing, issueMark, slipMark, barTooltip, barParts } from "./gantt-marks.js";
 
 const NS = "http://www.w3.org/2000/svg";
 const s = (tag, attrs = {}, ...children) => {
@@ -95,6 +95,7 @@ export async function renderGantt(main, state) {
     on: { change: (e) => ((showCritical = e.target.checked), rerender()) },
   });
 
+  const todayYmd = new Date().toISOString().slice(0, 10);
   const rows = [];
   const undated = [];
   const visibleByWp = new Map();
@@ -133,15 +134,22 @@ export async function renderGantt(main, state) {
       return start && end ? { start_date: start, end_date: end } : null;
     };
 
+    const actualSpan = (w) => {
+      const from = w.actual_start || w.actual_end;
+      if (!from) return null;
+      return { start_date: from, end_date: w.actual_end || (from > todayYmd ? from : todayYmd) };
+    };
+
     const walkAll = (w, depth, top) => {
       allWps.push(w);
       const validOwn = w.start_date && w.end_date && w.end_date >= w.start_date;
 
       if (level === "main") {
         if (depth === 0) {
-          const span = validOwn ? { start_date: w.start_date, end_date: w.end_date } : collectDescendantSpan(w);
+          const descendants = validOwn ? null : collectDescendantSpan(w);
+          const span = validOwn ? { start_date: w.start_date, end_date: w.end_date } : descendants || actualSpan(w);
           if (span) {
-            const row = { type: "wp", w, depth: 0, p, start_date: span.start_date, end_date: span.end_date };
+            const row = { type: "wp", w, depth: 0, p, start_date: span.start_date, end_date: span.end_date, actualOnly: !validOwn && !descendants };
             projectRows.push(row);
             visibleByWp.set(w.id, row);
             top = row;
@@ -157,14 +165,16 @@ export async function renderGantt(main, state) {
         return;
       }
 
-      if (validOwn) {
+      const own = validOwn ? { start_date: w.start_date, end_date: w.end_date } : actualSpan(w);
+      if (own) {
         const row = {
           type: "wp",
           w,
           depth,
           p,
-          start_date: w.start_date,
-          end_date: w.end_date,
+          start_date: own.start_date,
+          end_date: own.end_date,
+          actualOnly: !validOwn,
         };
         projectRows.push(row);
         visibleByWp.set(w.id, row);
@@ -269,8 +279,11 @@ function chart(rows, visibleByWp, allWps, milestones, { titleOf, issueKeys }) {
   const datedRows = rows.filter((r) => r.type === "wp" || r.type === "milestone");
   const today = Math.floor(Date.now() / DAY);
 
-  let min = Math.min(...datedRows.map((r) => (r.type === "wp" ? toDay(r.start_date) : toDay(r.date))));
-  let max = Math.max(...datedRows.map((r) => (r.type === "wp" ? toDay(r.end_date) + 1 : toDay(r.date) + 1)));
+  const partsOf = (r) => barParts(r.actualOnly ? { ...r.w, start_date: null, end_date: null } : { ...r.w, start_date: r.start_date, end_date: r.end_date }, today);
+  const extents = datedRows.map((r) => (r.type === "wp" ? (partsOf(r)?.extent ?? { from: toDay(r.start_date), to: toDay(r.end_date) + 1 }) : { from: toDay(r.date), to: toDay(r.date) + 1 }));
+
+  let min = Math.min(...extents.map((e) => e.from));
+  let max = Math.max(...extents.map((e) => e.to));
 
   min -= 3;
   max += 3;
@@ -475,38 +488,22 @@ function chart(rows, visibleByWp, allWps, milestones, { titleOf, issueKeys }) {
     }
 
     const w = r.w;
+    const parts = partsOf(r);
     const x1 = x(toDay(r.start_date));
     const x2 = x(toDay(r.end_date) + 1);
     const pct = w.status === "done" ? 100 : Math.max(0, Math.min(100, w.progress || 0));
-    const title = s("title", {}, barTooltip(`${w.title}: ${fmtDate(r.start_date)} – ${fmtDate(r.end_date)} · ${fmtPct(pct)}`, w, titleOf));
+    const range = r.actualOnly ? `${fmtDate(w.actual_start || w.actual_end)} – ${w.actual_end ? fmtDate(w.actual_end) : t("ganttOngoing")}` : `${fmtDate(r.start_date)} – ${fmtDate(r.end_date)}`;
+    const title = () => s("title", {}, barTooltip(`${w.title}: ${range} · ${fmtPct(pct)}`, w, titleOf));
     const colour = catVar("w", w.bar_category);
-
-    const bg = s(
-      "rect",
-      {
-        class: "bar-bg",
-        x: x1,
-        y: y + 7,
-        width: Math.max(2, x2 - x1),
-        height: ROW - 14,
-        rx: 3,
-        "fill-opacity": 0.3,
-      },
-      title,
-    );
-    if (showCritical && w.critical) bg.classList.add("critical");
-    bg.style.setProperty("fill", colour);
-    bg.style.setProperty("stroke", colour);
-
-    const fill = s("rect", {
-      class: "bar-fill",
-      x: x1,
-      y: y + 7,
-      width: Math.max(0, ((x2 - x1) * pct) / 100),
-      height: ROW - 14,
-      rx: 3,
-    });
-    fill.style.setProperty("fill", colour);
+    const barY = y + 7;
+    const barH = ROW - 14;
+    const rect = (cls, span, extra = {}) => {
+      const el = s("rect", { class: cls, x: x(span.from), y: barY, width: Math.max(2, x(span.to) - x(span.from)), height: barH, rx: 3, ...extra }, title());
+      const outline = cls === "bar-actual";
+      el.style.setProperty("fill", outline ? "none" : colour);
+      el.style.setProperty("stroke", cls.startsWith("bar-fill") ? "none" : colour);
+      return el;
+    };
 
     svg.append(
       ...[
@@ -519,7 +516,25 @@ function chart(rows, visibleByWp, allWps, milestones, { titleOf, issueKeys }) {
       const slip = slipMark(s, { x: x2 + 4, y: y + 20, days: w.slip_days });
       if (slip) svg.append(slip);
     }
-    svg.append(bg, fill);
+    if (!parts) return;
+    if (parts.planned) {
+      const bg = rect("bar-bg", parts.planned);
+      if (showCritical && w.critical) bg.classList.add("critical");
+      svg.append(bg);
+    }
+    if (parts.progress && parts.progress.to > parts.progress.from) svg.append(rect("bar-fill", parts.progress));
+    if (parts.solid) svg.append(rect("bar-fill bar-actual-solid", parts.solid));
+    if (parts.block) svg.append(rect("bar-fill bar-actual-block", parts.block));
+    if (parts.actual) svg.append(rect("bar-actual", parts.actual));
+    if (parts.overdue) {
+      const { from, to, closed } = parts.overdue;
+      const yTop = barY;
+      const yBot = barY + barH;
+      const d = closed ? `M${x(from)},${yTop} H${x(to)} V${yBot} H${x(from)}` : `M${x(from)},${yTop} H${x(to)} M${x(from)},${yBot} H${x(to)}`;
+      const od = s("path", { class: "bar-overdue", d }, title());
+      od.style.setProperty("stroke", colour);
+      svg.append(od);
+    }
   });
 
   if (today >= min && today <= max) {
@@ -541,6 +556,10 @@ function legend() {
     h("span", h("span.ms-diamond.open"), t("msOpen")),
     h("span", h("span.ms-diamond.overdue"), t("overdue")),
     h("span", h("span.ms-diamond.gate"), t("ganttGate")),
+    h("span", h("span.legend-planned"), t("ganttLegendPlanned")),
+    h("span", h("span.legend-actual"), t("ganttLegendActual")),
+    h("span", h("span.legend-progress"), t("ganttLegendProgress")),
+    h("span", h("span.legend-overdue"), t("ganttLegendOverdue")),
     h("span", h("span.legend-ghost"), t("ganttBaseline")),
     h("span", h("span.legend-critical"), t("ganttCritical")),
     h("span", h("span.legend-issue", { "aria-hidden": "true" }, "⚠"), t("ganttIssues")),

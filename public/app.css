@@ -1779,3 +1779,46 @@ details.cat-empty[open] > summary.cat-head::before {
   }
 }
 /* /qol:t06 */
+/* qol:t10 */
+.gantt .bar-bg {
+  fill-opacity: 0.3;
+  stroke-width: 1;
+}
+.gantt .bar-actual {
+  fill: none;
+  stroke-width: 2.5;
+}
+.gantt .bar-actual-solid,
+.gantt .bar-actual-block {
+  stroke: none;
+}
+.gantt .bar-overdue {
+  fill: none;
+  stroke-width: 2.5;
+  stroke-dasharray: 4 3;
+}
+.legend-planned,
+.legend-actual,
+.legend-progress,
+.legend-overdue {
+  display: inline-block;
+  width: 1.4rem;
+  height: 0.7rem;
+  margin: 0 0.3rem;
+  border: 1px solid var(--color-primary);
+  border-radius: 3px;
+  vertical-align: middle;
+}
+.legend-planned {
+  background: var(--color-tint);
+}
+.legend-actual {
+  border-width: 3px;
+}
+.legend-progress {
+  background: var(--color-primary);
+}
+.legend-overdue {
+  border: 2px dashed var(--color-primary);
+}
+/* /qol:t10 */

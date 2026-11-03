@@ -98,3 +98,53 @@ export function barTooltip(base, entity, titleOf) {
 
   return lines.join("\n");
 }
+
+const DAY_MS = 86400000;
+
+/** Day number (days since epoch, UTC) of a YYYY-MM-DD string. */
+export function dayOf(ymd) {
+  const [y, m, d] = ymd.slice(0, 10).split("-").map(Number);
+  return Date.UTC(y, m - 1, d) / DAY_MS;
+}
+
+/**
+ * Pure bar geometry for one work package. Spans are `{ from, to }` in day numbers, `to` exclusive.
+ * `today` is a YYYY-MM-DD string or a day number. Returns null when there is nothing to draw
+ * (dates are never invented).
+ */
+export function barParts(wp, today) {
+  const todayDay = typeof today === "number" ? today : dayOf(today);
+  const hasPlan = Boolean(wp.start_date && wp.end_date && wp.end_date >= wp.start_date);
+  const hasStart = Boolean(wp.actual_start);
+  const hasEnd = Boolean(wp.actual_end);
+
+  if (!hasPlan && !hasStart && !hasEnd) return null;
+
+  const planned = hasPlan ? { from: dayOf(wp.start_date), to: dayOf(wp.end_date) + 1 } : null;
+  const actualFrom = hasStart ? dayOf(wp.actual_start) : null;
+  const actualTo = hasStart ? Math.max(actualFrom + 1, hasEnd ? dayOf(wp.actual_end) + 1 : todayDay + 1) : null;
+
+  const parts = { planned, actual: null, progress: null, overdue: null, solid: null, block: null, extent: null };
+
+  if (hasStart && !hasPlan) {
+    parts.solid = { from: actualFrom, to: actualTo };
+  } else if (hasStart) {
+    parts.actual = { from: actualFrom, to: Math.max(actualFrom, Math.min(actualTo, planned.to)) };
+    if (actualTo > planned.to) {
+      parts.overdue = { from: planned.to, to: actualTo, closed: hasEnd };
+    }
+  } else if (hasEnd) {
+    const at = dayOf(wp.actual_end);
+    parts.block = { from: at, to: at + 1 };
+  }
+
+  if (hasPlan) {
+    const pct = wp.status === "done" ? 100 : Math.max(0, Math.min(100, wp.progress || 0));
+    const to = Math.min(planned.to, planned.from + ((planned.to - planned.from) * pct) / 100);
+    parts.progress = { from: planned.from, to };
+  }
+
+  const spans = [parts.planned, parts.actual, parts.overdue, parts.solid, parts.block].filter(Boolean);
+  parts.extent = { from: Math.min(...spans.map((p) => p.from)), to: Math.max(...spans.map((p) => p.to)) };
+  return parts;
+}
