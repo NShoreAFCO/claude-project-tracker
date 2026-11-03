@@ -77,3 +77,13 @@ test("commit log: GitHub merge subjects are skipped, real content is not", () =>
   ].join("\n");
   assert.deepEqual(commitLogHits(log, DENY), ["chore: fixture-denied-word in a subject"]);
 });
+
+test("commit log: the owner's GitHub noreply co-author trailer is skipped, other trailers are not", () => {
+  const log = [
+    "Co-authored-by: fixture-denied-word <12345+fixture-denied-word@users.noreply.github.com>",
+    "Co-authored-by: fixture-denied-word <someone@example.com>",
+    "Co-authored-by: other <1+fixture-denied-word@users.noreply.github.com>",
+  ];
+  assert.deepEqual(commitLogHits(log.join("\n"), DENY, "fixture-denied-word/some-repo"), log.slice(1));
+  assert.equal(commitLogHits(log.join("\n"), DENY).length, 3);
+});

@@ -81,9 +81,16 @@ export function denylistHits(files, read, deny, skip = [], allow = []) {
  * Skips subjects GitHub writes itself: "Merge pull request #N from <owner>/<branch>" (the owner is the
  * hosting account) and "Merge branch 'main' into <branch>" (the branch-update button).
  */
-export function commitLogHits(log, deny) {
+export function commitLogHits(log, deny, ownSlug = null) {
+  // GitHub adds "Co-authored-by: <login> <id+login@users.noreply.github.com>" for the repo owner on squash
+  // merges; the owner login is already public in the repo slug, so exactly that trailer is skipped
+  const owner = ownSlug ? ownSlug.split("/")[0] : null;
+  const ownerTrailer = owner
+    ? new RegExp(`^Co-authored-by: ${escapeRe(owner)} <\\d+\\+${escapeRe(owner)}@users\\.noreply\\.github\\.com>$`, "i")
+    : null;
   return log
     .split("\n")
     .filter((l) => !/^Merge branch '[^']+' into \S+$/.test(l))
+    .filter((l) => !(ownerTrailer && ownerTrailer.test(l.trim())))
     .filter((l) => deny.test(l.replace(/^Merge pull request #\d+ from [^/\s]+\//, "")));
 }
