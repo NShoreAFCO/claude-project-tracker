@@ -7,6 +7,7 @@ import { api } from "./api.js";
 import { h, clear, toastError } from "./dom.js";
 import { renderGrid } from "./grid.js";
 import { renderGantt } from "./gantt.js";
+import { renderMyDashboard } from "./mydash.js";
 import { renderUpcoming, renderMyWps, loadSummary } from "./portfolio.js";
 import { renderInbox } from "./inbox.js";
 import { openProject } from "./project.js";
@@ -197,7 +198,7 @@ async function renderView() {
   else if (view === "trash") await renderTrash(main, state);
   else if (view === "upcoming") await renderUpcoming(main);
   else if (view === "mine") await renderMyWps(main);
-  else if (view === "my") clear(main, h("h2", t("navMy"))); // placeholder, filled by the my-dashboard task
+  else if (view === "my") await renderMyDashboard(main, state);
   else if (view === "gantt") await renderGantt(main, state);
   else if (view === "inbox") await renderInbox(main, state);
   else if (view === "search") await renderSearchResults(params.get("q") || "");

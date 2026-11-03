@@ -83,6 +83,12 @@ export const api = {
   portfolioSummary: () => request("GET", "/api/portfolio/summary"),
   upcomingWps: (params = {}) => request("GET", `/api/workpackages/upcoming${q(params)}`),
   myWps: (params = {}) => request("GET", `/api/workpackages/mine${q(params)}`),
+  // qol:t12
+  openWps: (params = {}) => request("GET", `/api/workpackages/open${q(params)}`),
+  openGates: (params = {}) => request("GET", `/api/gates/open${q(params)}`),
+  getDashboardPrefs: () => request("GET", "/api/persons/me/dashboard"),
+  putDashboardPrefs: (prefs) => request("PUT", "/api/persons/me/dashboard", { prefs }),
+  // /qol:t12
   /** Raw report fetch (pdf: a Blob; md/html: text). Throws ApiError, e.g. 503 pdf_unavailable. */
   report: async (id, format) => {
     const res = await fetch(`/api/projects/${encodeURIComponent(id)}/report?format=${format}`, { credentials: "same-origin" });
