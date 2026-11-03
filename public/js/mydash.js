@@ -128,10 +128,13 @@ export async function renderMyDashboard(main, state) {
               checked: picked.has(project.id),
               on: {
                 change: async (event) => {
-                  const next = new Set(prefs.active_projects);
-                  if (event.target.checked) next.add(project.id);
-                  else next.delete(project.id);
-                  await persistPrefs({ ...prefs, active_projects: [...next] });
+                  const checked = Boolean(event.target.checked);
+                  await persistPrefs((current) => {
+                    const next = new Set(current.active_projects);
+                    if (checked) next.add(project.id);
+                    else next.delete(project.id);
+                    return { ...current, active_projects: [...next] };
+                  });
                 },
               },
             }),
@@ -269,7 +272,9 @@ export async function renderMyDashboard(main, state) {
                 kind,
                 project_id: kind === "active_projects" ? null : projectId || null,
               };
-              await persistPrefs({ ...prefs, views: [...prefs.views, view] });
+              await persistPrefs((current) =>
+                current.views.length >= 20 ? current : { ...current, views: [...current.views, view] },
+              );
             },
           },
         },
@@ -311,8 +316,10 @@ export async function renderMyDashboard(main, state) {
             click: async () => {
               const name = window.prompt(t("mydViewName"), view.name);
               if (!name || !name.trim()) return;
-              const views = prefs.views.map((item, i) => (i === index ? { ...item, name: name.trim() } : item));
-              await persistPrefs({ ...prefs, views });
+              await persistPrefs((current) => ({
+                ...current,
+                views: current.views.map((item) => (item.id === view.id ? { ...item, name: name.trim() } : item)),
+              }));
             },
           },
         },
@@ -323,7 +330,7 @@ export async function renderMyDashboard(main, state) {
         {
           type: "button",
           disabled: first,
-          on: { click: () => moveView(index, index - 1) },
+          on: { click: () => moveView(view.id, -1) },
         },
         t("mydMoveUp"),
       ),
@@ -332,7 +339,7 @@ export async function renderMyDashboard(main, state) {
         {
           type: "button",
           disabled: last,
-          on: { click: () => moveView(index, index + 1) },
+          on: { click: () => moveView(view.id, 1) },
         },
         t("mydMoveDown"),
       ),
@@ -343,7 +350,10 @@ export async function renderMyDashboard(main, state) {
           on: {
             click: async () => {
               if (!window.confirm(t("mydConfirmDelete", { name: view.name }))) return;
-              await persistPrefs({ ...prefs, views: prefs.views.filter((_, i) => i !== index) });
+              await persistPrefs((current) => ({
+                ...current,
+                views: current.views.filter((item) => item.id !== view.id),
+              }));
             },
           },
         },
@@ -357,10 +367,14 @@ export async function renderMyDashboard(main, state) {
               type: "button",
               on: {
                 click: async () => {
-                  const views = prefs.views.slice();
-                  const [selected] = views.splice(index, 1);
-                  views.unshift(selected);
-                  await persistPrefs({ ...prefs, views });
+                  await persistPrefs((current) => {
+                    const at = current.views.findIndex((item) => item.id === view.id);
+                    if (at < 0) return current;
+                    const views = current.views.slice();
+                    const [selected] = views.splice(at, 1);
+                    views.unshift(selected);
+                    return { ...current, views };
+                  });
                 },
               },
             },
@@ -369,21 +383,36 @@ export async function renderMyDashboard(main, state) {
     );
   }
 
-  async function moveView(from, to) {
-    if (to < 0 || to >= prefs.views.length) return;
-    const views = prefs.views.slice();
-    [views[from], views[to]] = [views[to], views[from]];
-    await persistPrefs({ ...prefs, views });
+  async function moveView(id, delta) {
+    await persistPrefs((current) => {
+      const from = current.views.findIndex((item) => item.id === id);
+      const to = from + delta;
+      if (from < 0 || to < 0 || to >= current.views.length) return current;
+      const views = current.views.slice();
+      [views[from], views[to]] = [views[to], views[from]];
+      return { ...current, views };
+    });
   }
 
-  async function persistPrefs(next) {
-    const payload = {
-      version: 1,
-      views: next.views,
-      active_projects: next.active_projects,
-    };
+  // Preference writes are serialised: each mutation is applied to the latest
+  // acknowledged prefs when its turn comes, with one PUT in flight at a time.
+  // On failure `prefs` stays at the last acknowledged state and the UI is rebuilt from it.
+  let prefsQueue = Promise.resolve();
+  function persistPrefs(mutate) {
+    const run = () => applyMutation(mutate);
+    prefsQueue = prefsQueue.then(run, run);
+    return prefsQueue;
+  }
 
+  async function applyMutation(mutate) {
     try {
+      const next = mutate(prefs);
+      if (next === prefs) return;
+      const payload = {
+        version: 1,
+        views: next.views,
+        active_projects: next.active_projects,
+      };
       const result = await api.putDashboardPrefs(payload);
       prefs = normalisePrefs(result?.prefs);
       renderViewsPanel();
