@@ -1822,3 +1822,98 @@ details.cat-empty[open] > summary.cat-head::before {
   border: 2px dashed var(--color-primary);
 }
 /* /qol:t10 */
+/* qol:t07 */
+.seg-control {
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.seg-control .seg {
+  border: 0;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+}
+.seg-control .seg:last-child {
+  border-right: 0;
+}
+.seg-control .seg[aria-pressed="true"] {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+.seg-control .seg:focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: -3px;
+}
+.tag-filter {
+  position: relative;
+}
+.tag-pop {
+  position: absolute;
+  z-index: 15;
+  top: 100%;
+  left: 0;
+  margin-top: 0.25rem;
+  min-width: 200px;
+  max-height: 20rem;
+  overflow: auto;
+  padding: 0.5rem 0.75rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.tag-pop[hidden] {
+  display: none;
+}
+.tag-opt {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+.card-target {
+  font-size: 0.9rem;
+}
+.card .card-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+.card .box-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.card .box-title {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card .box-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.75rem;
+  font-size: 0.9rem;
+}
+.card .card-minor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+}
+.card .card-minor .initials,
+.card .card-minor .chip {
+  font-size: 0.7rem;
+  opacity: 0.85;
+}
+/* /qol:t07 */
