@@ -53,9 +53,12 @@ const OPENING_SQL = `(${OPENING_DECISIONS.map((d) => `'${d}'`).join(", ")})`;
 /** SQL: the latest decision of milestone alias `m` (NULL without one). */
 export const latestDecisionSql = (m: string): string =>
   `(SELECT d.decision FROM decision d WHERE d.milestone_id = ${m}.id ORDER BY d.decided_at DESC, d.rowid DESC LIMIT 1)`;
-/** SQL: milestone alias `m` is a live gate whose latest decision is not go / go_with_conditions. */
+/**
+ * SQL: milestone alias `m` is a closed gate: a live gate that is not reached yet or whose latest decision
+ * is not go / go_with_conditions. A go recorded before the gate is reached does not open it early.
+ */
 export const gateClosedSql = (m: string): string =>
-  `(${m}.gate = 1 AND ${m}.deleted_at IS NULL AND COALESCE(${latestDecisionSql(m)}, '') NOT IN ${OPENING_SQL})`;
+  `(${m}.gate = 1 AND ${m}.deleted_at IS NULL AND (${m}.reached_at IS NULL OR COALESCE(${latestDecisionSql(m)}, '') NOT IN ${OPENING_SQL}))`;
 /**
  * SQL: WP alias `w` has not been started. Started = doing/done or any progress; a WP that went todo →
  * blocked/waiting/dropped without progress is still unstarted, so such a detour does not unlock it.
@@ -97,18 +100,18 @@ export async function gateLockedWpIds(db: D1Database, projectId: string): Promis
 }
 
 /**
- * "Gates" section of the context bundle (spec §4.4), after the open risks: the project's undecided gates
- * (live gates whose latest decision is not go / go_with_conditions) and its gate-locked WPs. "" when there
- * are none. Trashed gates and WPs are left out.
+ * "Gates" section of the context bundle (spec §4.4), after the open risks: the project's closed gates
+ * (live gates not reached yet or whose latest decision is not go / go_with_conditions) and its gate-locked
+ * WPs. "" when there are none. Trashed gates and WPs are left out.
  */
 export async function gateStatusMarkdown(db: D1Database, projectId: string): Promise<string> {
   const { results: gates } = await db
     .prepare(
-      `SELECT m.id, m.title, m.due_date, ${latestDecisionSql("m")} AS latest FROM milestone m
+      `SELECT m.id, m.title, m.due_date, m.reached_at, ${latestDecisionSql("m")} AS latest FROM milestone m
        WHERE m.project_id = ? AND ${gateClosedSql("m")} ORDER BY m.due_date IS NULL, m.due_date, m.sort, m.title, m.id`,
     )
     .bind(projectId)
-    .all<{ id: string; title: string; due_date: string | null; latest: string | null }>();
+    .all<{ id: string; title: string; due_date: string | null; reached_at: string | null; latest: string | null }>();
   const locked = await gateLockedWpIds(db, projectId);
   if (!gates.length && !locked.size) return "";
   const { results: wps } = locked.size
@@ -120,11 +123,13 @@ export async function gateStatusMarkdown(db: D1Database, projectId: string): Pro
   const parts = ["## Gates\n"];
   if (gates.length)
     parts.push(
-      `\nUndecided gates:\n\n${gates.map((g) => `- ${g.title} (${g.id}; due ${g.due_date ?? "none"}; latest decision: ${g.latest ?? "none"})`).join("\n")}\n`,
+      `\nUndecided gates (closed until reached with a go decision):\n\n${gates
+        .map((g) => `- ${g.title} (${g.id}; due ${g.due_date ?? "none"}; reached: ${g.reached_at ? "yes" : "no"}; latest decision: ${g.latest ?? "none"})`)
+        .join("\n")}\n`,
     );
   if (wps.length)
     parts.push(
-      `\nGate-locked work packages (not started until a go decision or a person's override):\n\n${wps
+      `\nGate-locked work packages (not started until the gate is reached with a go decision, or a person's override):\n\n${wps
         .map((w) => `- ${w.title} (${w.id}; locked by gate ${locked.get(w.id)!.title})`)
         .join("\n")}\n`,
     );
@@ -150,7 +155,7 @@ export function gateLockedError(wpId: string, gates: GateRef[], by?: Caller, ove
   const person = by?.channel === "dashboard";
   const endpoint = `POST /api/workpackages/${overrideId ?? wpId}/gate-override`;
   return new TransitionError(
-    `work package ${wpId} is locked by gate ${names} until a go decision is recorded; ` +
+    `work package ${wpId} is locked by gate ${names} until the gate is reached (its required work packages done or dropped) with a go decision; ` +
       (person
         ? `to start it before the decision, record an override with a reason (${endpoint})`
         : "ask the decision maker to decide, or a person can override the lock in the dashboard"),
@@ -376,13 +381,15 @@ async function newWpIds(db: D1Database, projectId: string, titles: string[]): Pr
  *   keeps their ids too); stop puts the project on hold with `closure_decision_pending`.
  * - The decision event carries the decision, note, evidence, conditions and on_behalf (audit trail).
  * The batch re-checks the gate, the project status and the decision maker; a change meanwhile → 409.
+ * A decision may be recorded before the gate is reached (`reached: false` in the result): it is stored and
+ * baselined as usual, but the gate only opens once it is reached (spec §19).
  */
 export async function recordGateDecision(
   db: D1Database,
   milestoneId: string,
   input: DecisionInput,
   by: Caller,
-): Promise<{ decision_id: string; baseline_id?: string; created_wps?: string[] }> {
+): Promise<{ decision_id: string; reached: boolean; baseline_id?: string; created_wps?: string[] }> {
   // F11: decider or above; service tokens never decide (also with on_behalf_of). A person records it:
   // decided_by is the caller's person (the OAuth login for MCP), never an agent or the system.
   requireAction(by, "decide");
@@ -401,9 +408,9 @@ export async function recordGateDecision(
     throw new ValidationError("on_behalf_of_decision_maker must be true or false");
 
   const m = await db
-    .prepare(`SELECT id, project_id, title, gate, due_date FROM milestone WHERE id = ? AND ${LIVE()}`)
+    .prepare(`SELECT id, project_id, title, gate, due_date, reached_at FROM milestone WHERE id = ? AND ${LIVE()}`)
     .bind(milestoneId)
-    .first<{ id: string; project_id: string; title: string; gate: number; due_date: string | null }>();
+    .first<{ id: string; project_id: string; title: string; gate: number; due_date: string | null; reached_at: string | null }>();
   if (!m) throw new NotFoundError(`milestone ${milestoneId} not found`);
   if (m.gate !== 1) throw new ValidationError(`milestone ${m.id} is not a gate; set gate=true first`);
   const project = await db.prepare(`SELECT * FROM project WHERE id = ? AND ${LIVE()}`).bind(m.project_id).first<ProjectRow>();
@@ -579,8 +586,10 @@ export async function recordGateDecision(
     if (DECISION_GUARD_FAILED.test(String((e as Error)?.message ?? e))) throw decisionConflict();
     throw e;
   }
+  // reached=false: the decision is stored, but the gate stays closed until its requires are done or dropped.
   return {
     decision_id: decisionId,
+    reached: m.reached_at !== null,
     ...(baseline ? { baseline_id: baseline.id } : {}),
     ...(wpIds.length ? { created_wps: wpIds } : {}),
   };

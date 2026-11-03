@@ -463,7 +463,7 @@ describe("gate decisions", () => {
     expect(md.indexOf("## Open risks")).toBeGreaterThan(-1);
     expect(md.indexOf("## Open risks")).toBeLessThan(md.indexOf("## Gates"));
     const m1 = (await listMilestones(db, g.p.id)).find((m) => m.id === g.m1)!;
-    expect(gates).toContain(`- M1 (${g.m1}; due ${m1.due_date}; latest decision: none)`);
+    expect(gates).toContain(`- M1 (${g.m1}; due ${m1.due_date}; reached: yes; latest decision: none)`);
     expect(gates).toContain(`- WP2 (${g.wp2}; locked by gate M1)`);
     // other gates of the plan are not gates here; non-gate milestones are not listed
     expect(gates).not.toContain(`(${g.m2};`);

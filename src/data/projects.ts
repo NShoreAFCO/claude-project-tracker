@@ -37,7 +37,7 @@ import {
   projectLinks,
   TransitionError,
 } from "./rules";
-import { gateClosedSql, gateLockedWpIds } from "./gates";
+import { gateClosedSql, gateLockedWpIds, latestDecisionSql } from "./gates";
 import { isAgent } from "../auth/caller";
 import { requireAction } from "../auth/permissions";
 import { POLICY } from "../policy";
@@ -134,6 +134,11 @@ export type ProjectCard = {
   /** Number of waiting WPs (deferrals), for the card's Waiting chip. */
   waiting_count: number;
   next_milestone: { id: string; title: string; due_date: string | null } | null;
+  /**
+   * The earliest-due live gate that is not (reached and decided go / go_with_conditions); null when none.
+   * decision_state as on milestones: the latest decision, else pending (reached) or none.
+   */
+  current_gate: CurrentGate | null;
   /** Last progress (log_progress, status change, WP done); not touched by system writes. */
   last_activity: string | null;
   /** Active project without progress for stale_days (policy, per-category override). */
@@ -307,6 +312,9 @@ export function setBeforeProjectWriteForTesting(f: (() => Promise<void>) | null)
   beforeProjectWrite = f;
 }
 
+/** Card field current_gate (D7). */
+export type CurrentGate = { id: string; title: string; due_date: string | null; reached: boolean; decision_state: string };
+
 export async function getProjectRow(db: D1Database, id: string): Promise<ProjectRow> {
   const p = await db.prepare(`SELECT * FROM project WHERE id = ? AND ${LIVE()}`).bind(id).first<ProjectRow>();
   if (!p) throw new NotFoundError(`project ${id} not found`);
@@ -319,7 +327,7 @@ export async function listProjects(
   /** The reader; viewers get cards without the internal fields (spec F12). Omitted = internal read. */
   by?: Caller,
 ): Promise<ProjectCard[]> {
-  const [projects, wps, branches, docs, ms] = await db.batch([
+  const [projects, wps, branches, docs, ms, gates] = await db.batch([
     filter.status
       ? db.prepare(`SELECT * FROM project WHERE status = ? AND ${LIVE()} ORDER BY updated_at DESC`).bind(filter.status)
       : db.prepare(`SELECT * FROM project WHERE ${LIVE()} ORDER BY updated_at DESC`),
@@ -329,7 +337,21 @@ export async function listProjects(
     db.prepare(
       `SELECT m.project_id, m.id, m.title, m.due_date FROM milestone m WHERE ${LIVE("m")} AND NOT (${QUALIFIES}) ORDER BY m.due_date IS NULL, m.due_date, m.sort, m.title`,
     ),
+    db.prepare(
+      `SELECT m.project_id, m.id, m.title, m.due_date, m.reached_at, ${latestDecisionSql("m")} AS latest FROM milestone m
+       WHERE ${gateClosedSql("m")} ORDER BY m.due_date IS NULL, m.due_date, m.sort, m.title, m.id`,
+    ),
   ]);
+  const currentGate = new Map<string, CurrentGate>();
+  for (const g of gates.results as Array<{ project_id: string; id: string; title: string; due_date: string | null; reached_at: string | null; latest: string | null }>)
+    if (!currentGate.has(g.project_id))
+      currentGate.set(g.project_id, {
+        id: g.id,
+        title: g.title,
+        due_date: g.due_date,
+        reached: g.reached_at !== null,
+        decision_state: g.latest ?? (g.reached_at ? "pending" : "none"),
+      });
   const nextMs = new Map<string, { id: string; title: string; due_date: string | null }>();
   for (const m of ms.results as Array<{ project_id: string; id: string; title: string; due_date: string | null }>)
     if (!nextMs.has(m.project_id)) nextMs.set(m.project_id, { id: m.id, title: m.title, due_date: m.due_date });
@@ -376,6 +398,7 @@ export async function listProjects(
             .sort()[0] ?? null,
         waiting_count: list.filter((w) => !w.deleted_at && w.status === "waiting").length,
         next_milestone: nextMs.get(p.id) ?? null,
+        current_gate: currentGate.get(p.id) ?? null,
         last_activity: p.last_progress_at ?? p.created_at,
         stale: projectStale(p),
         open_branches: openBranches.get(p.id) ?? 0,
