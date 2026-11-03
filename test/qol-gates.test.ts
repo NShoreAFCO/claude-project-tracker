@@ -2,7 +2,7 @@
 // and the project card's current_gate.
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { call, installTestKeys, testCaller, userJwt } from "./helpers";
+import { call, installTestKeys, serviceJwt, testCaller, userJwt } from "./helpers";
 import { gatedPlan } from "./fixtures/gated-plan";
 import { createProject, listProjects } from "../src/data/projects";
 import { upsertWorkpackage } from "../src/data/workpackages";
@@ -207,6 +207,38 @@ describe("start writes re-check the lock (go recorded, requires unfinished)", ()
   });
 });
 
+describe("move to another project (early go, gate not reached)", () => {
+  // SPEC §19: only agents are refused moving a locked WP to another project; a person's move is the
+  // dashboard's way to re-plan and is not gate-checked (unchanged by the reached rule). Agents cannot
+  // reach the REST route, so the MCP check (above) is the only agent move path.
+  const moveSetup = async () => {
+    const g = await gated();
+    const target = await createProject(db, { title: `QoL move target ${++n}`, owner: "Owner" }, SYS);
+    await recordGateDecision(db, g.m1, { decision: "go" }, DM);
+    expect(await lockedIds(g.p.id)).toEqual([g.wp2]);
+    return { g, target, path: `/api/projects/${g.p.id}/move-workpackages`, payload: { to_project_id: target.id, ids: [g.wp2] } };
+  };
+  const projectOf = async (id: string) =>
+    (await db.prepare("SELECT project_id FROM workpackage WHERE id = ?").bind(id).first<{ project_id: string }>())!.project_id;
+
+  it("REST with a service token: refused 403 before the handler, nothing moves", async () => {
+    const { g, path, payload } = await moveSetup();
+    const res = await call(path, { method: "POST", jwt: await serviceJwt(), body: JSON.stringify(payload) });
+    expect(res.status).toBe(403);
+    expect(await projectOf(g.wp2)).toBe(g.p.id);
+    expect(await lockedIds(g.p.id)).toEqual([g.wp2]);
+  });
+
+  it("REST by a person: not gate-checked, the WP moves and leaves the gate's unlocks", async () => {
+    const { g, target, path, payload } = await moveSetup();
+    const r = await rest(path, "POST", payload);
+    expect([r.status, r.json]).toEqual([200, { moved: [g.wp2] }]);
+    expect(await projectOf(g.wp2)).toBe(target.id);
+    expect(await lockedIds(g.p.id)).toEqual([]);
+    expect((await listMilestones(db, g.p.id)).find((m) => m.id === g.m1)!).toMatchObject({ reached: false, decision_state: "go" });
+  });
+});
+
 describe("milestone WP status lists", () => {
   it("requires_status / unlocks_status: live WPs in sort order with code, title, status, progress", async () => {
     const g = await gated();
@@ -246,7 +278,13 @@ describe("project card current_gate", () => {
 
     const g = await gated();
     const m1 = (await listMilestones(db, g.p.id)).find((m) => m.id === g.m1)!;
-    expect((await card(g.p.id)).current_gate).toEqual({ id: g.m1, title: "M1", due_date: m1.due_date, reached: false, decision_state: "none" });
+    expect((await card(g.p.id)).current_gate).toEqual({
+      id: g.m1,
+      title: "M1",
+      due_date: m1.due_date,
+      reached: false,
+      decision_state: "none",
+    });
     await upsertMilestone(db, g.p.id, { id: g.m2, gate: true }, SYS);
     await recordGateDecision(db, g.m1, { decision: "go" }, DM);
     // an early go keeps M1 current
@@ -264,7 +302,9 @@ describe("project card current_gate", () => {
     const expected = { id: g.m1, reached: true, decision_state: "pending" };
     expect((await card(g.p.id)).current_gate).toMatchObject(expected);
     const r = await rest("/api/projects", "GET");
-    expect((r.json as unknown as Array<{ id: string; current_gate: unknown }>).find((p) => p.id === g.p.id)!.current_gate).toMatchObject(expected);
+    expect((r.json as unknown as Array<{ id: string; current_gate: unknown }>).find((p) => p.id === g.p.id)!.current_gate).toMatchObject(
+      expected,
+    );
     const list = body(await mcp("list_projects", {}));
     const rows = (Array.isArray(list) ? list : list.projects) as Array<{ id: string; current_gate: unknown }>;
     expect(rows.find((p) => p.id === g.p.id)!.current_gate).toMatchObject(expected);
