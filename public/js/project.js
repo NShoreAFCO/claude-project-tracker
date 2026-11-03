@@ -535,7 +535,8 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         ],
       });
 
-    const shownTree = d.workpackages.filter((w) => !shownWps || shownWps.has(w.id));
+    const pruneTree = (list) => list.filter((w) => !shownWps || shownWps.has(w.id)).map((w) => (w.children?.length ? { ...w, children: pruneTree(w.children) } : w));
+    const shownTree = pruneTree(d.workpackages);
     const plan = placeMilestones(shownTree, d.milestones, (w) => fold.open.has(w.id) || (!!shownWps && fold.issuesOnly));
 
     const workpackageActions = h(

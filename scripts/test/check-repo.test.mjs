@@ -109,3 +109,8 @@ test("underlay below 7:1 fails", () => {
   assert.equal(p.length, 1);
   assert.match(p[0], /underlay-wp/);
 });
+
+test("underlay just below 7:1 (6.98:1) fails", () => {
+  const p = underlayProblems({ ...GOOD_THEME, "color-text-strong": "#111c24", "underlay-wp": "#17b9a0" });
+  assert.ok(p.some((x) => x.includes("underlay-wp")));
+});

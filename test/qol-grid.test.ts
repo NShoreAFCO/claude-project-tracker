@@ -50,3 +50,17 @@ describe("tag filter", () => {
     expect(orderTags(["b", "a", "c", "d", "a"], ["c", "b"])).toEqual(["b", "c", "a", "d"]);
   });
 });
+
+describe("storage getter that throws", () => {
+  it("load/save do not throw when globalThis.localStorage access throws", () => {
+    const desc = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, get: () => { throw new Error("blocked"); } });
+    try {
+      expect(() => saveGridFilter({})).not.toThrow();
+      expect(loadGridFilter({})).toEqual({});
+    } finally {
+      if (desc) Object.defineProperty(globalThis, "localStorage", desc);
+      else delete (globalThis as any).localStorage;
+    }
+  });
+});
