@@ -24,7 +24,7 @@ import {
 } from "./forms.js";
 import { renderContextPanel, openDocViewer } from "./context.js";
 import { collectIssues, issuesByEntity } from "./schedule-ui.js";
-import { issueList, issueBadge, scheduleMeta, milestoneItem, placeMilestones } from "./schedule-view.js";
+import { issueList, issueBadge, scheduleMeta, milestoneItem, placeMilestones, pruneTree } from "./schedule-view.js";
 import { decisionDialog, baselineDialog } from "./gates-ui.js";
 
 /** Render sanitised markdown into a container (the only innerHTML use in the app). */
@@ -164,7 +164,11 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
           name === "overview" ? t("tabOverview") : name === "risks" ? t("tabRisks") : t("tabContext"),
         ),
       ),
-      h("a.gantt-link", { href: `#/gantt?project=${encodeURIComponent(p.id)}`, on: { click: () => setTimeout(() => m.close(), 0) } }, t("cardGantt")),
+      h(
+        "a.gantt-link",
+        { href: `#/gantt?project=${encodeURIComponent(p.id)}`, on: { click: () => setTimeout(() => m.close(), 0) } },
+        t("cardGantt"),
+      ),
     );
     clear(m.foot);
     if (current.tab === "context") {
@@ -251,7 +255,11 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
   function levelRows(list, shown, plan, rowOf) {
     return list
       .filter((c) => !shown || shown.has(c.id))
-      .flatMap((c) => [...(plan.before.get(c.id) ?? []).map(rowOf), wpNode(c, shown, plan, rowOf), ...(plan.after.get(c.id) ?? []).map(rowOf)]);
+      .flatMap((c) => [
+        ...(plan.before.get(c.id) ?? []).map(rowOf),
+        wpNode(c, shown, plan, rowOf),
+        ...(plan.after.get(c.id) ?? []).map(rowOf),
+      ]);
   }
 
   function wpNode(w, shown, plan, rowOf) {
@@ -348,12 +356,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         w.drop_reason ? h("div.blocked", `${t("fDropReason")}: ${w.drop_reason}`) : null,
         w.description_md ? h("details.blocked", h("summary", t("description")), mdBlock(w.description_md)) : null,
       ),
-      !leaf && open
-        ? h(
-            "ul",
-            levelRows(w.children, shown, plan, rowOf),
-          )
-        : null,
+      !leaf && open ? h("ul", levelRows(w.children, shown, plan, rowOf)) : null,
     );
   }
 
@@ -535,8 +538,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         ],
       });
 
-    const pruneTree = (list) => list.filter((w) => !shownWps || shownWps.has(w.id)).map((w) => (w.children?.length ? { ...w, children: pruneTree(w.children) } : w));
-    const shownTree = pruneTree(d.workpackages);
+    const shownTree = pruneTree(d.workpackages, shownWps);
     const plan = placeMilestones(shownTree, d.milestones, (w) => fold.open.has(w.id) || (!!shownWps && fold.issuesOnly));
 
     const workpackageActions = h(

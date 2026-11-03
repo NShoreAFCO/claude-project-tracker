@@ -13,7 +13,7 @@ import { renderInbox } from "./inbox.js";
 import { openProject } from "./project.js";
 import { renderPeople } from "./people.js";
 import { renderTrash } from "./trash.js";
-import { sidebarModel, resetGridFilter } from "./sidebar.js";
+import { sidebarModel, renderSidebar, createDrawer, goHome } from "./sidebar.js";
 import { PROJECT_CATEGORIES, catLabel } from "./categories.js";
 
 document.getElementById("logo").src = `/instance/${config.app.logo}`;
@@ -71,17 +71,7 @@ function renderNav() {
     inboxCount: state.inboxCount,
     hostname: location.hostname,
   });
-  const link = (e, label, extra) =>
-    h("a", { href: e.href, "aria-current": e.current ? "page" : null, on: e.category ? { click: (ev) => pickCategory(ev, e.category) } : {} }, label, extra || null);
-  const count = (n) => (n ? h("span.count", { "aria-label": String(n) }, String(n)) : null);
-  clear(
-    nav,
-    ...model.top.map((e) => link(e, t(e.labelKey))),
-    h("div.nav-group", h("h2.nav-heading", t("navCategories")), ...model.categories.map((e) => link(e, catLabel("p", e.category)))),
-    h("hr.nav-rule"),
-    ...model.views.map((e) => link(e, t(e.labelKey), count(e.count))),
-    model.logout ? h("a.nav-logout", { href: model.logout.href }, t(model.logout.labelKey)) : null,
-  );
+  renderSidebar(nav, model, { h, clear, t, catLabel, onCategory: pickCategory });
   navToggle.textContent = t("navMenu");
 }
 
@@ -94,44 +84,15 @@ function pickCategory(ev, key) {
   else location.hash = "#/";
 }
 
-function setDrawer(open) {
-  document.body.classList.toggle("nav-open", open);
-  navToggle.setAttribute("aria-expanded", String(open));
-}
-function closeDrawer() {
-  setDrawer(false);
-}
-navToggle.addEventListener("click", (e) => {
-  e.stopPropagation();
-  setDrawer(navToggle.getAttribute("aria-expanded") !== "true");
-});
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && document.body.classList.contains("nav-open")) {
-    closeDrawer();
-    navToggle.focus();
-  }
-});
-document.addEventListener("click", (e) => {
-  if (document.body.classList.contains("nav-open") && !nav.contains(e.target)) closeDrawer();
-});
-nav.addEventListener("click", (e) => {
-  if (e.target.closest("a")) closeDrawer();
-});
+const drawer = createDrawer({ doc: document, nav, toggle: navToggle });
+const closeDrawer = drawer.close;
 
 // Logo/title: home. Reset filters, close dialogs, scroll to top (also when already on #/).
-document.getElementById("home").addEventListener("click", () => {
-  let store = null;
-  try {
-    store = localStorage;
-  } catch {
-    // storage blocked: filters are reset in memory only
-  }
-  resetGridFilter(state.filter, store);
-  document.querySelectorAll("dialog[open]").forEach((d) => d.close());
-  window.scrollTo(0, 0);
-  closeDrawer();
-  if (location.hash === "#/" || location.hash === "" || location.hash === "#") route();
-});
+document
+  .getElementById("home")
+  .addEventListener("click", () =>
+    goHome({ filter: state.filter, getStorage: () => localStorage, doc: document, win: window, closeDrawer, hash: location.hash, route }),
+  );
 
 /** Shell texts come from the instance config and the UI locale (index.html carries no brand text). Re-run after a language switch. */
 function renderShell() {

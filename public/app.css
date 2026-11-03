@@ -81,16 +81,38 @@ a {
 }
 .top h1 {
   margin: 0;
-}
-.top .home {
-  display: flex;
-  align-items: center;
   flex: 1 1 auto;
-  color: var(--color-text-strong);
-  text-decoration: none;
 }
-.top .nav-toggle {
-  display: none;
+.top nav {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+.top nav a {
+  font-weight: 600;
+  text-transform: var(--button-transform);
+  letter-spacing: var(--button-letter-spacing);
+  font-size: 0.85rem;
+  text-decoration: none;
+  color: var(--color-text-strong);
+  padding: 0.45rem 0.7rem;
+  border-radius: var(--radius);
+  border-bottom: 3px solid transparent;
+}
+.top nav a[aria-current="page"] {
+  border-bottom-color: var(--color-primary);
+  color: var(--color-primary-strong);
+}
+.top nav .count {
+  display: inline-block;
+  min-width: 1.4em;
+  margin-left: 0.3rem;
+  padding: 0 0.35rem;
+  border-radius: 1em;
+  background: var(--color-primary-strong);
+  color: var(--color-on-primary);
+  font-size: 0.75rem;
+  text-align: center;
 }
 .search {
   display: flex;
@@ -1661,6 +1683,20 @@ details.cat-empty[open] > summary.cat-head::before {
 }
 /* /qol:t09 */
 /* qol:t06 */
+/* header overrides: the logo/title link replaces the old top nav, the menu button is shown by the narrow-screen rules */
+.top h1 {
+  flex: 0 1 auto;
+}
+.top .home {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  color: var(--color-text-strong);
+  text-decoration: none;
+}
+.top .nav-toggle {
+  display: none;
+}
 .shell {
   display: flex;
   align-items: flex-start;

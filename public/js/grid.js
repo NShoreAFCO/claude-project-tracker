@@ -54,7 +54,10 @@ export function filterProjects(projects, filter, kpiIds = null) {
 
 export function saveGridFilter(filter, storage) {
   try {
-    (storage ?? globalThis.localStorage)?.setItem(GRID_FILTER_KEY, JSON.stringify(Object.fromEntries(PERSISTED.map((k) => [k, filter[k]]))));
+    (storage ?? globalThis.localStorage)?.setItem(
+      GRID_FILTER_KEY,
+      JSON.stringify(Object.fromEntries(PERSISTED.map((k) => [k, filter[k]]))),
+    );
   } catch {
     // storage unavailable: the filter just is not remembered
   }
@@ -75,6 +78,9 @@ export function loadGridFilter(filter, storage) {
   return filter;
 }
 let hydrated = false;
+/** Removes the open tag popover's document listener; a rerender discards that popover, so it must run first. */
+let disposePop = null;
+const FOCUS = "data-focus";
 
 /** Red "Blocked" (with age), amber "Waiting (n)" and "Closure due" chips of a card (spec F3). */
 function flagChips(p) {
@@ -219,8 +225,14 @@ function categoryBlocks(shown, persons, filter, all = shown) {
     .filter((block) => block !== null);
 }
 
-export function renderGrid(main, state) {
+/**
+ * `restore` = { key, popOpen }: after a rebuild, focus the control whose data-focus equals `key` (and reopen the tag
+ * popover when the key belongs to it), so keyboard users keep their place.
+ */
+export function renderGrid(main, state, restore = null) {
   const { filter } = state;
+  disposePop?.();
+  disposePop = null;
   if (!hydrated) {
     hydrated = true;
     loadGridFilter(filter);
@@ -228,10 +240,11 @@ export function renderGrid(main, state) {
   const mode = completedMode(filter);
   const checked = checkedTags(filter);
   const change = (fn) => {
+    const key = document.activeElement?.getAttribute?.(FOCUS) || null;
     fn();
     if (filter.status && !statusOptions(completedMode(filter)).includes(filter.status)) filter.status = "";
     saveGridFilter(filter);
-    renderGrid(main, state);
+    renderGrid(main, state, key ? { key, popOpen: key.startsWith("tag-") } : null);
   };
   const category = filter.category || "";
   const tags = orderTags(
@@ -250,7 +263,7 @@ export function renderGrid(main, state) {
 
   const statusSel = h(
     "select",
-    { "aria-label": t("filterStatus"), on: { change: (e) => change(() => (filter.status = e.target.value)) } },
+    { "aria-label": t("filterStatus"), [FOCUS]: "status", on: { change: (e) => change(() => (filter.status = e.target.value)) } },
     h("option", { value: "" }, `${t("filterStatus")}: ${t("filterAll")}`),
     statusOptions(mode).map((s) => h("option", { value: s }, t(`status.${s}`))),
   );
@@ -262,7 +275,12 @@ export function renderGrid(main, state) {
     COMPLETED_MODES.map((m) =>
       h(
         "button.seg",
-        { type: "button", "aria-pressed": String(m === mode), on: { click: () => change(() => (filter.completed = m)) } },
+        {
+          type: "button",
+          [FOCUS]: `completed-${m}`,
+          "aria-pressed": String(m === mode),
+          on: { click: () => change(() => (filter.completed = m)) },
+        },
         t(`completed.${m}`),
       ),
     ),
@@ -275,7 +293,7 @@ export function renderGrid(main, state) {
   );
   const ownerSel = h(
     "select",
-    { "aria-label": t("filterOwner"), on: { change: (e) => change(() => (filter.owner = e.target.value)) } },
+    { "aria-label": t("filterOwner"), [FOCUS]: "owner", on: { change: (e) => change(() => (filter.owner = e.target.value)) } },
     h("option", { value: "" }, `${t("filterOwner")}: ${t("filterAll")}`),
     ownerIds.map((id) => h("option", { value: id }, persons.get(id) || id)),
     h("option", { value: "none" }, t("noOwner")),
@@ -284,7 +302,7 @@ export function renderGrid(main, state) {
 
   const tagBtn = h(
     "button.btn.secondary.tag-filter-btn",
-    { type: "button", "aria-haspopup": "true", "aria-expanded": "false" },
+    { type: "button", [FOCUS]: "tag-btn", "aria-haspopup": "true", "aria-expanded": "false" },
     t("filterTagsBtn", { n: checked.length }),
   );
   const tagPop = h("div.tag-pop", { hidden: true, role: "group", "aria-label": t("filterTag") });
@@ -296,15 +314,20 @@ export function renderGrid(main, state) {
     }
   };
   const closePop = () => {
+    disposePop = null;
     tagPop.hidden = true;
     tagBtn.setAttribute("aria-expanded", "false");
     document.removeEventListener("keydown", onKey, true);
   };
-  tagBtn.addEventListener("click", () => {
-    if (!tagPop.hidden) return closePop();
+  const openPop = () => {
     tagPop.hidden = false;
     tagBtn.setAttribute("aria-expanded", "true");
     document.addEventListener("keydown", onKey, true);
+    disposePop = () => document.removeEventListener("keydown", onKey, true);
+  };
+  tagBtn.addEventListener("click", () => {
+    if (!tagPop.hidden) return closePop();
+    openPop();
     tagPop.querySelector("input")?.focus();
   });
   clear(
@@ -312,7 +335,7 @@ export function renderGrid(main, state) {
     checked.length
       ? h(
           "button.btn.small.secondary.tag-clear",
-          { type: "button", on: { click: () => change(() => (filter.tags = [])) } },
+          { type: "button", [FOCUS]: "tag-clear", on: { click: () => change(() => (filter.tags = [])) } },
           t("filterTagsClear"),
         )
       : null,
@@ -322,6 +345,7 @@ export function renderGrid(main, state) {
         "label.tag-opt",
         h("input", {
           type: "checkbox",
+          [FOCUS]: `tag-opt:${x}`,
           checked: checked.includes(x),
           on: {
             change: (e) => change(() => (filter.tags = e.target.checked ? [...checked, x] : checked.filter((c) => c !== x))),
@@ -364,4 +388,12 @@ export function renderGrid(main, state) {
     ),
     shown.length ? categoryBlocks(shown, persons, filter, state.projects) : h("p.empty", t("noProjects")),
   );
+
+  if (restore?.key) {
+    if (restore.popOpen) openPop();
+    // a control that vanished (the clear button after clearing) falls back to the tag button
+    const target =
+      [...main.querySelectorAll(`[${FOCUS}]`)].find((el) => el.getAttribute(FOCUS) === restore.key) ?? (restore.popOpen ? tagBtn : null);
+    target?.focus();
+  }
 }
