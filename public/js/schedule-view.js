@@ -118,6 +118,13 @@ export function milestoneItem(ms, { today, titleOf, requiresText, unlocksText, a
   );
 }
 
+/** Keeps only the WPs in `shown` (a Set of ids; null = all) at every depth, so a hidden descendant never anchors a milestone. */
+export function pruneTree(list, shown) {
+  return list
+    .filter((w) => !shown || shown.has(w.id))
+    .map((w) => (w.children?.length ? { ...w, children: pruneTree(w.children, shown) } : w));
+}
+
 /**
  * Places milestone and gate rows in a work package tree (running context, D13).
  * `tree` is the list of top-level WPs as shown (children nested); `isOpen(wp)` tells whether a parent is unfolded.
@@ -145,7 +152,7 @@ export function placeMilestones(tree, milestones, isOpen = () => true) {
   const pick = (ids, last) => {
     const nodes = [...new Set((ids ?? []).map((id) => rep.get(id)).filter((x) => x !== undefined))];
     if (!nodes.length) return null;
-    return nodes.reduce((a, b) => ((order.get(b) > order.get(a)) === last ? b : a));
+    return nodes.reduce((a, b) => (order.get(b) > order.get(a) === last ? b : a));
   };
   for (const ms of milestones) {
     const first = ms.gate ? pick(ms.unlocks, false) : null;
