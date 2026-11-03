@@ -1,7 +1,8 @@
 // Portfolio overview (spec F9, release R4.2): summary counters, upcoming deadlines, my work packages.
 // Read-only. The SQL builders and the two WP lists were drafted by Copilot. Every query requires the
 // child AND its project to be live (a trashed project hides its children even if they kept deleted_at NULL).
-import type { ProjectRow, PersonRefOut } from "../types";
+import type { ProjectRow, PersonRefOut, WorkpackageRow } from "../types";
+import { effectiveCategories, isHuman } from "./categories";
 import { LIVE } from "./util";
 import { isStale, staleDaysFor } from "./activity";
 import { INSTANCE } from "../generated/instance";
@@ -177,7 +178,22 @@ type PortfolioWpRow = {
   owner_text: string | null;
   project_owner_person_id: string | null;
   project_owner_text: string | null;
+  human?: number | null;
+  category?: string | null;
+  parent_id?: string | null;
 };
+
+/** Keeps the rows whose effective `is_human` is true (own flag, else the effective category's default). */
+async function onlyHuman(db: D1Database, rows: PortfolioWpRow[]): Promise<PortfolioWpRow[]> {
+  const pids = [...new Set(rows.map((r) => r.project_id))];
+  if (!pids.length) return rows;
+  const { results } = await db
+    .prepare(`SELECT id, parent_id, category, human FROM workpackage WHERE deleted_at IS NULL AND project_id IN (SELECT value FROM json_each(?))`)
+    .bind(JSON.stringify(pids))
+    .all<WorkpackageRow>();
+  const cats = effectiveCategories(results);
+  return rows.filter((r) => isHuman({ human: r.human ?? null }, cats.get(r.id) ?? null));
+}
 
 async function toPortfolioWps(db: D1Database, rows: PortfolioWpRow[]): Promise<PortfolioWp[]> {
   const people = await personOuts(
@@ -255,6 +271,8 @@ export async function mineWorkpackages(
   opts: {
     assigned_only?: boolean;
     sort?: "project" | "in_progress" | "start" | "end";
+    human_only?: boolean;
+    project_id?: string;
   },
 ): Promise<PortfolioWp[]> {
   if (personId === null) {
@@ -297,7 +315,12 @@ export async function mineWorkpackages(
         )
       )`;
 
-  const params = opts.assigned_only ? [personId] : [personId, personId];
+  const params: (string | number)[] = opts.assigned_only ? [personId] : [personId, personId];
+  let projectFilter = "";
+  if (opts.project_id !== undefined) {
+    projectFilter = " AND w.project_id = ?";
+    params.push(opts.project_id);
+  }
 
   const result = await db
     .prepare(
@@ -315,18 +338,61 @@ export async function mineWorkpackages(
         w.owner_person_id,
         w.owner_text,
         p.owner_person_id AS project_owner_person_id,
-        p.owner_text AS project_owner_text
+        p.owner_text AS project_owner_text,
+        w.human,
+        w.category,
+        w.parent_id
       FROM workpackage w
       JOIN project p ON p.id = w.project_id
       WHERE ${LIVE("w")}
         AND ${LIVE("p")}
         AND w.status NOT IN ('done', 'dropped')
         AND ${ownership}
+        ${projectFilter}
       ORDER BY ${orderBy}
     `,
     )
     .bind(...params)
     .all<PortfolioWpRow>();
 
-  return toPortfolioWps(db, result.results);
+  return toPortfolioWps(db, opts.human_only ? await onlyHuman(db, result.results) : result.results);
+}
+
+/** Open (todo|doing|blocked|waiting) live leaf WPs of open projects, any owner, nearest end date first. */
+export async function openWorkpackages(
+  db: D1Database,
+  opts: { human_only?: boolean; project_id?: string; limit?: number },
+): Promise<PortfolioWp[]> {
+  const requested = opts.limit ?? 50;
+  const limit = Number.isFinite(requested) ? Math.max(1, Math.min(200, Math.trunc(requested))) : 50;
+  const params: (string | number)[] = [];
+  let projectFilter = "";
+  if (opts.project_id !== undefined) {
+    projectFilter = " AND w.project_id = ?";
+    params.push(opts.project_id);
+  }
+  // With human_only the filter needs the ancestors' categories, so it runs before the limit, in code.
+  const sqlLimit = opts.human_only ? "" : " LIMIT ?";
+  if (!opts.human_only) params.push(limit);
+  const result = await db
+    .prepare(
+      `
+      SELECT w.id, w.project_id, p.title AS project_title, w.code, w.title, w.status, w.progress, w.start_date, w.end_date,
+        w.owner_person_id, w.owner_text, p.owner_person_id AS project_owner_person_id, p.owner_text AS project_owner_text,
+        w.human, w.category, w.parent_id
+      FROM workpackage w
+      JOIN project p ON p.id = w.project_id
+      WHERE ${LIVE("w")}
+        AND ${LIVE("p")}
+        AND p.status NOT IN ('done', 'abandoned')
+        AND w.status IN ('todo', 'doing', 'blocked', 'waiting')
+        AND NOT EXISTS (SELECT 1 FROM workpackage c WHERE c.parent_id = w.id AND c.deleted_at IS NULL)
+        ${projectFilter}
+      ORDER BY w.end_date IS NULL, w.end_date, p.title, w.sort, w.id${sqlLimit}
+    `,
+    )
+    .bind(...params)
+    .all<PortfolioWpRow>();
+  const rows = opts.human_only ? (await onlyHuman(db, result.results)).slice(0, limit) : result.results;
+  return toPortfolioWps(db, rows);
 }

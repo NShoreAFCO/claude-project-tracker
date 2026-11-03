@@ -1,7 +1,7 @@
 import type { Caller, Env, Identity, OwnerKind } from "../types";
 import { createProject, getProjectDetail, listProjects, updateProject } from "../data/projects";
 import { listWorkpackagesOut, upsertWorkpackage } from "../data/workpackages";
-import { mineWorkpackages, summary, upcomingWorkpackages } from "../data/portfolio";
+import { mineWorkpackages, openWorkpackages, summary, upcomingWorkpackages } from "../data/portfolio";
 import { listMilestones, upsertMilestone } from "../data/milestones";
 import { listRisks, upsertRisk, type RiskType } from "../data/risks";
 import { createBaseline } from "../data/baselines";
@@ -23,6 +23,7 @@ import { search } from "../data/search";
 import { redactEvents } from "../data/internal";
 import { moveWorkpackages } from "../data/rules";
 import { ConflictError, ForbiddenError, ValidationError } from "../data/util";
+import { getDashboardPrefs, openGates, putDashboardPrefs } from "../data/mydash";
 import { handleUpload } from "./upload";
 import { userCaller } from "../auth/caller";
 import { REST_ACTIONS, requireAction, restAction, type Action } from "../auth/permissions";
@@ -160,8 +161,24 @@ route("GET", "/api/workpackages/mine", async ({ db, url, by }) =>
   mineWorkpackages(db, by.personId, {
     assigned_only: ["1", "true"].includes(url.searchParams.get("assigned_only") ?? ""),
     sort: (url.searchParams.get("sort") ?? undefined) as "project" | "in_progress" | "start" | "end" | undefined,
+    human_only: ["1", "true"].includes(url.searchParams.get("human_only") ?? ""),
+    project_id: url.searchParams.get("project_id") || undefined,
   }),
 );
+// my-dashboard data (QoL D5): for people with a dashboard login only, like /mine
+route("GET", "/api/workpackages/open", async ({ db, url, by }) => {
+  if (!by.personId) throw new ForbiddenError("this is for people with a dashboard login");
+  return openWorkpackages(db, {
+    human_only: ["1", "true"].includes(url.searchParams.get("human_only") ?? ""),
+    project_id: url.searchParams.get("project_id") || undefined,
+    limit: optNum(url.searchParams.get("limit")),
+  });
+});
+route("GET", "/api/gates/open", async ({ db, url, by }) => {
+  const scope = url.searchParams.get("scope") ?? "me";
+  if (scope !== "me" && scope !== "all") throw new ValidationError("scope must be me|all");
+  return openGates(db, by, { scope, project_id: url.searchParams.get("project_id") || undefined });
+});
 
 // ---- work packages
 route("GET", "/api/workpackages", async ({ db, url }) => listWorkpackagesOut(db, reqStr(url.searchParams.get("project_id"), "project_id")));
@@ -209,6 +226,8 @@ route("POST", "/api/persons", async ({ db, req, by }) => {
 });
 /** Own profile: only locale, display_name and phone. Registered before /:id so "me" is not taken as an id. */
 const OWN_PROFILE_FIELDS = ["locale", "display_name", "phone"];
+route("GET", "/api/persons/me/dashboard", async ({ db, by }) => getDashboardPrefs(db, by));
+route("PUT", "/api/persons/me/dashboard", async ({ db, req, by }) => putDashboardPrefs(db, (await readJson(req)).prefs, by));
 route("PATCH", "/api/persons/me", async ({ db, req, by }) => {
   const { expected_version, ...input } = await readJson(req);
   const other = Object.keys(input).filter((k) => !OWN_PROFILE_FIELDS.includes(k));
