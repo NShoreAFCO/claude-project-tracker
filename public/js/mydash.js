@@ -131,7 +131,7 @@ export async function renderMyDashboard(main, state) {
                   const next = new Set(prefs.active_projects);
                   if (event.target.checked) next.add(project.id);
                   else next.delete(project.id);
-                  await persistPrefs({ ...prefs, active_projects: [...next] }, true);
+                  await persistPrefs({ ...prefs, active_projects: [...next] });
                 },
               },
             }),
@@ -376,7 +376,7 @@ export async function renderMyDashboard(main, state) {
     await persistPrefs({ ...prefs, views });
   }
 
-  async function persistPrefs(next, reloadRows = false) {
+  async function persistPrefs(next) {
     const payload = {
       version: 1,
       views: next.views,
@@ -389,9 +389,14 @@ export async function renderMyDashboard(main, state) {
       renderViewsPanel();
       if (kind === "active_projects") {
         renderShell();
-        if (reloadRows) await loadRows();
+        await loadRows();
       }
     } catch (e) {
+      // rebuild the shell so checkboxes fall back to the acknowledged preferences
+      if (kind === "active_projects") {
+        renderShell();
+        await loadRows();
+      }
       renderViewsPanel(e);
     }
   }

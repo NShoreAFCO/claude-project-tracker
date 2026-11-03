@@ -147,8 +147,9 @@ export async function renderGantt(main, state) {
 
       if (level === "main") {
         if (depth === 0) {
-          const descendants = validOwn ? null : collectDescendantSpan(w);
-          const span = validOwn ? { start_date: w.start_date, end_date: w.end_date } : descendants || actualSpan(w);
+          const ownActual = validOwn ? null : actualSpan(w);
+          const descendants = validOwn || ownActual ? null : collectDescendantSpan(w);
+          const span = validOwn ? { start_date: w.start_date, end_date: w.end_date } : ownActual || descendants;
           if (span) {
             const row = {
               type: "wp",
@@ -522,7 +523,7 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
     const range = r.actualOnly
       ? `${fmtDate(w.actual_start || w.actual_end)} – ${w.actual_end ? fmtDate(w.actual_end) : t("ganttOngoing")}`
       : `${fmtDate(r.start_date)} – ${fmtDate(r.end_date)}`;
-    const title = () => s("title", {}, barTooltip(`${w.title}: ${range} · ${fmtPct(pct)}`, w, titleOf));
+    const title = () => s("title", {}, barTooltip(`${w.code ? `${w.code} ${w.title}` : w.title}: ${range} · ${fmtPct(pct)}`, w, titleOf));
     const colour = catVar("w", w.bar_category);
     const barY = y + 7;
     const barH = ROW - 14;
@@ -556,8 +557,19 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
       svg.append(bg);
     }
     if (parts.progress && parts.progress.to > parts.progress.from) svg.append(rect("bar-fill", parts.progress));
-    if (parts.solid) svg.append(rect("bar-fill bar-actual-solid", parts.solid));
-    if (parts.block) svg.append(rect("bar-fill bar-actual-block", parts.block));
+    for (const [key, cls] of [
+      ["solid", "bar-fill bar-actual-solid"],
+      ["block", "bar-fill bar-actual-block"],
+    ]) {
+      if (!parts[key]) continue;
+      const el = rect(cls, parts[key]);
+      if (showCritical && w.critical) {
+        el.classList.add("critical");
+        el.style.setProperty("stroke", "var(--status-blocked)");
+        el.style.setProperty("stroke-width", "3");
+      }
+      svg.append(el);
+    }
     if (parts.actual) svg.append(rect("bar-actual", parts.actual));
     if (parts.overdue) {
       const { from, to, closed } = parts.overdue;

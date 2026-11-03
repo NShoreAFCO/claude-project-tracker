@@ -54,6 +54,15 @@ describe("barParts", () => {
     expect(barParts({ actual_end: "2026-03-08" }, "2026-04-01")!.block).not.toBeNull();
   });
 
+  it("late start after the planned end: overdue starts at the actual start, no empty actual segment", () => {
+    const open = barParts({ ...plan, actual_start: "2026-03-14" }, "2026-03-20")!;
+    expect(open.actual).toBeNull();
+    expect(open.overdue).toEqual({ from: d("2026-03-14"), to: d("2026-03-21"), closed: false });
+    const done = barParts({ ...plan, status: "done", actual_start: "2026-03-14", actual_end: "2026-03-16" }, "2026-04-01")!;
+    expect(done.actual).toBeNull();
+    expect(done.overdue).toEqual({ from: d("2026-03-14"), to: d("2026-03-17"), closed: true });
+  });
+
   it("nothing: null, dates are not invented", () => {
     expect(barParts({ status: "todo" }, "2026-03-05")).toBeNull();
   });
@@ -107,5 +116,18 @@ describe("placeMarks", () => {
     const marks = placeMarks([rowA], e, topOf).placed.get(rowA);
     const byId = Object.fromEntries(marks.map((k: any) => [k.m.id, k.label]));
     expect(byId).toEqual({ "3": "M1", "1": "M2", "2": "M3" });
+  });
+
+  it("numbers independently per project and kind, equal dates keep input order", () => {
+    const q = { id: "q" };
+    const e = [
+      ms({ id: "1", due_date: "2026-05-01", workpackage_id: "a" }),
+      ms({ id: "2", due_date: "2026-05-01", workpackage_id: "a" }),
+      { m: { id: "3", title: "t", due_date: "2026-01-01", workpackage_id: "a" }, p: q },
+      ms({ id: "4", gate: 1, due_date: "2026-06-01", workpackage_id: "a" }),
+    ];
+    const marks = placeMarks([rowA], e, topOf).placed.get(rowA);
+    const byId = Object.fromEntries(marks.map((k: any) => [k.m.id, k.label]));
+    expect(byId).toEqual({ "1": "M1", "2": "M2", "3": "M1", "4": "G1" });
   });
 });

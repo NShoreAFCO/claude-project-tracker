@@ -129,9 +129,9 @@ export function barParts(wp, today) {
   if (hasStart && !hasPlan) {
     parts.solid = { from: actualFrom, to: actualTo };
   } else if (hasStart) {
-    parts.actual = { from: actualFrom, to: Math.max(actualFrom, Math.min(actualTo, planned.to)) };
+    if (actualFrom < planned.to) parts.actual = { from: actualFrom, to: Math.min(actualTo, planned.to) };
     if (actualTo > planned.to) {
-      parts.overdue = { from: planned.to, to: actualTo, closed: hasEnd };
+      parts.overdue = { from: Math.max(actualFrom, planned.to), to: actualTo, closed: hasEnd };
     }
   } else if (hasEnd) {
     const at = dayOf(wp.actual_end);
