@@ -627,4 +627,11 @@ export default {
   navLogout: "Log out",
   navMenu: "Menu",
   // /qol:t06
+  // qol:t10
+  ganttLegendPlanned: "Planned",
+  ganttLegendActual: "Actual",
+  ganttLegendProgress: "Progress",
+  ganttLegendOverdue: "Overdue",
+  ganttOngoing: "ongoing",
+  // /qol:t10
 };

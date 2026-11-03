@@ -632,4 +632,11 @@ export default {
   navLogout: "Abmelden",
   navMenu: "Menü",
   // /qol:t06
+  // qol:t10
+  ganttLegendPlanned: "Geplant",
+  ganttLegendActual: "Ist",
+  ganttLegendProgress: "Fortschritt",
+  ganttLegendOverdue: "Überfällig",
+  ganttOngoing: "laufend",
+  // /qol:t10
 };
