@@ -212,15 +212,18 @@ export async function renderGantt(main, state) {
     milestones,
     topOf,
   );
-  const drawable = (mk) => mk.kind === "gate" || mk.date;
+  // an undated gate is only drawn when it unlocks a WP (it sits at that WP's start); other undated gates are legend-only (G2 R5)
+  const drawable = (mk) => mk.date || (mk.kind === "gate" && (mk.m.unlocks || []).length > 0);
+  const legendOnly = [];
+  const skip = (mk) => (mk.kind === "gate" ? legendOnly.push(mk) : undated.push({ type: "milestone", m: mk.m, p: mk.p }));
   for (const [row, marks] of placed) {
-    for (const mk of marks.filter((x) => !drawable(x))) undated.push({ type: "milestone", m: mk.m, p: mk.p });
+    for (const mk of marks.filter((x) => !drawable(x))) skip(mk);
     placed.set(row, marks.filter(drawable));
   }
   const unplacedDated = [];
-  for (const mk of unplaced) (mk.date ? unplacedDated : undated).push(mk.date ? mk : { type: "milestone", m: mk.m, p: mk.p });
+  for (const mk of unplaced) (mk.date ? unplacedDated.push(mk) : skip(mk));
   if (unplacedDated.length) rows.push({ type: "unplaced", marks: unplacedDated });
-  const allMarks = [...[...placed.values()].flat(), ...unplacedDated].sort((a, b) =>
+  const allMarks = [...[...placed.values()].flat(), ...unplacedDated, ...legendOnly].sort((a, b) =>
     a.kind === b.kind ? Number(a.label.slice(1)) - Number(b.label.slice(1)) : a.kind === "milestone" ? -1 : 1,
   );
   const marksCtx = { placed };
@@ -356,7 +359,7 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
     for (let day = min + ((4 - (min % 7) + 7) % 7); day <= max; day += 7) {
       svg.append(
         s("line", { class: "grid-line", x1: x(day), x2: x(day), y1: TOP - 6, y2: height }),
-        s("text", { x: x(day) + 3, y: 18 }, dm.format(new Date(day * DAY))),
+        s("text", { x: x(day) + 3, y: 13 }, dm.format(new Date(day * DAY))),
       );
     }
   }
@@ -371,7 +374,7 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
     if (day < min || span <= 120) continue;
     svg.append(
       s("line", { class: "grid-line", x1: x(day), x2: x(day), y1: TOP - 6, y2: height }),
-      s("text", { x: x(day) + 4, y: 18 }, monthFmt().format(d)),
+      s("text", { x: x(day) + 4, y: 13 }, monthFmt().format(d)),
     );
   }
 
@@ -596,7 +599,7 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
   if (today >= min && today <= max) {
     svg.append(
       s("line", { class: "today", x1: x(today), x2: x(today), y1: TOP - 6, y2: height }),
-      s("text", { x: x(today) + 3, y: TOP - 8 }, t("ganttToday")),
+      s("text", { x: x(today) + 3, y: TOP - 4 }, t("ganttToday")),
     );
   }
 

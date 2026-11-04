@@ -26,6 +26,13 @@ Read "Breaking" and "Upgrade from v0.2.0" before you deploy. Details: `docs/SPEC
 - Version 0.3.0 (package and MCP server).
 - Milestone dependency arrows are gone from the Gantt chart.
 
+### Known issues
+
+- The Gantt chart is not adapted to narrow screens: on mobile only the left part of the timeline is visible.
+- Opening the mobile drawer does not move or trap keyboard focus.
+- A project whose category key is not in the instance categories does not appear in the grid.
+- Dependency arrows are not drawn through milestones and gates (by design in this release); work package dependencies draw arrows only when `depends_ids` are set.
+
 ### Breaking
 
 - **Gate lock.** A work package stays locked until its gate is reached (all `requires` work packages done or dropped) and has a go or go_with_conditions decision. A decision recorded before the gate is reached no longer unlocks early. Gates without any non-dropped `requires` work package never reach; their work packages stay locked until an override. `policy.gates.require_decision=false` is unchanged. Check the live data for gates with a go decision that are not yet reached before you deploy.

@@ -115,7 +115,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
                 },
               },
             },
-            open ? "▾ " : "▸ ",
+            h("span.fold-glyph", { "aria-hidden": "true" }, open ? "▾" : "▸"),
             title,
           ),
         ),
@@ -316,7 +316,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
                     },
                   },
                 },
-                open ? "▾" : "▸",
+                h("span.fold-glyph", { "aria-hidden": "true" }, open ? "▾" : "▸"),
               )
             : null,
           h("strong", w.code ? [h("span.wp-code", w.code), " ", w.title] : w.title),
