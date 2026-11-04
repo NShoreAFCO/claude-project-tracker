@@ -36,7 +36,10 @@ test("parseArgs: flags, required project, unknown argument", () => {
 
 test("startEvidence: notes are ignored, todo WPs have no evidence", () => {
   const events = [ev({ action: "note", ts: "2026-01-20T00:00:00Z" }), ev({ ts: "2026-02-10T09:00:00Z" })];
-  assert.deepEqual(startEvidence(wp(), events).map((e) => e.date), ["2026-02-10"]);
+  assert.deepEqual(
+    startEvidence(wp(), events).map((e) => e.date),
+    ["2026-02-10"],
+  );
   assert.deepEqual(startEvidence(wp({ status: "todo" }), events), []);
 });
 
@@ -46,19 +49,35 @@ test("startEvidence: status change to doing and progress above 0 count", () => {
     ev({ action: "update", ts: "2026-03-02T00:00:00Z", diff_json: JSON.stringify({ progress: [0, 0] }) }),
     ev({ action: "update", ts: "2026-03-03T00:00:00Z", diff_json: "not json" }),
   ];
-  assert.deepEqual(startEvidence(wp(), events).map((e) => e.date), ["2026-03-01"]);
+  assert.deepEqual(
+    startEvidence(wp(), events).map((e) => e.date),
+    ["2026-03-01"],
+  );
 });
 
 test("proposeWp: earliest progress event wins over every fallback", () => {
-  const p = proposeWp(wp(), ctx({ events: [ev({ ts: "2026-02-12T00:00:00Z" }), ev({ ts: "2026-02-10T00:00:00Z" })], opening: "2026-02-01", parentStart: "2026-01-15" }));
+  const p = proposeWp(
+    wp(),
+    ctx({
+      events: [ev({ ts: "2026-02-12T00:00:00Z" }), ev({ ts: "2026-02-10T00:00:00Z" })],
+      opening: "2026-02-01",
+      parentStart: "2026-01-15",
+    }),
+  );
   assert.deepEqual(p.start, { value: "2026-02-10", source: "progress event" });
 });
 
 test("proposeWp: fallback order gate, parent, project start, project created", () => {
-  assert.deepEqual(proposeWp(wp(), ctx({ opening: "2026-02-01", parentStart: "2026-01-15" })).start, { value: "2026-02-01", source: "gate opening" });
+  assert.deepEqual(proposeWp(wp(), ctx({ opening: "2026-02-01", parentStart: "2026-01-15" })).start, {
+    value: "2026-02-01",
+    source: "gate opening",
+  });
   assert.deepEqual(proposeWp(wp(), ctx({ parentStart: "2026-01-15" })).start, { value: "2026-01-15", source: "parent start" });
   assert.deepEqual(proposeWp(wp(), ctx()).start, { value: "2026-01-05", source: "project start" });
-  assert.deepEqual(proposeWp(wp(), ctx({ project: { created_at: "2026-01-02T10:00:00Z" } })).start, { value: "2026-01-02", source: "project created" });
+  assert.deepEqual(proposeWp(wp(), ctx({ project: { created_at: "2026-01-02T10:00:00Z" } })).start, {
+    value: "2026-01-02",
+    source: "project created",
+  });
   assert.equal(proposeWp(wp(), ctx({ project: {} })).start.value, null);
 });
 
@@ -78,7 +97,10 @@ test("proposeWp: end only for done WPs; done event, then git, then last progress
   const done = wp({ status: "done" });
   const doneEv = ev({ action: "update", ts: "2026-04-01T00:00:00Z", diff_json: JSON.stringify({ status: ["doing", "done"] }) });
   assert.deepEqual(proposeWp(done, ctx({ events: [ev(), doneEv] })).end, { value: "2026-04-01", source: "done event" });
-  assert.deepEqual(proposeWp(done, ctx({ events: [ev()], git: { first: "2026-02-01", last: "2026-03-30" } })).end, { value: "2026-03-30", source: "git last commit" });
+  assert.deepEqual(proposeWp(done, ctx({ events: [ev()], git: { first: "2026-02-01", last: "2026-03-30" } })).end, {
+    value: "2026-03-30",
+    source: "git last commit",
+  });
   assert.deepEqual(proposeWp(done, ctx({ events: [ev()] })).end, { value: "2026-02-10", source: "progress event" });
 });
 
@@ -102,7 +124,15 @@ test("mergeGit: first commit replaces fallbacks and later events, not earlier ev
 
 test("gateOpenings: reached and go decision, later of the two; hold does not open", () => {
   const ms = [
-    { gate: 1, reached_at: "2026-02-01T00:00:00Z", decisions: [{ decision: "hold", decided_at: "2026-02-02" }, { decision: "go", decided_at: "2026-02-10T00:00:00Z" }], unlocks: ["a"] },
+    {
+      gate: 1,
+      reached_at: "2026-02-01T00:00:00Z",
+      decisions: [
+        { decision: "hold", decided_at: "2026-02-02" },
+        { decision: "go", decided_at: "2026-02-10T00:00:00Z" },
+      ],
+      unlocks: ["a"],
+    },
     { gate: 1, reached_at: "2026-02-01", decisions: [{ decision: "stop", decided_at: "2026-02-02" }], unlocks: ["b"] },
     { gate: 0, reached_at: "2026-01-20", decisions: [], unlocks: ["c"] },
     { gate: 0, reached_at: null, decisions: [], unlocks: ["d"] },
@@ -143,7 +173,15 @@ test("branchDates / gitEvidence: range with base, origin fallback, several branc
   assert.deepEqual(branchDates("/r", { name: "f1" }, run), { first: "2026-02-01", last: "2026-02-05" });
   assert.deepEqual(calls.slice(0, 2), ["log --format=%as f1", "log --format=%as origin/f1"]);
   assert.equal(branchDates("/r", { name: "none" }, run), null);
-  const m = gitEvidence([{ workpackage_id: "w1", name: "f1" }, { workpackage_id: "w1", name: "f2", base: "main" }, { workpackage_id: null, name: "x" }], "/r", run);
+  const m = gitEvidence(
+    [
+      { workpackage_id: "w1", name: "f1" },
+      { workpackage_id: "w1", name: "f2", base: "main" },
+      { workpackage_id: null, name: "x" },
+    ],
+    "/r",
+    run,
+  );
   assert.deepEqual(m.get("w1"), { first: "2026-02-01", last: "2026-03-01" });
   assert.equal(m.size, 1);
 });
@@ -187,7 +225,11 @@ const detail = { project, workpackages: [wp({ id: "w1", code: "T1" })], mileston
 test("run: dry run writes nothing", async () => {
   const api = fakeApi(detail, [ev()]);
   const out = [];
-  const code = await run({ args: { project: "p1", apply: false }, client: makeClient({ url: "https://t.example", id: "I", secret: "S", fetchImpl: api.fetchImpl }), log: (l) => out.push(l) });
+  const code = await run({
+    args: { project: "p1", apply: false },
+    client: makeClient({ url: "https://t.example", id: "I", secret: "S", fetchImpl: api.fetchImpl }),
+    log: (l) => out.push(l),
+  });
   assert.equal(code, 0);
   assert.ok(!api.calls.some((c) => c.init.method === "PATCH"));
   assert.match(out.join("\n"), /1 of 1 work packages would change/);
@@ -196,7 +238,11 @@ test("run: dry run writes nothing", async () => {
 
 test("run --apply: PATCH with expected_version and only the changed fields", async () => {
   const api = fakeApi(detail, [ev()]);
-  const code = await run({ args: { project: "p1", apply: true }, client: makeClient({ url: "https://t.example", id: "I", secret: "S", fetchImpl: api.fetchImpl }), log: () => {} });
+  const code = await run({
+    args: { project: "p1", apply: true },
+    client: makeClient({ url: "https://t.example", id: "I", secret: "S", fetchImpl: api.fetchImpl }),
+    log: () => {},
+  });
   assert.equal(code, 0);
   const patch = api.calls.find((c) => c.init.method === "PATCH");
   assert.match(patch.url, /\/api\/workpackages\/w1$/);
@@ -209,13 +255,21 @@ test("run --apply: a failed write gives exit code 1; an unreadable tracker too",
   const client = makeClient({ url: "https://t.example", id: "I", secret: "S", fetchImpl: api.fetchImpl });
   assert.equal(await run({ args: { project: "p1", apply: true }, client, log: (l) => out.push(l) }), 1);
   assert.match(out.join("\n"), /FAILED T1/);
-  const broken = { get: async () => { throw new Error("down"); }, patch: async () => {} };
+  const broken = {
+    get: async () => {
+      throw new Error("down");
+    },
+    patch: async () => {},
+  };
   assert.equal(await run({ args: { project: "p1" }, client: broken, log: () => {} }), 1);
 });
 
 test("CLI: --help exits 0, missing project or credentials exits 2", () => {
   const sh = (args, env = {}) =>
-    spawnSync(process.execPath, [script, ...args], { encoding: "utf8", env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, ...env } });
+    spawnSync(process.execPath, [script, ...args], {
+      encoding: "utf8",
+      env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, ...env },
+    });
   const h = sh(["--help"]);
   assert.equal(h.status, 0);
   assert.match(h.stdout, /Usage: node scripts\/reconstruct-timeline\.mjs/);
@@ -223,4 +277,29 @@ test("CLI: --help exits 0, missing project or credentials exits 2", () => {
   const noEnv = sh(["--project", "p1"]);
   assert.equal(noEnv.status, 2);
   assert.match(noEnv.stderr, /TRACKER_URL/);
+});
+
+test("review FIX t23: existing start is never rewritten by clamping", () => {
+  const p = proposeWp(
+    wp({ status: "done", actual_start: "2026-03-01" }),
+    ctx({ events: [ev({ action: "update", ts: "2026-02-10T00:00:00Z", diff_json: JSON.stringify({ status: ["doing", "done"] }) })] }),
+  );
+  assert.equal(p.start.value, "2026-03-01");
+  assert.equal(p.end.value, null);
+  assert.deepEqual(changesFor(wp({ status: "done", actual_start: "2026-03-01" }), p), {});
+});
+
+test("review FIX t23: a status-only history gives the start (no fallback)", () => {
+  const events = [ev({ action: "update", ts: "2026-02-03T00:00:00Z", diff_json: JSON.stringify({ status: ["todo", "doing"] }) })];
+  assert.deepEqual(proposeWp(wp(), ctx({ events, opening: "2026-02-20" })).start, { value: "2026-02-03", source: "progress event" });
+});
+
+test("review FIX t23: an unreached gate opens nothing", () => {
+  const o = gateOpenings([{ gate: 1, reached_at: null, decisions: [{ decision: "go", decided_at: "2026-02-10" }], unlocks: ["a"] }]);
+  assert.equal(o.has("a"), false);
+});
+
+test("review FIX t23: fetchEvents fails when the page limit is reached", async () => {
+  const client = { get: async () => Array.from({ length: 200 }, (_, i) => ({ id: 1000 - i })) };
+  await assert.rejects(fetchEvents(client, "p", 2), /history incomplete/);
 });

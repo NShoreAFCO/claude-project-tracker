@@ -79,6 +79,7 @@ export function gateOpenings(milestones) {
   const by = new Map();
   for (const m of milestones) {
     let open = day(m.reached_at);
+    if (m.gate && !open) continue; // a gate that was never reached opened nothing (D6)
     if (m.gate) {
       const decisions = m.decisions ?? [];
       const go = decisions.filter((d) => ["go", "go_with_conditions"].includes(d.decision)).map((d) => day(d.decided_at));
@@ -114,8 +115,11 @@ export function mergeGit(proposal, git, wp) {
 }
 
 /** Start never later than end. */
-export function clamp({ start, end }) {
+export function clamp({ start, end }, wp = {}) {
   if (start.value && end.value && start.value > end.value) {
+    // never rewrite an existing start: keep the current end instead of a proposal that contradicts it
+    if (wp.actual_start)
+      return { start, end: { value: wp.actual_end ?? null, source: "current (proposed end is before the existing start)" } };
     return { start: { value: end.value, source: `${start.source}, clamped to end` }, end };
   }
   return { start, end };
@@ -124,7 +128,7 @@ export function clamp({ start, end }) {
 /** D21 (e) for one WP. ctx: { project, parentStart, opening, events, git }. Existing dates are kept. */
 export function proposeWp(wp, ctx) {
   const ev = startEvidence(wp, ctx.events);
-  const progress = ev.filter((e) => e.progress).map((e) => e.date);
+  const progress = ev.map((e) => e.date);
   let start = { value: wp.actual_start ?? null, source: "current" };
   if (!wp.actual_start) {
     const steps = [
@@ -146,7 +150,7 @@ export function proposeWp(wp, ctx) {
     else if (last) end = { value: last, source: "progress event" };
     else end = { value: null, source: "no evidence" };
   }
-  return clamp(ctx.git ? mergeGit({ start, end }, ctx.git, wp) : { start, end });
+  return clamp(ctx.git ? mergeGit({ start, end }, ctx.git, wp) : { start, end }, wp);
 }
 
 /** Fields to write: only those that are proposed and differ from the current value. */
@@ -184,7 +188,11 @@ export function formatTable(rows) {
     p.end.source,
   ]);
   const w = head.map((h, i) => Math.max(h.length, ...body.map((r) => r[i].length)));
-  const line = (r) => r.map((c, i) => c.padEnd(w[i])).join("  ").trimEnd();
+  const line = (r) =>
+    r
+      .map((c, i) => c.padEnd(w[i]))
+      .join("  ")
+      .trimEnd();
   return [line(head), line(w.map((n) => "-".repeat(n))), ...body.map(line)].join("\n");
 }
 
@@ -192,7 +200,12 @@ export function formatTable(rows) {
 
 export function gitDefaultRunner(repo, args) {
   try {
-    return execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true, timeout: 15000 });
+    return execFileSync("git", ["-C", repo, ...args], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+      timeout: 15000,
+    });
   } catch {
     return null;
   }
@@ -203,7 +216,10 @@ export function branchDates(repo, branch, run = gitDefaultRunner) {
   for (const ref of [branch.name, `origin/${branch.name}`]) {
     const range = branch.base ? `${branch.base}..${ref}` : ref;
     const out = run(repo, ["log", "--format=%as", range]);
-    const dates = (out ?? "").split(/\r?\n/).map((s) => s.trim()).filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s));
+    const dates = (out ?? "")
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s));
     if (dates.length) return { first: minDay(dates), last: maxDay(dates) };
   }
   return null;
@@ -246,16 +262,18 @@ export function makeClient({ url, id, secret, fetchImpl = fetch }) {
 }
 
 /** All events of a project, newest first, paged by before_id. */
-export async function fetchEvents(client, projectId) {
+export async function fetchEvents(client, projectId, maxPages = 500) {
   const all = [];
   let before;
-  for (let page = 0; page < 500; page++) {
-    const rows = await client.get(`/api/events?project_id=${encodeURIComponent(projectId)}&limit=200${before ? `&before_id=${before}` : ""}`);
+  for (let page = 0; page < maxPages; page++) {
+    const rows = await client.get(
+      `/api/events?project_id=${encodeURIComponent(projectId)}&limit=200${before ? `&before_id=${before}` : ""}`,
+    );
     all.push(...rows);
-    if (rows.length < 200) break;
+    if (rows.length < 200) return all;
     before = rows[rows.length - 1].id;
   }
-  return all;
+  throw new Error(`more than ${maxPages * 200} events: history incomplete, refusing to propose dates`);
 }
 
 export async function run({ args, client, gitRun = gitDefaultRunner, log = console.log }) {
@@ -268,7 +286,13 @@ export async function run({ args, client, gitRun = gitDefaultRunner, log = conso
     return 1;
   }
   const gitByWp = args.git ? gitEvidence(detail.branches ?? [], args.git, gitRun) : new Map();
-  const rows = buildProposals({ project: detail.project, workpackages: detail.workpackages, milestones: detail.milestones, events, gitByWp });
+  const rows = buildProposals({
+    project: detail.project,
+    workpackages: detail.workpackages,
+    milestones: detail.milestones,
+    events,
+    gitByWp,
+  });
   log(formatTable(rows));
   const todo = rows.filter((r) => Object.keys(r.changes).length);
   log(`\n${todo.length} of ${rows.length} work packages would change.`);
@@ -279,8 +303,16 @@ export async function run({ args, client, gitRun = gitDefaultRunner, log = conso
   let failed = 0;
   for (const { wp, changes } of todo) {
     try {
-      await client.patch(`/api/workpackages/${encodeURIComponent(wp.id)}`, { project_id: args.project, expected_version: wp.version, ...changes });
-      log(`updated ${wp.code ?? wp.id}: ${Object.entries(changes).map(([k, v]) => `${k}=${v}`).join(" ")}`);
+      await client.patch(`/api/workpackages/${encodeURIComponent(wp.id)}`, {
+        project_id: args.project,
+        expected_version: wp.version,
+        ...changes,
+      });
+      log(
+        `updated ${wp.code ?? wp.id}: ${Object.entries(changes)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(" ")}`,
+      );
     } catch (e) {
       failed++;
       log(`FAILED ${wp.code ?? wp.id}: ${e.message}`);

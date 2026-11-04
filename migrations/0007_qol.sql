@@ -22,14 +22,14 @@ UPDATE workpackage SET actual_end = (
 -- Backfill actual_start for WPs that have started (status not todo or dropped), in fallback order. Each
 -- step only fills what is still empty, so the steps are idempotent and a log before a gate opened wins.
 -- Notes (action 'note') never count as start. A todo WP gets no start: old progress events do not count for it.
--- Step 1: earliest event that started the WP (status doing or done, progress above 0, or a log_progress event).
+-- Step 1 (also for dropped WPs, D21 h: only a current todo is excluded): earliest event that started the WP (status doing or done, progress above 0, or a log_progress event).
 UPDATE workpackage SET actual_start = (
   SELECT substr(MIN(e.ts), 1, 10) FROM event e
   WHERE e.entity = 'workpackage' AND e.entity_id = workpackage.id AND e.action <> 'note'
     AND (e.action = 'progress'
       OR CASE WHEN json_valid(e.diff_json) THEN json_extract(e.diff_json, '$.status[1]') END IN ('doing', 'done')
       OR COALESCE(CASE WHEN json_valid(e.diff_json) THEN json_extract(e.diff_json, '$.progress[1]') END, 0) > 0)
-) WHERE actual_start IS NULL AND status IN ('doing', 'blocked', 'waiting', 'done');
+) WHERE actual_start IS NULL AND status <> 'todo';
 
 -- Step 2: opening of a gate that unlocks the WP: the later of the date the gate was reached and the date of
 -- its first opening decision (go, go_with_conditions); the earliest such date over the WP's gates.

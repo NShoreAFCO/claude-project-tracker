@@ -89,7 +89,9 @@ describe("migration 0007", () => {
     };
     const ev = (id: string, ts: string, action: string, diff: unknown) =>
       db
-        .prepare("INSERT INTO event (ts, actor, project_id, entity, entity_id, action, diff_json) VALUES (?, 'test', ?, 'workpackage', ?, ?, ?)")
+        .prepare(
+          "INSERT INTO event (ts, actor, project_id, entity, entity_id, action, diff_json) VALUES (?, 'test', ?, 'workpackage', ?, ?, ?)",
+        )
         .bind(ts, p.id, id, action, diff === null ? null : JSON.stringify(diff))
         .run();
     await mk("bf-both", "done");
@@ -120,7 +122,7 @@ describe("migration 0007", () => {
     expect(await get("bf-log")).toMatchObject({ actual_start: "2026-04-07", actual_end: null });
     expect(await get("bf-reopened")).toMatchObject({ actual_start: "2026-05-01", actual_end: "2026-05-09" });
     // No events: D21 (e) falls back to the project (created_at here, no start date).
-    expect(await get("bf-legacy")).toMatchObject({ actual_start: (await projCreated(p.id)), actual_end: null });
+    expect(await get("bf-legacy")).toMatchObject({ actual_start: await projCreated(p.id), actual_end: null });
     expect(await get("bf-todo")).toMatchObject({ actual_start: null, actual_end: null });
   });
 
@@ -136,15 +138,20 @@ describe("migration 0007", () => {
         .run();
     const ev = (id: string, ts: string, action: string, diff: unknown) =>
       db
-        .prepare("INSERT INTO event (ts, actor, project_id, entity, entity_id, action, diff_json) VALUES (?, 'test', ?, 'workpackage', ?, ?, ?)")
+        .prepare(
+          "INSERT INTO event (ts, actor, project_id, entity, entity_id, action, diff_json) VALUES (?, 'test', ?, 'workpackage', ?, ?, ?)",
+        )
         .bind(ts, p.id, id, action, diff === null ? null : JSON.stringify(diff))
         .run();
     const gate = async (mid: string, reached: string | null, goAt: string | null, wps: string[]) => {
       await db
-        .prepare("INSERT INTO milestone (id, project_id, title, gate, reached_at, created_at, updated_at) VALUES (?, ?, ?, 1, ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')")
+        .prepare(
+          "INSERT INTO milestone (id, project_id, title, gate, reached_at, created_at, updated_at) VALUES (?, ?, ?, 1, ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
         .bind(mid, p.id, mid, reached)
         .run();
-      for (const w of wps) await db.prepare("INSERT INTO milestone_link (milestone_id, workpackage_id, role) VALUES (?, ?, 'unlocks')").bind(mid, w).run();
+      for (const w of wps)
+        await db.prepare("INSERT INTO milestone_link (milestone_id, workpackage_id, role) VALUES (?, ?, 'unlocks')").bind(mid, w).run();
       if (goAt)
         await db
           .prepare(
@@ -177,7 +184,9 @@ describe("migration 0007", () => {
     const p2 = await proj();
     await db.prepare("UPDATE project SET start_date = '2026-01-15', created_at = '2026-01-20T08:00:00Z' WHERE id = ?").bind(p2.id).run();
     await db
-      .prepare("INSERT INTO workpackage (id, project_id, title, status, progress, created_at, updated_at) VALUES ('fc-pstart', ?, 'x', 'waiting', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')")
+      .prepare(
+        "INSERT INTO workpackage (id, project_id, title, status, progress, created_at, updated_at) VALUES ('fc-pstart', ?, 'x', 'waiting', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+      )
       .bind(p2.id)
       .run();
     // 5: project created_at.
@@ -185,6 +194,9 @@ describe("migration 0007", () => {
     // (h): todo WP with old progress events gets no start.
     await mk("fc-todo", "todo");
     await ev("fc-todo", "2026-02-03T09:00:00Z", "progress", null);
+    // (h): a dropped WP with progress history keeps its first event as start.
+    await mk("fc-dropped", "dropped");
+    await ev("fc-dropped", "2026-02-04T09:00:00Z", "progress", null);
     // Clamp: fallback start later than the end.
     await mk("fc-clamp", "done");
     await ev("fc-clamp", "2026-01-25T09:00:00Z", "update", { status: ["doing", "done"] });
@@ -197,7 +209,13 @@ describe("migration 0007", () => {
       for (const q of backfill) await db.prepare(q).run();
     };
     await run();
-    const snap = async () => (await db.prepare("SELECT id, actual_start, actual_end FROM workpackage WHERE project_id IN (?, ?) ORDER BY id").bind(p.id, p2.id).all()).results;
+    const snap = async () =>
+      (
+        await db
+          .prepare("SELECT id, actual_start, actual_end FROM workpackage WHERE project_id IN (?, ?) ORDER BY id")
+          .bind(p.id, p2.id)
+          .all()
+      ).results;
     const get = async (id: string) => (await row(id))!.actual_start;
     expect(await get("fc-event")).toBe("2026-02-05");
     expect(await get("fc-override")).toBe("2026-02-02");
@@ -208,6 +226,7 @@ describe("migration 0007", () => {
     expect(await get("fc-pstart")).toBe("2026-01-15");
     expect(await get("fc-created")).toBe("2026-01-20");
     expect(await get("fc-todo")).toBeNull();
+    expect(await get("fc-dropped")).toBe("2026-02-04");
     expect(await row("fc-clamp")).toMatchObject({ actual_start: "2026-01-25", actual_end: "2026-01-25" });
     // Force a later fallback than the end: end 2026-01-10 with the project created 2026-01-20.
     await db.prepare("UPDATE workpackage SET actual_start = NULL, actual_end = '2026-01-10' WHERE id = 'fc-created'").run();
@@ -321,8 +340,12 @@ describe("actual dates", () => {
     expect(await row(w.id)).toMatchObject({ status: "todo", actual_start: null, actual_end: "2026-01-05" });
     const events = async () => (await db.prepare("SELECT COUNT(*) AS n FROM event WHERE project_id = ?").bind(p.id).first<any>()).n;
     const n0 = await events();
-    await expect(logProgress(db, { project_id: p.id, workpackage_id: w.id, summary: "x", session_id: "s-inv" }, SYS)).rejects.toThrow(ValidationError);
-    await expect(logProgress(db, { project_id: p.id, workpackage_id: w.id, summary: "x", progress: 40 }, SYS)).rejects.toThrow(ValidationError);
+    await expect(logProgress(db, { project_id: p.id, workpackage_id: w.id, summary: "x", session_id: "s-inv" }, SYS)).rejects.toThrow(
+      ValidationError,
+    );
+    await expect(logProgress(db, { project_id: p.id, workpackage_id: w.id, summary: "x", progress: 40 }, SYS)).rejects.toThrow(
+      ValidationError,
+    );
     expect(await row(w.id)).toMatchObject({ status: "todo", actual_start: null, progress: 0, actual_end: "2026-01-05" });
     expect(await events()).toBe(n0);
     expect((await db.prepare("SELECT session_id FROM project WHERE id = ?").bind(p.id).first<any>()).session_id).not.toBe("s-inv");
@@ -330,13 +353,23 @@ describe("actual dates", () => {
 
   it("REST and MCP: actual_end round-trips; an invalid code is 400", async () => {
     const p = await proj();
-    const ok = await rest(EDITOR, "POST", "/api/workpackages", { project_id: p.id, title: "e", actual_start: "2026-03-01", actual_end: "2026-03-05" });
+    const ok = await rest(EDITOR, "POST", "/api/workpackages", {
+      project_id: p.id,
+      title: "e",
+      actual_start: "2026-03-01",
+      actual_end: "2026-03-05",
+    });
     expect(ok.status).toBe(201);
     const w = (await ok.json()) as any;
     expect(w).toMatchObject({ actual_end: "2026-03-05" });
     const list = (await (await rest(EDITOR, "GET", `/api/workpackages?project_id=${p.id}`)).json()) as any[];
     expect(list.find((x) => x.id === w.id)).toMatchObject({ actual_end: "2026-03-05" });
-    const m = await mcpTool(EDITOR, "upsert_workpackage", { project_id: p.id, title: "m", actual_start: "2026-03-01", actual_end: "2026-03-07" });
+    const m = await mcpTool(EDITOR, "upsert_workpackage", {
+      project_id: p.id,
+      title: "m",
+      actual_start: "2026-03-01",
+      actual_end: "2026-03-07",
+    });
     expect(m.isError).toBeFalsy();
     expect(m.body).toMatchObject({ actual_end: "2026-03-07" });
     const bad = await rest(EDITOR, "POST", "/api/workpackages", { project_id: p.id, title: "c", code: "bad code" });
@@ -409,7 +442,11 @@ describe("code", () => {
 
 describe("local_host", () => {
   it("round-trips for editors and is absent for viewers in list, detail, events and MCP", async () => {
-    const p = await createProject(db, { title: "QoL1 host", owner: "Owner", local_path: "C:/work/qol1", local_host: "  zz-host-name  " }, SYS);
+    const p = await createProject(
+      db,
+      { title: "QoL1 host", owner: "Owner", local_path: "C:/work/qol1", local_host: "  zz-host-name  " },
+      SYS,
+    );
     expect(p.local_host).toBe("zz-host-name");
 
     const eList = (await (await rest(EDITOR, "GET", "/api/projects")).json()) as any[];
