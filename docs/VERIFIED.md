@@ -11,13 +11,13 @@ Sources: the listed docs plus the installed `.d.ts` files. Where docs and types 
 | `@cloudflare/workers-oauth-provider` | 1.2.3 | |
 | `zod` | 4.6.7 | `agents` peer `^4` |
 | `jose` | 6.2.13 | JWT/JWKS verification (Access JWT + OIDC id_token) |
-| `wrangler` | 4.151.3 | |
-| `@cloudflare/vitest-plugin` | 1.4.6 | **renamed** from `@cloudflare/vitest-pool-workers` (0.23.0 deprecated); peer `vitest ^4.1 \|\| ^5` |
+| `wrangler` | 4.157.0 | 4.36.0–4.152.0 pull in a vulnerable `undici` via `miniflare`; peer `@cloudflare/workers-types ^5.20261103.1` |
+| `@cloudflare/vitest-plugin` | 1.5.1 | pins `wrangler` 4.157.0 and `zod` 4.6.6, keep both in step; **renamed** from `@cloudflare/vitest-pool-workers` (0.23.0 deprecated); peer `vitest ^4.1 \|\| ^5` |
 | `vitest` | 5.0.5 | |
 | `typescript` | 5.9.3 | 7.x (Go port) deliberately not used |
-| `@cloudflare/workers-types` | 5.20261019.1 | |
+| `@cloudflare/workers-types` | 5.20261103.1 | |
 
-CI runs on Node 24 (local development verified on v24.19.0, 2026-10-25).
+CI runs on Node 24 (local development verified on v24.19.0, 2026-10-25; dependency update v0.2.1 verified on v26.13.0, 2026-11-03).
 
 npm 11 blocks install scripts. `allowScripts` in `package.json` approves `esbuild` and `workerd`.
 

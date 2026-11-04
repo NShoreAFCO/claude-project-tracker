@@ -47,6 +47,16 @@ Read "Breaking" and "Upgrade from v0.2.0" before you deploy. Details: `docs/SPEC
 6. Reconnect MCP clients (new instructions and descriptions).
 7. Run `npm test` and `npm run check`, then deploy.
 
+## v0.2.1 — 2026-11-03
+
+Security update of dependencies. No code, schema or config changes; `npm audit` reports 0 vulnerabilities.
+
+- `wrangler` 4.151.3 → 4.157.0, `@cloudflare/vitest-plugin` 1.4.6 → 1.5.1, `@cloudflare/workers-types` 5.20261019.1 → 5.20261103.1. Fixes the `undici` advisories (via `miniflare`) and the nested `zod` advisory. These are development and deploy tools; the deployed Worker is not affected.
+- `body-parser` 2.3.0 → 2.4.0 (lockfile only, via `@modelcontextprotocol/sdk` → `express`). The Worker does not import `express`.
+- `allowScripts` approves `workerd@1.20261103.1`.
+
+Upgrade: `git fetch upstream && git merge upstream/main`, then `npm install`, `npm test`, `npm run check`, `npm run deploy`. No migration.
+
 ## v0.2.0 — 2026-10-26
 
 v0.2.0 bundles the conformity releases R1 to R5 below plus the fixes from the final review. Read "Breaking" and "Upgrade from v0.1.0" before you deploy.
