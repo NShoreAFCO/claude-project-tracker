@@ -33,9 +33,10 @@ UPDATE workpackage SET actual_start = (
 
 -- Step 2: opening of a gate that unlocks the WP. A gate opens only if its latest decision (by decided_at, then
 -- created_at, id) is go or go_with_conditions; a go superseded by a later hold or stop opens nothing. The opening
--- date is the later of reached_at and that go decision's date; the earliest such date over the WP's gates.
+-- date is the later of reached_at and that go decision's date; the latest such date over the WP's gates (D6: a WP is
+-- unlocked only once every gate that unlocks it is open; same rule as scripts/reconstruct-timeline.mjs).
 UPDATE workpackage SET actual_start = (
-  SELECT MIN(CASE WHEN substr(d.decided_at, 1, 10) > substr(m.reached_at, 1, 10) THEN substr(d.decided_at, 1, 10) ELSE substr(m.reached_at, 1, 10) END)
+  SELECT MAX(CASE WHEN substr(d.decided_at, 1, 10) > substr(m.reached_at, 1, 10) THEN substr(d.decided_at, 1, 10) ELSE substr(m.reached_at, 1, 10) END)
   FROM milestone_link l
   JOIN milestone m ON m.id = l.milestone_id AND m.gate = 1 AND m.deleted_at IS NULL AND m.reached_at IS NOT NULL
   JOIN decision d ON d.id = (SELECT d2.id FROM decision d2 WHERE d2.milestone_id = m.id

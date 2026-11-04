@@ -173,6 +173,10 @@ describe("migration 0007", () => {
     await gate("fc-g1", "2026-03-01T00:00:00Z", "2026-03-04T10:00:00Z", ["fc-gate-go"]);
     await mk("fc-gate-reached", "doing");
     await gate("fc-g2", "2026-03-09T00:00:00Z", "2026-03-02T10:00:00Z", ["fc-gate-reached"]);
+    // Two open gates unlock the WP: it opens with the later one (D6: all its gates must be open).
+    await mk("fc-two-gates", "doing");
+    await db.prepare("INSERT INTO milestone_link (milestone_id, workpackage_id, role) VALUES ('fc-g1', 'fc-two-gates', 'unlocks')").run();
+    await gate("fc-g5", "2026-03-12T00:00:00Z", "2026-03-10T10:00:00Z", ["fc-two-gates"]);
     // A gate with no go decision, or not reached, does not count: falls through to the parent.
     await mk("fc-gate-nogo", "doing");
     await gate("fc-g3", "2026-03-01T00:00:00Z", null, ["fc-gate-nogo"]);
@@ -243,6 +247,7 @@ describe("migration 0007", () => {
     expect(await get("fc-override")).toBe("2026-02-02");
     expect(await get("fc-gate-go")).toBe("2026-03-04");
     expect(await get("fc-gate-reached")).toBe("2026-03-09");
+    expect(await get("fc-two-gates")).toBe("2026-03-12");
     expect(await get("fc-gate-nogo")).toBe("2026-01-20");
     expect(await get("fc-child")).toBe("2026-02-11");
     expect(await get("fc-gate-hold")).toBe("2026-01-20");

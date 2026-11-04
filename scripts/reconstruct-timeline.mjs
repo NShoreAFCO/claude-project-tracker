@@ -17,13 +17,14 @@ Options
   --apply            Write the proposals through the REST API (only the fields that change)
   --help             Show this text
 
-Environment (same names as the session-end hook)
+Environment
   TRACKER_URL                 Base URL of the tracker
-  TRACKER_CF_CLIENT_ID        Access service token id
-  TRACKER_CF_CLIENT_SECRET    Access service token secret
+  TRACKER_ACCESS_TOKEN        Your own Access token (editor or above), from
+                              cloudflared access token -app=<TRACKER_URL>
+                              (service tokens are refused on /api/*: they only reach the hook route)
 
-Start order for a WP without actual_start: earliest progress event (notes do not count), then the
-opening of a gate that unlocks it, then the parent WP start, the project start date, the project
+Start order for a WP without actual_start (todo WPs get none; dropped WPs only from events or git):
+earliest progress event (notes do not count), then the opening of a gate that unlocks it, then the parent WP start, the project start date, the project
 creation date. Git commit dates, where present, replace the gate/parent/project fallbacks and
 any later event date. The end (done WPs only) is the date the WP was set to done, else the last
 commit, else the last progress event. The start is never later than the end.
@@ -78,15 +79,14 @@ export function startEvidence(wp, events) {
 export function gateOpenings(milestones) {
   const by = new Map();
   for (const m of milestones) {
-    let open = day(m.reached_at);
-    if (m.gate && !open) continue; // a gate that was never reached opened nothing (D6)
-    if (m.gate) {
-      // opens only if the latest decision is go; opening = later of reached and that go (a go superseded by hold/stop does not count)
-      let latest = null;
-      for (const d of m.decisions ?? []) if (!latest || String(d.decided_at ?? "") >= String(latest.decided_at ?? "")) latest = d;
-      if (latest && ["go", "go_with_conditions"].includes(latest.decision)) open = maxDay([open, day(latest.decided_at)]);
-      else open = null;
-    }
+    // D21 (e): only gates count (as in migration 0007); a gate that was never reached opened nothing (D6)
+    let open = m.gate ? day(m.reached_at) : null;
+    if (!open) continue;
+    // opens only if the latest decision is go; opening = later of reached and that go (a go superseded by hold/stop does not count)
+    let latest = null;
+    for (const d of m.decisions ?? []) if (!latest || String(d.decided_at ?? "") >= String(latest.decided_at ?? "")) latest = d;
+    if (latest && ["go", "go_with_conditions"].includes(latest.decision)) open = maxDay([open, day(latest.decided_at)]);
+    else open = null;
     if (!open) continue;
     for (const id of m.unlocks ?? []) by.set(id, maxDay([by.get(id), open]));
   }
@@ -105,7 +105,7 @@ export function flattenTree(nodes, out = []) {
 /** Merge git commit dates ({first,last}) into the event/fallback proposal. */
 export function mergeGit(proposal, git, wp) {
   const p = { start: { ...proposal.start }, end: { ...proposal.end } };
-  if (git?.first && !wp.actual_start) {
+  if (git?.first && !wp.actual_start && wp.status !== "todo") {
     const eventBased = p.start.source === "progress event";
     if (!p.start.value || !eventBased || git.first < p.start.value) p.start = { value: git.first, source: "git first commit" };
   }
@@ -126,19 +126,23 @@ export function clamp({ start, end }, wp = {}) {
   return { start, end };
 }
 
+const STARTED = ["doing", "blocked", "waiting", "done"];
+
 /** D21 (e) for one WP. ctx: { project, parentStart, opening, events, git }. Existing dates are kept. */
 export function proposeWp(wp, ctx) {
   const ev = startEvidence(wp, ctx.events);
   const progress = ev.map((e) => e.date);
   let start = { value: wp.actual_start ?? null, source: "current" };
-  if (!wp.actual_start) {
-    const steps = [
-      [minDay(progress), "progress event"],
-      [ctx.opening, "gate opening"],
-      [day(ctx.parentStart), "parent start"],
-      [day(ctx.project.start_date), "project start"],
-      [day(ctx.project.created_at), "project created"],
-    ];
+  // D21 (h), as migration 0007: a todo WP gets no start; a dropped WP only from its own events (no fallbacks)
+  if (!wp.actual_start && wp.status !== "todo") {
+    const steps = [[minDay(progress), "progress event"]];
+    if (STARTED.includes(wp.status))
+      steps.push(
+        [ctx.opening, "gate opening"],
+        [day(ctx.parentStart), "parent start"],
+        [day(ctx.project.start_date), "project start"],
+        [day(ctx.project.created_at), "project created"],
+      );
     const hit = steps.find(([v]) => v);
     start = hit ? { value: hit[0], source: hit[1] } : { value: null, source: "no evidence" };
   }
@@ -253,13 +257,15 @@ export function gitEvidence(branches, repo, run = gitDefaultRunner) {
 
 // ---- REST
 
-export function makeClient({ url, id, secret, fetchImpl = fetch }) {
+/** REST client with a person's Access token (cf-access-token): /api/* takes user identities only, no service tokens. */
+export function makeClient({ url, token, fetchImpl = fetch }) {
   const base = url.replace(/\/+$/, "");
   const call = async (method, path, body) => {
     const res = await fetchImpl(base + path, {
       method,
-      headers: { "CF-Access-Client-Id": id, "CF-Access-Client-Secret": secret, ...(body ? { "Content-Type": "application/json" } : {}) },
+      headers: { "cf-access-token": token, ...(body ? { "Content-Type": "application/json" } : {}) },
       body: body ? JSON.stringify(body) : undefined,
+      redirect: "manual", // an Access login redirect means the token is missing or expired
     });
     const text = await res.text();
     let data = null;
@@ -353,12 +359,12 @@ async function main() {
     console.log(HELP);
     return 0;
   }
-  const { TRACKER_URL, TRACKER_CF_CLIENT_ID, TRACKER_CF_CLIENT_SECRET } = process.env;
-  if (!TRACKER_URL || !TRACKER_CF_CLIENT_ID || !TRACKER_CF_CLIENT_SECRET) {
-    console.error("Set TRACKER_URL, TRACKER_CF_CLIENT_ID and TRACKER_CF_CLIENT_SECRET in the environment.");
+  const { TRACKER_URL, TRACKER_ACCESS_TOKEN } = process.env;
+  if (!TRACKER_URL || !TRACKER_ACCESS_TOKEN) {
+    console.error("Set TRACKER_URL and TRACKER_ACCESS_TOKEN (cloudflared access token -app=<TRACKER_URL>) in the environment.");
     return 2;
   }
-  const client = makeClient({ url: TRACKER_URL, id: TRACKER_CF_CLIENT_ID, secret: TRACKER_CF_CLIENT_SECRET });
+  const client = makeClient({ url: TRACKER_URL, token: TRACKER_ACCESS_TOKEN.trim() });
   return run({ args, client });
 }
 
