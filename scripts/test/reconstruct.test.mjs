@@ -142,12 +142,19 @@ test("gateOpenings: reached and go decision, later of the two; hold does not ope
   assert.equal(o.get("a"), "2026-02-10");
   assert.equal(o.has("e"), false);
   assert.equal(o.has("b"), false);
-  assert.equal(o.get("c"), "2026-01-20");
+  assert.equal(
+    gateOpenings([
+      { gate: 1, reached_at: "2026-02-01", decisions: [{ decision: "go", decided_at: "2026-02-03" }], unlocks: ["x"] },
+      { gate: 1, reached_at: "2026-02-08", decisions: [{ decision: "go", decided_at: "2026-02-05" }], unlocks: ["x"] },
+    ]).get("x"),
+    "2026-02-08",
+  ); // several gates: the latest opening (as migration 0007)
+  assert.equal(o.has("c"), false); // a reached milestone that is not a gate is no gate opening (D21 e, as migration 0007)
   assert.equal(o.has("d"), false);
 });
 
 test("buildProposals: child follows the parent's proposed start; only changed fields listed", () => {
-  const child = wp({ id: "c1", parent_id: "w1", title: "Child", status: "todo" });
+  const child = wp({ id: "c1", parent_id: "w1", title: "Child", status: "waiting" });
   const parent = wp({ children: [child] });
   const rows = buildProposals({ project, workpackages: [parent], milestones: [], events: [ev({ ts: "2026-02-10T00:00:00Z" })] });
   assert.equal(rows.length, 2);
@@ -200,14 +207,16 @@ function fakeApi(detail, events, { failPatch = false } = {}) {
   return { calls, fetchImpl };
 }
 
-test("makeClient sends the service-token headers and reports HTTP errors", async () => {
+test("makeClient sends the person's Access token (not service-token headers) and reports HTTP errors", async () => {
   const { calls, fetchImpl } = fakeApi({}, []);
-  const c = makeClient({ url: "https://t.example/", id: "ID", secret: "SEC", fetchImpl });
+  const c = makeClient({ url: "https://t.example/", token: "TOK", fetchImpl });
   await c.get("/api/x");
   assert.equal(calls[0].url, "https://t.example/api/x");
-  assert.equal(calls[0].init.headers["CF-Access-Client-Id"], "ID");
+  assert.equal(calls[0].init.headers["cf-access-token"], "TOK");
+  assert.equal(calls[0].init.headers["CF-Access-Client-Id"], undefined);
+  assert.equal(calls[0].init.redirect, "manual");
   const bad = fakeApi({}, [], { failPatch: true });
-  const c2 = makeClient({ url: "https://t.example", id: "I", secret: "S", fetchImpl: bad.fetchImpl });
+  const c2 = makeClient({ url: "https://t.example", token: "T", fetchImpl: bad.fetchImpl });
   await assert.rejects(c2.patch("/api/y", {}), /409 version conflict/);
 });
 
@@ -228,7 +237,7 @@ test("run: dry run writes nothing", async () => {
   const out = [];
   const code = await run({
     args: { project: "p1", apply: false },
-    client: makeClient({ url: "https://t.example", id: "I", secret: "S", fetchImpl: api.fetchImpl }),
+    client: makeClient({ url: "https://t.example", token: "T", fetchImpl: api.fetchImpl }),
     log: (l) => out.push(l),
   });
   assert.equal(code, 0);
@@ -241,7 +250,7 @@ test("run --apply: PATCH with expected_version and only the changed fields", asy
   const api = fakeApi(detail, [ev()]);
   const code = await run({
     args: { project: "p1", apply: true },
-    client: makeClient({ url: "https://t.example", id: "I", secret: "S", fetchImpl: api.fetchImpl }),
+    client: makeClient({ url: "https://t.example", token: "T", fetchImpl: api.fetchImpl }),
     log: () => {},
   });
   assert.equal(code, 0);
@@ -253,7 +262,7 @@ test("run --apply: PATCH with expected_version and only the changed fields", asy
 test("run --apply: a failed write gives exit code 1; an unreadable tracker too", async () => {
   const api = fakeApi(detail, [ev()], { failPatch: true });
   const out = [];
-  const client = makeClient({ url: "https://t.example", id: "I", secret: "S", fetchImpl: api.fetchImpl });
+  const client = makeClient({ url: "https://t.example", token: "T", fetchImpl: api.fetchImpl });
   assert.equal(await run({ args: { project: "p1", apply: true }, client, log: (l) => out.push(l) }), 1);
   assert.match(out.join("\n"), /FAILED T1/);
   const broken = {
@@ -360,7 +369,7 @@ test("review FIX-fix1: --git with a bad repo path is an error, exit 2", async ()
   const out = [];
   const code = await run({
     args: { project: "p1", apply: true, git: "/nonexistent" },
-    client: makeClient({ url: "https://t.example", id: "I", secret: "S", fetchImpl: api.fetchImpl }),
+    client: makeClient({ url: "https://t.example", token: "T", fetchImpl: api.fetchImpl }),
     log: (l) => out.push(l),
   });
   assert.equal(code, 2);
@@ -368,8 +377,25 @@ test("review FIX-fix1: --git with a bad repo path is an error, exit 2", async ()
   assert.ok(!api.calls.some((c) => c.init.method === "PATCH"));
   const real = await run({
     args: { project: "p1", apply: false, git: join(dirname(script), "no-such-dir-xyz") },
-    client: makeClient({ url: "https://t.example", id: "I", secret: "S", fetchImpl: api.fetchImpl }),
+    client: makeClient({ url: "https://t.example", token: "T", fetchImpl: api.fetchImpl }),
     log: () => {},
   });
   assert.equal(real, 2);
+});
+
+test("T24: a todo WP gets no proposal (no fallback, no git); a dropped WP only from its own evidence", () => {
+  const opening = "2026-02-01";
+  const todo = proposeWp(wp({ status: "todo" }), ctx({ opening, events: [ev()], git: { first: "2026-01-20", last: "2026-01-25" } }));
+  assert.equal(todo.start.value, null);
+  assert.deepEqual(changesFor(wp({ status: "todo" }), todo), {});
+  assert.equal(proposeWp(wp({ status: "dropped" }), ctx({ opening, parentStart: "2026-01-15" })).start.value, null);
+  assert.equal(proposeWp(wp({ status: "dropped" }), ctx({ events: [ev()] })).start.value, "2026-02-10");
+  assert.equal(proposeWp(wp({ status: "dropped" }), ctx({ git: { first: "2026-01-20" } })).start.value, "2026-01-20");
+  // a todo parent gets nothing, so its started child looks further up
+  const gc = wp({ id: "gc", parent_id: "c", status: "doing" });
+  const c = wp({ id: "c", parent_id: "root", status: "todo", children: [gc] });
+  const root = wp({ id: "root", status: "doing", children: [c] });
+  const rows = buildProposals({ project, workpackages: [root], milestones: [], events: [] });
+  assert.deepEqual(rows.find((r) => r.wp.id === "c").changes, {});
+  assert.equal(rows.find((r) => r.wp.id === "gc").proposal.start.value, "2026-01-05");
 });

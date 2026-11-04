@@ -4,7 +4,7 @@
 // Reads the hook JSON from stdin (session_id, cwd, reason), collects git facts for cwd, attaches the host name and <cwd>/session.md
 // and <cwd>/HANDOFF.md (each ≤ 256 KB) and POSTs to ${TRACKER_URL}/api/hooks/claude-code with the Access service-token headers.
 // SessionEnd hooks share a ~1.5 s budget, so every step has a deadline. Set TRACKER_DEBUG=1 to see errors on stderr.
-// A 409 GATE_LOCKED / WP_DONE is retried once as a note. A log the server could not take (network error, 5xx) is kept
+// A 409 GATE_LOCKED / WP_DONE is retried once as a note. A log the server could not take (network error, 5xx, 429) is kept
 // in a pending file in the hook's state folder (TRACKER_HOOK_STATE_DIR, default ~/.claude/hooks) and resent on a later run.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -58,7 +58,8 @@ function gitFacts(cwd) {
   if (!rp) return {};
   const [branch, gitDir, commonDir] = rp.split(/\r?\n/);
   const worktree = !!gitDir && !!commonDir && resolve(gitDir).toLowerCase() !== resolve(cwd, commonDir).toLowerCase();
-  const repo_url = git(cwd, ["config", "--get", "remote.origin.url"]);
+  // Credentials in an https remote (https://user:token@host/...) are never sent or kept in the pending file.
+  const repo_url = git(cwd, ["config", "--get", "remote.origin.url"])?.replace(/^(https?:\/\/)[^@/]*@/i, "$1");
   const last_commit = git(cwd, ["log", "-1", "--format=%h %s"]);
   // "origin/main" → "main"; absent without a remote (the server then treats main/master as default)
   const originHead = repo_url ? git(cwd, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]) : null;
@@ -120,8 +121,9 @@ async function main() {
   let res = await post(base, headers, body);
   // A log the rules refuse (gate-locked or done work package) is kept as a note instead.
   if (res.status === 409 && ["GATE_LOCKED", "WP_DONE"].includes(res.code)) res = await post(base, headers, { ...body, note: true });
-  // Not taken (network error, timeout, 5xx): keep it for a later run, without the files (they are re-read then).
-  if (!res.ok && (res.status === 0 || res.status >= 500)) {
+  // Not taken for now (network error, timeout, 5xx, rate limit, Access refused the token): keep it for a later
+  // run, without the files (they are re-read then). Only a refusal by the tracker's rules (other 4xx) drops a log.
+  if (!res.ok && transient(res.status)) {
     const { context_files, ...entry } = body;
     pending.push({ ...entry, note: true });
     return writePending(pending);
@@ -132,10 +134,13 @@ async function main() {
   while (res.ok && pending.length && BUDGET_MS - elapsed() >= RESEND_MIN_MS) {
     const { session_id, ...old } = pending[0];
     res = await post(base, headers, { ...old, note: true });
-    if (res.ok || (res.status > 0 && res.status < 500)) (pending.shift(), (changed = true)); // 4xx: will never be taken
+    if (res.ok || !transient(res.status)) (pending.shift(), (changed = true)); // other 4xx: will never be taken
   }
   if (changed) writePending(pending);
 }
+
+/** No response, a redirect (Access login), 401/403 (token refused), 408, 429 or 5xx: worth sending again later. */
+const transient = (status) => status === 0 || (status >= 300 && status < 400) || [401, 403, 408, 429].includes(status) || status >= 500;
 
 /** POST one hook body → {ok, status (0 = no response), code (409 current.code)}. */
 async function post(base, headers, body) {

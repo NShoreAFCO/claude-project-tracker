@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -242,4 +242,24 @@ test("hook keeps a log the server did not take (5xx, unreachable) and resends it
   } finally {
     up.close();
   }
+});
+
+test("T24: a 429 or an Access redirect keeps the log; credentials in an https remote are never sent or kept", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "hookcwd-"));
+  execFileSync("git", ["init", "-q", dir]);
+  execFileSync("git", ["-C", dir, "remote", "add", "origin", "https://someone:tok-123@example.com/o/r.git"]);
+  const stateDir = mkdtempSync(join(tmpdir(), "hookstate-"));
+  const file = join(stateDir, "tracker-pending.json");
+  const busy = await scripted([[429, { error: "rate_limited" }], [302, {}]]);
+  try {
+    assert.equal(await runHook(dir, busy.url, stateDir, "s-429"), 0);
+    assert.equal(await runHook(dir, busy.url, stateDir, "s-302"), 0);
+  } finally {
+    busy.close();
+  }
+  // (git has a 300 ms budget in the hook; under heavy load it may give no facts, then only the spool part is checked)
+  for (const p of busy.posts) if (p.repo_url) assert.equal(p.repo_url, "https://example.com/o/r.git");
+  const text = readFileSync(file, "utf8");
+  assert.doesNotMatch(text, /tok-123/);
+  assert.deepEqual(JSON.parse(text).map((e) => e.session_id), ["s-429", "s-302"]);
 });
