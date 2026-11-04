@@ -4,9 +4,11 @@
 // Reads the hook JSON from stdin (session_id, cwd, reason), collects git facts for cwd, attaches the host name and <cwd>/session.md
 // and <cwd>/HANDOFF.md (each ≤ 256 KB) and POSTs to ${TRACKER_URL}/api/hooks/claude-code with the Access service-token headers.
 // SessionEnd hooks share a ~1.5 s budget, so every step has a deadline. Set TRACKER_DEBUG=1 to see errors on stderr.
+// A 409 GATE_LOCKED / WP_DONE is retried once as a note. A log the server could not take (network error, 5xx) is kept
+// in a pending file in the hook's state folder (TRACKER_HOOK_STATE_DIR, default ~/.claude/hooks) and resent on a later run.
 import { execFileSync } from "node:child_process";
-import { readFileSync, statSync } from "node:fs";
-import { hostname } from "node:os";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { homedir, hostname } from "node:os";
 import { join, resolve } from "node:path";
 
 const started = Date.now();
@@ -19,6 +21,8 @@ const GIT_TIMEOUT_MS = 300;
 const GIT_PHASE_MS = 600; // no new git call after this point
 const FETCH_MAX_MS = 800;
 const MAX_CONTEXT_BYTES = 256 * 1024;
+const PENDING_MAX = 50; // oldest entries beyond this are dropped
+const RESEND_MIN_MS = 200; // resend a pending entry only with at least this much budget left
 
 function readStdin(timeoutMs) {
   return new Promise((done) => {
@@ -110,21 +114,72 @@ async function main() {
   const files = ["session.md", "HANDOFF.md"].map((n) => contextFile(cwd, n)).filter(Boolean);
   if (files.length) body.context_files = files;
 
-  const timeout = Math.max(100, Math.min(FETCH_MAX_MS, BUDGET_MS - elapsed()));
-  const res = await fetch(`${TRACKER_URL.replace(/\/+$/, "")}/api/hooks/claude-code`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "CF-Access-Client-Id": TRACKER_CF_CLIENT_ID,
-      "CF-Access-Client-Secret": TRACKER_CF_CLIENT_SECRET,
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(timeout),
-    redirect: "manual", // an Access login redirect means the service token was rejected
-  });
-  log("POST", res.status, `${elapsed()} ms`);
-  const text = await res.text().catch(() => ""); // drain the body so the socket is released before exit
-  if (debug) log(text);
+  const base = TRACKER_URL.replace(/\/+$/, "");
+  const headers = { "CF-Access-Client-Id": TRACKER_CF_CLIENT_ID, "CF-Access-Client-Secret": TRACKER_CF_CLIENT_SECRET };
+  const pending = readPending();
+  let res = await post(base, headers, body);
+  // A log the rules refuse (gate-locked or done work package) is kept as a note instead.
+  if (res.status === 409 && ["GATE_LOCKED", "WP_DONE"].includes(res.code)) res = await post(base, headers, { ...body, note: true });
+  // Not taken (network error, timeout, 5xx): keep it for a later run, without the files (they are re-read then).
+  if (!res.ok && (res.status === 0 || res.status >= 500)) {
+    const { context_files, ...entry } = body;
+    pending.push({ ...entry, note: true });
+    return writePending(pending);
+  }
+  // Server reachable: resend the oldest pending entry while the budget allows. Without session_id, so the
+  // project keeps the current session; as a note, so it changes no work package.
+  let changed = false;
+  while (res.ok && pending.length && BUDGET_MS - elapsed() >= RESEND_MIN_MS) {
+    const { session_id, ...old } = pending[0];
+    res = await post(base, headers, { ...old, note: true });
+    if (res.ok || (res.status > 0 && res.status < 500)) (pending.shift(), (changed = true)); // 4xx: will never be taken
+  }
+  if (changed) writePending(pending);
+}
+
+/** POST one hook body → {ok, status (0 = no response), code (409 current.code)}. */
+async function post(base, headers, body) {
+  try {
+    const res = await fetch(`${base}/api/hooks/claude-code`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(Math.max(100, Math.min(FETCH_MAX_MS, BUDGET_MS - elapsed()))),
+      redirect: "manual", // an Access login redirect means the service token was rejected
+    });
+    log("POST", res.status, `${elapsed()} ms`);
+    const text = await res.text().catch(() => ""); // drain the body so the socket is released before exit
+    if (debug) log(text);
+    let code = null;
+    try {
+      code = JSON.parse(text)?.current?.code ?? null;
+    } catch {}
+    return { ok: res.ok, status: res.status, code };
+  } catch (e) {
+    log("POST failed:", e?.name || "", e?.message || e);
+    return { ok: false, status: 0, code: null };
+  }
+}
+
+function pendingFile() {
+  return join(process.env.TRACKER_HOOK_STATE_DIR || join(homedir(), ".claude", "hooks"), "tracker-pending.json");
+}
+function readPending() {
+  try {
+    const list = JSON.parse(readFileSync(pendingFile(), "utf8"));
+    return Array.isArray(list) ? list.filter((e) => e && typeof e === "object") : [];
+  } catch {
+    return [];
+  }
+}
+function writePending(list) {
+  try {
+    const file = pendingFile();
+    mkdirSync(join(file, ".."), { recursive: true });
+    writeFileSync(file, JSON.stringify(list.slice(-PENDING_MAX)));
+  } catch (e) {
+    log("pending file not written:", e?.message || e);
+  }
 }
 
 // No process.exit() on the normal path: on Windows, exiting while undici is still closing its TLS socket aborts
