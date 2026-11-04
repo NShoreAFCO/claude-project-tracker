@@ -193,6 +193,8 @@ export async function logProgress(
   const signOffGuarded = mayComplete && !!verifier && !canDo(by, "verify_sign_off");
   const verifyGuard =
     !wp || !mayComplete ? [] : !verifier ? [verificationGuardStmt(db, wp.id)] : signOffGuarded ? [signOffGuardStmt(db, wp.id)] : [];
+  // A done WP with an actual end but no start: use the end as the start, so end >= start holds.
+  const startDay = wp?.status === "done" && wp.actual_end ? wp.actual_end : today;
   if (wp && progress !== null) {
     const verify = "? >= 100 AND status != 'done' AND verification != 'none' AND verified_by IS NULL";
     stmts.push(
@@ -204,7 +206,7 @@ export async function logProgress(
             actual_start = COALESCE(actual_start, ?), actual_end = CASE WHEN ? >= 100 AND status != 'done' THEN ? ELSE actual_end END,
             version = version + 1, updated_at = ?${act.sql} WHERE id = ?`,
         )
-        .bind(progress, progress, progress, progress, progress, verifier, progress, ts, today, progress, today, ts, ...act.params, wp.id),
+        .bind(progress, progress, progress, progress, progress, verifier, progress, ts, startDay, progress, today, ts, ...act.params, wp.id),
     );
   } else if (wp && wp.status === "todo" && !autoStartLocked) {
     stmts.push(
@@ -219,7 +221,7 @@ export async function logProgress(
     stmts.push(
       db
         .prepare(`UPDATE workpackage SET actual_start = COALESCE(actual_start, ?), version = version + 1, updated_at = ?${act.sql} WHERE id = ?`)
-        .bind(today, ts, ...act.params, wp.id),
+        .bind(startDay, ts, ...act.params, wp.id),
     );
   }
   if (wp && effort !== null) stmts.push(effortStmt(db, wp.id, effort, ts, by));
@@ -228,11 +230,11 @@ export async function logProgress(
   if (wp && progress !== null) diff.progress = [wp.progress, progress];
   if (wp && nextStatus !== wp.status) diff.status = [wp.status, nextStatus];
   // Spec D2: the first log (or progress) on a WP is its actual start; reaching 100 is its actual end.
-  if (wp && !wp.actual_start && (progress !== null || nextStatus === "doing" || (wp.status !== "todo" && wp.status !== "dropped"))) diff.actual_start = [null, today];
+  if (wp && !wp.actual_start && (progress !== null || nextStatus === "doing" || (wp.status !== "todo" && wp.status !== "dropped"))) diff.actual_start = [null, startDay];
   if (wp && progress !== null && progress >= 100 && wp.status !== "done") diff.actual_end = [wp.actual_end ?? null, today];
   // The automatic dates must leave a valid pair (end not before start); refuse before anything is written.
   if (wp && (diff.actual_start || diff.actual_end)) {
-    const finalStart = diff.actual_start ? today : wp.actual_start;
+    const finalStart = diff.actual_start ? startDay : wp.actual_start;
     const finalEnd = diff.actual_end ? today : wp.actual_end;
     if (finalStart && finalEnd && finalEnd < finalStart) throw new ValidationError("actual_end cannot be before actual_start");
   }

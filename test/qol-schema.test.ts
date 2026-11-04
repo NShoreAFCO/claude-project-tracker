@@ -145,6 +145,15 @@ describe("actual dates", () => {
     expect(restarted.actual_start).toBe("2026-01-05");
   });
 
+  it("a plain log on a done WP with actual_end and no actual_start uses the end as the start", async () => {
+    const p = await proj();
+    const w = await upsertWorkpackage(db, p.id, { title: "legacy done", status: "done" }, SYS);
+    await db.prepare("UPDATE workpackage SET actual_start = NULL, actual_end = '2026-01-05' WHERE id = ?").bind(w.id).run();
+    const r = await logProgress(db, { project_id: p.id, workpackage_id: w.id, summary: "note" }, SYS);
+    expect(r.workpackage!.actual_start).toBe("2026-01-05");
+    expect(r.workpackage!.actual_end).toBe("2026-01-05");
+  });
+
   it("progress above 0 starts a WP; creating done sets both", async () => {
     const p = await proj();
     const w = await upsertWorkpackage(db, p.id, { title: "progress path", progress: 10 }, SYS);
