@@ -1,6 +1,6 @@
 // My-dashboard data (QoL D4/D5): per-person dashboard prefs and the open gates list.
 import type { Caller, PersonRefOut } from "../types";
-import { gateClosedSql, latestDecisionSql } from "./gates";
+import { OPENING_DECISIONS, latestDecisionSql } from "./gates";
 import { personOuts, personRefOut } from "./persons";
 import { eventStmt, ForbiddenError, LIVE, now, utf8Bytes, ValidationError } from "./util";
 
@@ -95,7 +95,10 @@ export type OpenGate = {
   decision_maker: PersonRefOut | null;
 };
 
-/** Closed live gates of open projects; scope=me limits to projects where the caller is the decision maker. */
+/**
+ * Live gates of open projects still awaiting a go / go_with_conditions decision (spec D5); a gate decided go
+ * before it is reached needs no decision, so it is not listed. scope=me: the caller is the decision maker.
+ */
 export async function openGates(db: D1Database, by: Caller, opts: { scope: "me" | "all"; project_id?: string }): Promise<OpenGate[]> {
   const me = needPerson(by);
   const params: string[] = [];
@@ -116,7 +119,7 @@ export async function openGates(db: D1Database, by: Caller, opts: { scope: "me" 
        FROM milestone m
        JOIN project p ON p.id = m.project_id
        LEFT JOIN workpackage w ON w.id = m.workpackage_id AND w.deleted_at IS NULL
-       WHERE ${gateClosedSql("m")} AND ${LIVE("p")} AND p.status NOT IN ('done', 'abandoned')${extra}
+       WHERE m.gate = 1 AND ${LIVE("m")} AND COALESCE(${latestDecisionSql("m")}, '') NOT IN (${OPENING_DECISIONS.map((d) => `'${d}'`).join(", ")}) AND ${LIVE("p")} AND p.status NOT IN ('done', 'abandoned')${extra}
        ORDER BY m.due_date IS NULL, m.due_date, p.title, m.sort, m.id`,
     )
     .bind(...params)
