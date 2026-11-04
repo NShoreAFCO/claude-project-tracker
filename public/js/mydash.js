@@ -268,7 +268,7 @@ export async function renderMyDashboard(main, state) {
               if (!name || !name.trim()) return;
               const view = {
                 id: makeViewId(),
-                name: name.trim(),
+                name: name.trim().slice(0, 80),
                 kind,
                 project_id: kind === "active_projects" ? null : projectId || null,
               };
@@ -318,7 +318,7 @@ export async function renderMyDashboard(main, state) {
               if (!name || !name.trim()) return;
               await persistPrefs((current) => ({
                 ...current,
-                views: current.views.map((item) => (item.id === view.id ? { ...item, name: name.trim() } : item)),
+                views: current.views.map((item) => (item.id === view.id ? { ...item, name: name.trim().slice(0, 80) } : item)),
               }));
             },
           },

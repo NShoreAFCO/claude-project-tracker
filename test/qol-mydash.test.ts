@@ -204,4 +204,20 @@ describe("open gates", () => {
     expect(row.decision_maker.person_id).toBe(me);
     expect((await api("/api/gates/open?scope=x")).status).toBe(400);
   });
+
+  it("lists gates awaiting a go decision only: an early go (not reached) is left out, a hold stays (D5)", async () => {
+    const p = await createProject(db, { title: uniq("Gate decided"), owner: "O", decision_maker: "user@example.com" }, SYS);
+    for (const g of ["go", "hold"]) {
+      await upsertMilestone(db, p.id, { id: `${p.id}-${g}`, title: g, gate: true }, SYS);
+      await db
+        .prepare(
+          "INSERT INTO decision (id, project_id, milestone_id, decision, decided_by, decided_at, actor, created_at) VALUES (?, ?, ?, ?, ?, '2030-01-01T00:00:00Z', 'test', '2030-01-01T00:00:00Z')",
+        )
+        .bind(`${p.id}-d-${g}`, p.id, `${p.id}-${g}`, g, me)
+        .run();
+    }
+    const listed = (await api(`/api/gates/open?scope=all&project_id=${p.id}`)).body;
+    expect(listed.map((g: any) => g.milestone_id)).toEqual([`${p.id}-hold`]);
+    expect(listed[0]).toMatchObject({ reached: false, decision_state: "hold" });
+  });
 });

@@ -260,6 +260,14 @@ describe("My dashboard", () => {
     expect(sent.views[0].id).toMatch(/^v/);
   });
 
+  it("caps a saved view name at the 80 characters the server accepts", async () => {
+    mocks.prompt.mockReturnValue(`  ${"n".repeat(100)}  `);
+    const main = await render();
+    find(main, (node) => matches(node, "button", "mydash-save"))!.attrs.on.click();
+    await flush();
+    expect(mocks.putDashboardPrefs.mock.calls.at(-1)![0].views.at(-1).name).toBe("n".repeat(80));
+  });
+
   it("renames, deletes, reorders, and makes views default", async () => {
     const views = [
       { id: "a", name: "A", kind: "my_tasks", project_id: null },
