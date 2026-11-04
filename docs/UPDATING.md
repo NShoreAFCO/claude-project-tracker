@@ -64,3 +64,29 @@ git cherry-pick <commit>        # commits that only touch core
 ```
 
 Commits that touch both core and `instance/` must be split first. Run `npm run check` before pushing; it fails if a deployment's name slipped into core.
+
+## Reconstructing actual dates (one-off, after updating to 0.3.x)
+
+Work packages created before the actual dates existed may lack `actual_start` / `actual_end`. `scripts/reconstruct-timeline.mjs` proposes them from the tracker's own history. It is a dry run unless you pass `--apply`.
+
+Set the connection once in your terminal (the same variables the session-end hook uses):
+
+```powershell
+$env:TRACKER_URL = "https://<your-tracker-host>"
+$env:TRACKER_CF_CLIENT_ID = "<service token id>"
+$env:TRACKER_CF_CLIENT_SECRET = "<service token secret>"
+```
+
+Then, per project:
+
+```powershell
+node scripts/reconstruct-timeline.mjs --project <project-id>                      # table only
+node scripts/reconstruct-timeline.mjs --project <project-id> --git <path-to-repo> # add commit dates of linked branches
+node scripts/reconstruct-timeline.mjs --project <project-id> --apply              # write the changes
+```
+
+The table lists, per work package, the current and proposed start and end, and where each proposed value comes from. Check it before using `--apply`.
+
+Start of a work package without one, first match wins: the earliest progress event (notes do not count; events of a work package that is still `todo` are ignored), the opening of a gate that unlocks it, the parent's start, the project start date, the project creation date. With `--git`, the first commit date on a linked branch replaces the gate, parent and project fallbacks and any later event date. The end is set for done work packages only: the date it was set to done, else the last commit, else the last progress event. The start is never later than the end.
+
+`--apply` writes only the fields that change, as explicit sets through the REST API, and never overwrites an existing date. Exit codes: 0 success, 1 the tracker could not be read or a write failed, 2 bad usage or missing environment variables.
