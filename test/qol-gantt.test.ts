@@ -89,10 +89,21 @@ describe("placeMarks", () => {
     expect(placed.get(rowA)[0].label).toBe("M1");
   });
 
-  it("falls back to the last requires WP's main row", () => {
-    const { placed } = placeMarks([rowA, rowB], [ms({ due_date: "2026-01-01", requires: ["a", "b1"] })], topOf);
+  it("a milestone is drawn once, on the topmost of its WP rows", () => {
+    const { placed } = placeMarks([rowA, rowB], [ms({ due_date: "2026-01-01", requires: ["b1", "a"] })], topOf);
+    expect(placed.get(rowA)).toHaveLength(1);
+    expect(placed.has(rowB)).toBe(false);
+    const attached = placeMarks([rowA, rowB], [ms({ due_date: "2026-01-01", workpackage_id: "b", requires: ["a1"] })], topOf);
+    expect(attached.placed.get(rowA)).toHaveLength(1);
+    expect(attached.placed.size).toBe(1);
+  });
+
+  it("a gate is drawn on every row it unlocks", () => {
+    const gate = ms({ gate: 1, due_date: "2026-01-01", unlocks: ["b", "a1"] });
+    const { placed } = placeMarks([rowA, rowA1, rowB], [gate], topOf);
+    expect(placed.get(rowA1)).toHaveLength(1);
     expect(placed.get(rowB)).toHaveLength(1);
-    expect(placed.has(rowA)).toBe(false);
+    expect(placed.get(rowA1)[0].label).toBe(placed.get(rowB)[0].label);
   });
 
   it("gate goes on the unlocked sub-WP row when visible, else on its main row", () => {
@@ -129,5 +140,39 @@ describe("placeMarks", () => {
     const marks = placeMarks([rowA], e, topOf).placed.get(rowA);
     const byId = Object.fromEntries(marks.map((k: any) => [k.m.id, k.label]));
     expect(byId).toEqual({ "1": "M1", "2": "M2", "3": "M1", "4": "G1" });
+  });
+});
+
+// @ts-expect-error untyped JS module
+const marks = (await import("../public/js/gantt-marks.js")) as unknown as { markEdges: (...a: any[]) => any[]; markArrowPath: (...a: any[]) => string };
+
+describe("mark arrows (R6)", () => {
+  const rowA = { w: { id: "a" } };
+  const rowB = { w: { id: "b" } };
+  const rowC = { w: { id: "c" } };
+  const resolve = (id: string) => ({ a: rowA, b: rowB, c: rowC })[id as "a"] ?? null;
+
+  it("one arrow per required WP to the single diamond; same-row and unknown sources are skipped", () => {
+    const mk = { m: { id: "m1", requires: ["a", "b", "zz", "c"] }, row: rowC, kind: "milestone" };
+    const edges = marks.markEdges(new Map([[rowC, [mk]]]), resolve);
+    expect(edges.map((e) => e.fromId)).toEqual(["a", "b"]);
+    expect(edges.every((e) => e.mark === mk && e.toId === "m1")).toBe(true);
+  });
+
+  it("a gate on two rows gets an arrow from the required WP to each flag", () => {
+    const g = { id: "g1", requires: [{ workpackage_id: "a" }] };
+    const edges = marks.markEdges(
+      new Map([
+        [rowB, [{ m: g, row: rowB, kind: "gate" }]],
+        [rowC, [{ m: g, row: rowC, kind: "gate" }]],
+      ]),
+      resolve,
+    );
+    expect(edges.map((e) => e.mark.row)).toEqual([rowB, rowC]);
+  });
+
+  it("arrow enters the top vertex from above and the bottom vertex from below", () => {
+    expect(marks.markArrowPath(10, 20, 50, 60, 8)).toBe("M 10 20 H 50 V 52");
+    expect(marks.markArrowPath(10, 100, 50, 60, 8)).toBe("M 10 100 H 50 V 68");
   });
 });

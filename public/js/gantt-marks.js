@@ -161,8 +161,9 @@ export function markDate(m) {
  * Decide on which Gantt row each milestone / gate is drawn (pure).
  * `rows`: the visible work package rows (`{ w: { id } }`); `topOf`: Map wpId -> top-level wpId;
  * `entries`: `{ m, p }` per milestone (m.requires / m.unlocks are WP ids, m.workpackage_id the attached WP).
- * Milestones go on the row of their main WP (attached, else last `requires`); gates on the row of the WP they
- * unlock (that WP's row, else its main WP's row), falling back to the milestone rule. Labels `M<n>` / `G<n>` count
+ * A milestone is drawn once, on the topmost row of its WP rows (attached WP and `requires`; a sub-WP without a row
+ * counts as its main WP's row). A gate is drawn on every row it unlocks (that WP's row, else its main WP's row),
+ * falling back to the milestone rule when it unlocks nothing visible (R6). Labels `M<n>` / `G<n>` count
  * per project by date (ties keep input order). Returns `{ placed: Map(row -> marks[]), unplaced: marks[] }`,
  * a mark being `{ m, p, kind, label, date, row }`.
  */
@@ -170,7 +171,7 @@ export function placeMarks(rows, entries, topOf = new Map()) {
   const rowOf = new Map();
   for (const r of rows) if (r.w) rowOf.set(r.w.id, r);
   const ownOrMain = (id) => rowOf.get(id) ?? rowOf.get(topOf.get(id)) ?? null;
-  const mainRow = (id) => rowOf.get(topOf.get(id) ?? id) ?? null;
+  const index = new Map(rows.map((r, i) => [r, i]));
 
   const counters = new Map();
   const order = entries
@@ -188,23 +189,56 @@ export function placeMarks(rows, entries, topOf = new Map()) {
     const base = { m, p, kind, label: `${kind === "gate" ? "G" : "M"}${n}`, date };
 
     const requires = (m.requires || []).map(linkId).filter(Boolean);
-    let target = null;
-    if (kind === "gate") {
-      for (const id of (m.unlocks || []).map(linkId)) {
-        target = id ? ownOrMain(id) : null;
-        if (target) break;
-      }
+    // R6: a gate is drawn on every row it unlocks; a milestone once, on the topmost of its WP rows
+    const targets = [];
+    const add = (r) => r && !targets.includes(r) && targets.push(r);
+    if (kind === "gate") for (const id of (m.unlocks || []).map(linkId)) if (id) add(ownOrMain(id));
+    if (!targets.length) {
+      const cands = [m.workpackage_id, ...requires].filter(Boolean).map(ownOrMain).filter(Boolean);
+      if (cands.length) targets.push(cands.reduce((a, b) => (index.get(b) < index.get(a) ? b : a)));
     }
-    if (!target && m.workpackage_id) target = mainRow(m.workpackage_id);
-    if (!target && requires.length) target = mainRow(requires[requires.length - 1]);
 
-    if (!target) {
+    if (!targets.length) {
       unplaced.push({ ...base, row: null });
       continue;
     }
-    if (!placed.has(target)) placed.set(target, []);
-    placed.get(target).push({ ...base, row: target });
+    for (const target of targets) {
+      if (!placed.has(target)) placed.set(target, []);
+      placed.get(target).push({ ...base, row: target });
+    }
   }
   return { placed, unplaced };
+}
+
+/** Half height of a mark's glyph: gate flag pole 9, milestone diamond 8 (10 when done). */
+export function markHalf(kind, done = false) {
+  return kind === "gate" ? 9 : done ? 10 : 8;
+}
+
+/**
+ * Dependency arrows WP -> mark (pure). `placed`: Map(row -> marks) from placeMarks; `resolve`: WP id -> its visible
+ * row or null. A mark with several flags (gate) gets an arrow per flag from every required WP; same-row pairs are
+ * skipped. Returns `{ from: row, mark, fromId, toId }[]` (toId = the milestone id, the issue-edge key is `fromId>toId`).
+ */
+export function markEdges(placed, resolve) {
+  const edges = [];
+  for (const marks of placed.values()) {
+    for (const mark of marks) {
+      for (const id of (mark.m.requires || []).map(linkId).filter(Boolean)) {
+        const from = resolve(id);
+        if (from && from !== mark.row) edges.push({ from, mark, fromId: id, toId: mark.m.id });
+      }
+    }
+  }
+  return edges;
+}
+
+/**
+ * Path of an arrow from a WP bar end (sx, sy) to a mark centred on (cx, cy): along the source row, then vertically into
+ * the top vertex when the source row is above, the bottom vertex when below.
+ */
+export function markArrowPath(sx, sy, cx, cy, half) {
+  const ey = sy < cy ? cy - half : cy + half;
+  return `M ${sx} ${sy} H ${cx} V ${ey}`;
 }
 // /qol:t11
