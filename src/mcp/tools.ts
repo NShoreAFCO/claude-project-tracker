@@ -548,7 +548,7 @@ export function registerTools(reg: Reg): void {
     {
       title: "Log progress",
       description:
-        "Log what was done in this session. Main logging tool. With workpackage_id, a todo work package moves to doing; progress 100 marks it done (for a WP with verification other than none this records your OAuth login's person as verified_by, so log 100 only when the user confirms the verification; never for human=true WPs on your own). A gate-locked work package (behind a gate not yet reached or without a go decision) is not started, and setting its progress is refused (409 GATE_LOCKED).",
+        "Log what was done in this session. Main logging tool. With workpackage_id, a todo work package moves to doing; progress 100 marks it done (for a WP with verification other than none this records your OAuth login's person as verified_by, so log 100 only when the user confirms the verification; never for human=true WPs on your own). A progress log on a gate-locked work package (behind a gate not yet reached or without a go decision) is refused (409 GATE_LOCKED), and so is one on a done work package (409 WP_DONE; only a person in the dashboard can authorise it). With note=true the entry is only recorded as a note: it never changes status, dates or progress and is accepted on any work package, locked and done ones included; use it for remarks and for work behind a gate. For new work on a done work package, open a new sub-work package or task.",
       inputSchema: z.object({
         project_id: z.string().describe("Identify the project."),
         summary: z.string().min(1).describe("Summarize the completed work."),
@@ -561,6 +561,10 @@ export function registerTools(reg: Reg): void {
           .optional()
           .describe("Add person-days of effort spent to the work package's actual effort (needs workpackage_id)."),
         session_id: optionalText("Link the session identifier."),
+        note: z
+          .boolean()
+          .optional()
+          .describe("Record a note only: no status, date or progress change; allowed on locked and done work packages (no progress or effort_pd)."),
         on_behalf_of: onBehalfOf,
       }),
     },
