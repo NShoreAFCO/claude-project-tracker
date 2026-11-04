@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.3.1 — 2026-11-04 (log and date rules)
+
+Read "Breaking" before you deploy. Migration 0007 is unchanged in name; if you have not applied it yet, apply this version of it. Details: `docs/SPEC.md` section 25 (log rules, schema).
+
+### Added
+
+- `log_progress` (MCP and REST) takes `note: true`: a note is stored as an event (action `note`), changes no status, dates, progress or effort, and is accepted on any work package (gate-locked, done, dropped and blocked ones included).
+- REST `authorize_done: true`: a person in the dashboard with write access can log on a `done` work package; `actual_end` moves to the log date. MCP logins, service tokens and the system can never authorise.
+- `scripts/reconstruct-timeline.mjs`: proposes `actual_start` / `actual_end` for existing work packages from the tracker's history and, with `--git`, the commit dates of linked branches. Dry run by default; `--apply` writes explicit dates with version checks. It runs as you, with your Access token (`TRACKER_ACCESS_TOKEN`, editor role or above); see `docs/UPDATING.md`.
+- Session hook: a log the server refuses with 409 `GATE_LOCKED` or `WP_DONE` is retried once as a note; a log the server did not take (network error, timeout, 5xx, 408, 429, or Access refusing the token) is kept in `tracker-pending.json` in the hook's state folder (at most 50 entries) and resent later. Credentials in an https remote URL are no longer sent.
+
+### Changed
+
+- Version 0.3.1 (package and MCP server).
+- A progress log on an unlocked `todo` work package sets `doing`; `blocked` and `waiting` keep their status. `actual_start` becomes the log date when it is empty. Planned dates never move from a log.
+- Migration 0007 backfill: `actual_start` of started work packages (not `todo`) comes from the first start-type event (notes excluded), else the latest opening of a gate that unlocks it, else the nearest ancestor's start, the project start date, the project creation date; it is clamped to `actual_end`. Idempotent.
+- A log no longer sets `actual_start` from an existing `actual_end`.
+
+### Breaking
+
+- **Progress logs on locked or done work packages are refused.** On a gate-locked work package every progress log (with or without `progress`) returns 409 `GATE_LOCKED` until the gate opens or a person overrides it in the dashboard. On a `done` work package it returns 409 `WP_DONE` unless authorised as above. Use `note: true` to record a note; open a new sub-work package for new work. Update agents and scripts that log to such work packages.
+- Notes are stored as events with action `note`; reports that count events by action see a new value.
+
+### Upgrade from v0.3.0
+
+1. Back up first: `npm run backup`.
+2. If migration 0007 is not applied yet: `npm run db:migrate:remote`. If it is, run `scripts/reconstruct-timeline.mjs` (dry run first) to fill missing actual dates.
+3. Re-run `npm run hook:install` on every machine that uses the session hook.
+4. Reconnect MCP clients (new `note` parameter).
+5. Run `npm test` and `npm run check`, then deploy.
+
 ## v0.3.0 — 2026-11-04 (usability release)
 
 Read "Breaking" and "Upgrade from v0.2.0" before you deploy. Details: `docs/SPEC.md` section 25.
