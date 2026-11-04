@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.3.0 - usability release
+## v0.3.0 — 2026-11-04 (usability release)
 
 Read "Breaking" and "Upgrade from v0.2.0" before you deploy. Details: `docs/SPEC.md` section 25.
 
