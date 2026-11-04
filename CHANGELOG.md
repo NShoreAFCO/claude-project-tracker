@@ -24,14 +24,13 @@ Read "Breaking" and "Upgrade from v0.2.0" before you deploy. Details: `docs/SPEC
 ### Changed
 
 - Version 0.3.0 (package and MCP server).
-- Milestone dependency arrows are gone from the Gantt chart.
+- Gantt dependency arrows (toggle): predecessor to dependent work package, and required work package to the milestone or gate that needs it. A gate flag is drawn on every row it unlocks (each gets its arrows); a milestone diamond once, on the topmost row of its work packages.
 
 ### Known issues
 
 - The Gantt chart is not adapted to narrow screens: on mobile only the left part of the timeline is visible.
 - Opening the mobile drawer does not move or trap keyboard focus.
 - A project whose category key is not in the instance categories does not appear in the grid.
-- Dependency arrows are not drawn through milestones and gates (by design in this release); work package dependencies draw arrows only when `depends_ids` are set.
 
 ### Breaking
 

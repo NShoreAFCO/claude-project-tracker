@@ -5,7 +5,7 @@ import { h, clear, statusChip, toastError } from "./dom.js";
 import { openProject } from "./project.js";
 import { WP_CATEGORIES, catVar, catDot, catLabel } from "./categories.js";
 import { collectIssues } from "./schedule-ui.js";
-import { issueEdgeKeys, ghostBar, ghostDiamond, issueMark, slipMark, barTooltip, barParts, placeMarks, markDate } from "./gantt-marks.js";
+import { issueEdgeKeys, ghostBar, ghostDiamond, issueMark, slipMark, barTooltip, barParts, placeMarks, markDate, markEdges, markArrowPath, markHalf } from "./gantt-marks.js";
 
 const NS = "http://www.w3.org/2000/svg";
 const s = (tag, attrs = {}, ...children) => {
@@ -223,7 +223,8 @@ export async function renderGantt(main, state) {
   const unplacedDated = [];
   for (const mk of unplaced) (mk.date ? unplacedDated.push(mk) : skip(mk));
   if (unplacedDated.length) rows.push({ type: "unplaced", marks: unplacedDated });
-  const allMarks = [...[...placed.values()].flat(), ...unplacedDated, ...legendOnly].sort((a, b) =>
+  // a gate drawn on several rows is listed once
+  const allMarks = [...new Map([...[...placed.values()].flat(), ...unplacedDated, ...legendOnly].map((mk) => [mk.m.id, mk])).values()].sort((a, b) =>
     a.kind === b.kind ? Number(a.label.slice(1)) - Number(b.label.slice(1)) : a.kind === "milestone" ? -1 : 1,
   );
   const marksCtx = { placed };
@@ -390,6 +391,8 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
   };
 
   const pointFor = wpPoint;
+  const markX = (mk) =>
+    mk.kind === "gate" ? x((partsOf(mk.row)?.extent ?? { from: toDay(mk.row.start_date) }).from) - 4 : x(toDay(mk.date) + 0.5);
 
   if (showDeps) {
     const defs = s(
@@ -438,6 +441,25 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
     }
 
     const isCritical = (row) => row.w.critical;
+    const arrow = (d, conflict, crit) =>
+      svg.append(
+        s("path", {
+          class: `dep${conflict ? " issue" : ""}${crit ? " critical" : ""}`,
+          d,
+          "marker-end": conflict ? "url(#gantt-arrow-issue)" : "url(#gantt-arrow)",
+        }),
+      );
+    // R6: WP -> milestone diamond / gate flags
+    for (const { from, mark, fromId, toId } of markEdges(placed, (id) => visibleByWp.get(id))) {
+      const start = pointFor(from, "right");
+      const cy = TOP + rowIndex.get(mark.row) * ROW + ROW / 2;
+      const half = markHalf(mark.kind, milestoneState(mark.m, today) === "done");
+      arrow(
+        markArrowPath(start.x, start.y, markX(mark), cy, half),
+        issueKeys.has(`${fromId}>${toId}`),
+        showCritical && isCritical(from) && mark.m.critical,
+      );
+    }
     for (const [sourceRow, targetRow, fromId, toId] of edges) {
       const start = pointFor(sourceRow, "right");
       const end = pointFor(targetRow, "left");
@@ -592,8 +614,7 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
     const marks = r.type === "wp" ? placed.get(r) : null;
     if (!marks) return;
     const y = TOP + i * ROW;
-    const barFrom = (partsOf(r)?.extent ?? { from: toDay(r.start_date) }).from;
-    for (const mk of marks) drawMark(mk, mk.kind === "gate" ? x(barFrom) - 4 : x(toDay(mk.date) + 0.5), y);
+    for (const mk of marks) drawMark(mk, markX(mk), y);
   });
 
   if (today >= min && today <= max) {
