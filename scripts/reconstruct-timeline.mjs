@@ -74,17 +74,18 @@ export function startEvidence(wp, events) {
   return wp.status === "todo" ? [] : out;
 }
 
-/** Date each WP became unlocked: per gate max(reached, first go decision); over several gates the latest. */
+/** Date each WP became unlocked: per gate max(reached, latest go decision), only if the latest decision is go; over several gates the latest. */
 export function gateOpenings(milestones) {
   const by = new Map();
   for (const m of milestones) {
     let open = day(m.reached_at);
     if (m.gate && !open) continue; // a gate that was never reached opened nothing (D6)
     if (m.gate) {
-      const decisions = m.decisions ?? [];
-      const go = decisions.filter((d) => ["go", "go_with_conditions"].includes(d.decision)).map((d) => day(d.decided_at));
-      if (go.length) open = maxDay([open, minDay(go)]);
-      else if (decisions.length) open = null; // decided, never go: not opened
+      // opens only if the latest decision is go; opening = later of reached and that go (a go superseded by hold/stop does not count)
+      let latest = null;
+      for (const d of m.decisions ?? []) if (!latest || String(d.decided_at ?? "") >= String(latest.decided_at ?? "")) latest = d;
+      if (latest && ["go", "go_with_conditions"].includes(latest.decision)) open = maxDay([open, day(latest.decided_at)]);
+      else open = null;
     }
     if (!open) continue;
     for (const id of m.unlocks ?? []) by.set(id, maxDay([by.get(id), open]));
@@ -166,8 +167,18 @@ export function buildProposals({ project, workpackages, milestones, events, gitB
   const openings = gateOpenings(milestones);
   const effStart = new Map();
   const rows = [];
-  for (const wp of flattenTree(workpackages)) {
-    const parentStart = wp.parent_id ? (effStart.get(wp.parent_id) ?? null) : null;
+  const flat = flattenTree(workpackages);
+  const parentOf = new Map(flat.map((w) => [w.id, w.parent_id ?? null]));
+  for (const wp of flat) {
+    // nearest ancestor with a start (parents are processed first, so a derived parent start counts)
+    let parentStart = null;
+    for (let a = wp.parent_id, n = 0; a && n < 50; n++) {
+      if (effStart.get(a)) {
+        parentStart = effStart.get(a);
+        break;
+      }
+      a = parentOf.get(a) ?? null;
+    }
     const proposal = proposeWp(wp, { project, parentStart, opening: openings.get(wp.id) ?? null, events, git: gitByWp.get(wp.id) ?? null });
     effStart.set(wp.id, proposal.start.value);
     rows.push({ wp, proposal, changes: changesFor(wp, proposal) });
@@ -206,8 +217,10 @@ export function gitDefaultRunner(repo, args) {
       windowsHide: true,
       timeout: 15000,
     });
-  } catch {
-    return null;
+  } catch (e) {
+    // git ran and exited non-zero (e.g. unknown ref): no output. Could not run git at all (missing, timeout): an error.
+    if (typeof e.status === "number") return null;
+    throw new Error(`git could not be run: ${e.code ?? e.signal ?? e.message}`);
   }
 }
 
@@ -285,7 +298,16 @@ export async function run({ args, client, gitRun = gitDefaultRunner, log = conso
     log(`Could not read the tracker: ${e.message}`);
     return 1;
   }
-  const gitByWp = args.git ? gitEvidence(detail.branches ?? [], args.git, gitRun) : new Map();
+  let gitByWp = new Map();
+  if (args.git) {
+    try {
+      if (gitRun(args.git, ["rev-parse", "--git-dir"]) === null) throw new Error(`${args.git} is not a git repository`);
+      gitByWp = gitEvidence(detail.branches ?? [], args.git, gitRun);
+    } catch (e) {
+      log(`Git failed: ${e.message}. Nothing proposed or written; fix --git or leave it out.`);
+      return 2;
+    }
+  }
   const rows = buildProposals({
     project: detail.project,
     workpackages: detail.workpackages,

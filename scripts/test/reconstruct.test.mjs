@@ -136,10 +136,11 @@ test("gateOpenings: reached and go decision, later of the two; hold does not ope
     { gate: 1, reached_at: "2026-02-01", decisions: [{ decision: "stop", decided_at: "2026-02-02" }], unlocks: ["b"] },
     { gate: 0, reached_at: "2026-01-20", decisions: [], unlocks: ["c"] },
     { gate: 0, reached_at: null, decisions: [], unlocks: ["d"] },
-    { gate: 1, reached_at: "2026-03-01", decisions: [], unlocks: ["a"] },
+    { gate: 1, reached_at: "2026-03-01", decisions: [], unlocks: ["e"] },
   ];
   const o = gateOpenings(ms);
-  assert.equal(o.get("a"), "2026-03-01");
+  assert.equal(o.get("a"), "2026-02-10");
+  assert.equal(o.has("e"), false);
   assert.equal(o.has("b"), false);
   assert.equal(o.get("c"), "2026-01-20");
   assert.equal(o.has("d"), false);
@@ -302,4 +303,73 @@ test("review FIX t23: an unreached gate opens nothing", () => {
 test("review FIX t23: fetchEvents fails when the page limit is reached", async () => {
   const client = { get: async () => Array.from({ length: 200 }, (_, i) => ({ id: 1000 - i })) };
   await assert.rejects(fetchEvents(client, "p", 2), /history incomplete/);
+});
+
+test("review FIX-fix1: go then hold does not open; hold then go does; later of reached and go", () => {
+  const g = (reached, decisions) => gateOpenings([{ gate: 1, reached_at: reached, decisions, unlocks: ["a"] }]).get("a") ?? null;
+  assert.equal(
+    g("2026-02-01", [
+      { decision: "go", decided_at: "2026-02-02" },
+      { decision: "hold", decided_at: "2026-02-05" },
+    ]),
+    null,
+  );
+  assert.equal(
+    g("2026-02-10", [
+      { decision: "go", decided_at: "2026-02-02" },
+      { decision: "hold", decided_at: "2026-02-05" },
+    ]),
+    null,
+  );
+  assert.equal(
+    g("2026-02-01", [
+      { decision: "hold", decided_at: "2026-02-02" },
+      { decision: "go", decided_at: "2026-02-05" },
+    ]),
+    "2026-02-05",
+  );
+  assert.equal(
+    g("2026-02-09", [
+      { decision: "hold", decided_at: "2026-02-02" },
+      { decision: "go_with_conditions", decided_at: "2026-02-05" },
+    ]),
+    "2026-02-09",
+  );
+});
+
+test("review FIX-fix1: nearest ancestor start counts through a todo parent, independent of order", () => {
+  const mk = (id, parent_id, o = {}) => ({
+    id,
+    parent_id,
+    title: id,
+    status: "doing",
+    actual_start: null,
+    actual_end: null,
+    children: [],
+    ...o,
+  });
+  const gc = mk("gc", "c");
+  const c = mk("c", "root", { status: "todo", children: [gc] });
+  const root = mk("root", null, { actual_start: "2026-02-03", children: [c] });
+  const rows = buildProposals({ project, workpackages: [root], milestones: [], events: [] });
+  assert.equal(rows.find((r) => r.wp.id === "gc").proposal.start.value, "2026-02-03");
+});
+
+test("review FIX-fix1: --git with a bad repo path is an error, exit 2", async () => {
+  const api = fakeApi(detail, [ev()]);
+  const out = [];
+  const code = await run({
+    args: { project: "p1", apply: true, git: "/nonexistent" },
+    client: makeClient({ url: "https://t.example", id: "I", secret: "S", fetchImpl: api.fetchImpl }),
+    log: (l) => out.push(l),
+  });
+  assert.equal(code, 2);
+  assert.match(out.join("\n"), /not a git repository/);
+  assert.ok(!api.calls.some((c) => c.init.method === "PATCH"));
+  const real = await run({
+    args: { project: "p1", apply: false, git: join(dirname(script), "no-such-dir-xyz") },
+    client: makeClient({ url: "https://t.example", id: "I", secret: "S", fetchImpl: api.fetchImpl }),
+    log: () => {},
+  });
+  assert.equal(real, 2);
 });

@@ -176,6 +176,28 @@ describe("migration 0007", () => {
     // A gate with no go decision, or not reached, does not count: falls through to the parent.
     await mk("fc-gate-nogo", "doing");
     await gate("fc-g3", "2026-03-01T00:00:00Z", null, ["fc-gate-nogo"]);
+    // A go followed by a hold does not open the gate (falls through), whether reached before or after.
+    await mk("fc-gate-hold", "doing");
+    await gate("fc-g4", "2026-03-01T00:00:00Z", "2026-03-04T10:00:00Z", ["fc-gate-hold"]);
+    await db
+      .prepare(
+        "INSERT INTO decision (id, project_id, milestone_id, decision, decided_by, decided_at, actor, created_at) VALUES ('dec-hold', ?, 'fc-g4', 'hold', 'x', '2026-03-06T10:00:00Z', 'test', '2026-03-06T10:00:00Z')",
+      )
+      .bind(p.id)
+      .run();
+    // 3: three-level chain, children inserted before parents (insertion-order independence); only the root has a start.
+    // (rows are inserted deepest first, parent_id links are set afterwards, so row order is child before parent)
+    await mk("fc-l3", "doing");
+    await mk("fc-l2", "doing");
+    await mk("fc-l1", "doing");
+    await mk("fc-l0", "doing");
+    await ev("fc-l0", "2026-02-07T09:00:00Z", "progress", null);
+    for (const [c, par] of [
+      ["fc-l3", "fc-l2"],
+      ["fc-l2", "fc-l1"],
+      ["fc-l1", "fc-l0"],
+    ])
+      await db.prepare("UPDATE workpackage SET parent_id = ? WHERE id = ?").bind(par, c).run();
     // 3: parent actual_start.
     await mk("fc-parent", "doing");
     await db.prepare("UPDATE workpackage SET actual_start = '2026-02-11' WHERE id = 'fc-parent'").run();
@@ -223,6 +245,8 @@ describe("migration 0007", () => {
     expect(await get("fc-gate-reached")).toBe("2026-03-09");
     expect(await get("fc-gate-nogo")).toBe("2026-01-20");
     expect(await get("fc-child")).toBe("2026-02-11");
+    expect(await get("fc-gate-hold")).toBe("2026-01-20");
+    for (const id of ["fc-l0", "fc-l1", "fc-l2", "fc-l3"]) expect(await get(id)).toBe("2026-02-07");
     expect(await get("fc-pstart")).toBe("2026-01-15");
     expect(await get("fc-created")).toBe("2026-01-20");
     expect(await get("fc-todo")).toBeNull();
