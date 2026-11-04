@@ -154,6 +154,7 @@ export function registerTools(reg: Reg): void {
         stalled_blocked: project.stalled_blocked,
         closure_due: project.closure_due,
         next_milestone: project.next_milestone,
+        current_gate: project.current_gate,
         target_date: project.target_date,
         last_activity: project.last_activity,
       }));
@@ -178,7 +179,7 @@ export function registerTools(reg: Reg): void {
     {
       title: "Create project",
       description:
-        "Create a project. Fill owner (defaults to you, the logged-in person), and sponsor / decision_maker when known. Fill objectives_md, scope_in_md, scope_out_md and success_criteria_md when the user has stated them (ask if unclear; do not invent them). Status active requires an owner: with status omitted and no owner the project starts as idea and the result carries a warning; an explicit status active without owner fails.",
+        "Create a project. Fill owner (defaults to you, the logged-in person), and sponsor / decision_maker when known. Fill objectives_md, scope_in_md, scope_out_md and success_criteria_md when the user has stated them (ask if unclear; do not invent them). Status active requires an owner: with status omitted and no owner the project starts as idea and the result carries a warning; an explicit status active without owner fails. Structure the project at creation: WP1 Project management and WP2 Research (never gated), the content WPs (WP3 and on) with their milestones and gates (see docs/ai/PROJECT-STRUCTURE.md).",
       inputSchema: z.object({
         title: z.string().min(1).describe("Set the project title."),
         id: z.string().optional().describe("Set an optional project identifier (slug)."),
@@ -190,6 +191,7 @@ export function registerTools(reg: Reg): void {
         origin: projectOriginSchema.optional().describe("Set the project origin."),
         repo_url: optionalText("Set the repository URL."),
         local_path: optionalText("Set the local repository path."),
+        local_host: optionalText("Set the host name of the machine that holds local_path (max 100 characters)."),
         context_file: optionalText("Set the context file path."),
         start_date: optionalDate("Set the start date as YYYY-MM-DD."),
         target_date: optionalDate("Set the target date as YYYY-MM-DD."),
@@ -216,6 +218,7 @@ export function registerTools(reg: Reg): void {
           origin: args.origin,
           repo_url: args.repo_url,
           local_path: args.local_path,
+          local_host: args.local_host,
           context_file: args.context_file,
           session_id: null,
           start_date: args.start_date,
@@ -256,6 +259,7 @@ export function registerTools(reg: Reg): void {
             origin: projectOriginSchema.optional().describe("Set the project origin."),
             repo_url: optionalText("Set the repository URL."),
             local_path: optionalText("Set the local repository path."),
+            local_host: optionalText("Set the host name of the machine that holds local_path (max 100 characters)."),
             context_file: optionalText("Set the context file path."),
             session_id: optionalText("Set the session identifier."),
             start_date: optionalDate("Set the start date as YYYY-MM-DD."),
@@ -291,11 +295,12 @@ export function registerTools(reg: Reg): void {
     "upsert_workpackage",
     {
       title: "Upsert work package",
-      description: `Create or update a work package. category: ${WP_CATEGORIES.join("|")} (null = inherit from the parent). WPs with human=true${HUMAN_DEFAULT.length ? ` (default for ${HUMAN_DEFAULT.join(", ")})` : ""} are done off the computer: log progress the user reports, and set them to done only when the user says so. When you create a WP, fill deliverable and acceptance_criteria_md (how to tell it is done) and choose verification (${VERIFICATIONS.join("|")}). Verification: setting a WP with verification other than none to done records your OAuth login's person as verified_by (verified_at now), so do it only when the user confirms they verified it; never mark human=true WPs verified yourself, and never set verified_by to an agent, free text or anyone but your login (refused). Set owner when someone other than the project owner is responsible (effective_owner falls back to the project owner); priority_stakeholders lists persons to keep informed. Status: use blocked only for a real blocker (blocked_by wp:<id>, ms:<id> or ext:<text>; blocked_since defaults to today) and waiting for a deliberate deferral (optional waiting_reason). dropped requires drop_reason. A todo WP whose progress rises above 0 becomes doing unless you set status in the same call. The result lists schedule issues in warnings (start before a predecessor ends or before an unlocking milestone is due, child outside its parent); fix them or tell the user. In a schedule_strict project a write that adds issues fails with a conflict listing them. A WP behind an undecided gate milestone is gate-locked: setting it to doing or done, or setting its progress, fails with 409 GATE_LOCKED naming the gate; tell the user (the decision maker decides, or a person overrides in the dashboard).`,
+      description: `Create or update a work package. Always set code (WP3.2, T07) and parent_id at the matching level (tasks under sub-WPs); dates must respect depends_on and unlocking gates unless the user expressly overrides. category: ${WP_CATEGORIES.join("|")} (null = inherit from the parent). WPs with human=true${HUMAN_DEFAULT.length ? ` (default for ${HUMAN_DEFAULT.join(", ")})` : ""} are done off the computer: log progress the user reports, and set them to done only when the user says so. When you create a WP, fill deliverable and acceptance_criteria_md (how to tell it is done) and choose verification (${VERIFICATIONS.join("|")}). Verification: setting a WP with verification other than none to done records your OAuth login's person as verified_by (verified_at now), so do it only when the user confirms they verified it; never mark human=true WPs verified yourself, and never set verified_by to an agent, free text or anyone but your login (refused). Set owner when someone other than the project owner is responsible (effective_owner falls back to the project owner); priority_stakeholders lists persons to keep informed. Status: use blocked only for a real blocker (blocked_by wp:<id>, ms:<id> or ext:<text>; blocked_since defaults to today) and waiting for a deliberate deferral (optional waiting_reason). dropped requires drop_reason. A todo WP whose progress rises above 0 becomes doing unless you set status in the same call. The result lists schedule issues in warnings (start before a predecessor ends or before an unlocking milestone is due, child outside its parent); fix them or tell the user. In a schedule_strict project a write that adds issues fails with a conflict listing them. A WP behind a closed gate milestone (not reached yet, or no go decision) is gate-locked: setting it to doing or done, or setting its progress, fails with 409 GATE_LOCKED naming the gate; tell the user (the decision maker decides, or a person overrides in the dashboard).`,
       inputSchema: z.object({
         project_id: z.string().describe("Identify the owning project."),
         id: z.string().optional().describe("Identify an existing work package (omit to create)."),
         parent_id: optionalText("Set the parent work package."),
+        code: optionalText("Set the short code shown before the title (max 12 characters: letters, digits, dot, hyphen; null clears)."),
         title: optionalText("Set the work package title."),
         description_md: optionalText("Set the Markdown description."),
         status: workpackageStatusSchema.optional().describe("Set the work package status."),
@@ -314,6 +319,8 @@ export function registerTools(reg: Reg): void {
           .describe("Set the actual effort in person-days (log_progress effort_pd adds to it)."),
         start_date: optionalDate("Set the start date as YYYY-MM-DD."),
         end_date: optionalDate("Set the end date as YYYY-MM-DD."),
+        actual_start: optionalDate("Set the actual start as YYYY-MM-DD (set automatically on the first start; not in the future; null clears)."),
+        actual_end: optionalDate("Set the actual end as YYYY-MM-DD (set automatically on done; not in the future, not before actual_start; null clears)."),
         depends_on: z
           .array(z.string())
           .optional()
@@ -381,7 +388,7 @@ export function registerTools(reg: Reg): void {
     {
       title: "Upsert milestone",
       description:
-        "Create or update a milestone (zero duration). It is reached automatically when all 'requires' WPs are done and reopens if one is reopened; 'unlocks' WPs stay locked until it is first reached. A gate (gate=true) unlocks only on a go / go_with_conditions decision: until then its unstarted 'unlocks' WPs are gate-locked and you cannot start them, and you cannot clear the gate flag, drop its unlocks or delete it. requires/unlocks replace the stored lists. The result lists schedule issues in warnings (due before a required WP ends, unlocked WPs starting before the due date); a schedule_strict project refuses writes that add issues.",
+        "Create or update a milestone (zero duration). A gate unlocks WPs and stays closed until its required WPs are done and a person records a go decision. It is reached automatically when all 'requires' WPs are done and reopens if one is reopened; 'unlocks' WPs stay locked until it is first reached. A gate (gate=true) unlocks only when it is reached and its latest decision is go / go_with_conditions (a go recorded earlier waits for the 'requires' WPs): until then its unstarted 'unlocks' WPs are gate-locked and you cannot start them, and you cannot clear the gate flag, drop its unlocks or delete it. Reads list requires_status / unlocks_status (id, code, title, status, progress) and reached. requires/unlocks replace the stored lists. The result lists schedule issues in warnings (due before a required WP ends, unlocked WPs starting before the due date); a schedule_strict project refuses writes that add issues.",
       inputSchema: z.object({
         project_id: z.string().describe("Identify the owning project."),
         id: z.string().optional().describe("Identify an existing milestone (omit to create)."),
@@ -408,7 +415,7 @@ export function registerTools(reg: Reg): void {
     {
       title: "Record gate decision",
       description:
-        "Record a decision (go | go_with_conditions | hold | stop) on a gate milestone. Call this ONLY when the user states the decision in this conversation; never decide yourself. Otherwise draft a note (e.g. append_context) and let the decision maker record it. The decision is always recorded for your OAuth login's person, who must be the project's decision maker (or, for a free-text decision maker such as a board, any decider; note_md must then name the body). go / go_with_conditions unlock the gate and take a baseline; conditions become todo work packages; stop puts the project on hold.",
+        "Record a decision (go | go_with_conditions | hold | stop) on a gate milestone. Call this ONLY when the user states the decision in this conversation; never decide yourself. Otherwise draft a note (e.g. append_context) and let the decision maker record it. The decision is always recorded for your OAuth login's person, who must be the project's decision maker (or, for a free-text decision maker such as a board, any decider; note_md must then name the body). go / go_with_conditions take a baseline and unlock the gate once it is reached (a decision may be recorded earlier: the result then says reached=false and the gate stays closed until its 'requires' WPs are done or dropped); conditions become todo work packages; stop puts the project on hold.",
       inputSchema: z.object({
         milestone_id: z.string().describe("Identify the gate milestone."),
         decision: z.enum(["go", "go_with_conditions", "hold", "stop"]).describe("Set the decision the user stated."),
@@ -541,7 +548,7 @@ export function registerTools(reg: Reg): void {
     {
       title: "Log progress",
       description:
-        "Log what was done in this session. Main logging tool. With workpackage_id, a todo work package moves to doing; progress 100 marks it done (for a WP with verification other than none this records your OAuth login's person as verified_by, so log 100 only when the user confirms the verification; never for human=true WPs on your own). A gate-locked work package (behind an undecided gate) is not started, and setting its progress is refused (409 GATE_LOCKED).",
+        "Log what was done in this session. Main logging tool. With workpackage_id, a todo work package moves to doing; progress 100 marks it done (for a WP with verification other than none this records your OAuth login's person as verified_by, so log 100 only when the user confirms the verification; never for human=true WPs on your own). A gate-locked work package (behind a gate not yet reached or without a go decision) is not started, and setting its progress is refused (409 GATE_LOCKED).",
       inputSchema: z.object({
         project_id: z.string().describe("Identify the project."),
         summary: z.string().min(1).describe("Summarize the completed work."),

@@ -281,6 +281,8 @@ npm run hook:install
 
 It copies the hook to your Claude Code folder, adds it to Claude Code's settings (after a backup), stores the tracker address and the hook's service token as your user environment variables, and sends one test message.
 
+The hook also sends the name of your computer (so the dashboard can show where a project's folder lives) and, if the folder has one, its `HANDOFF.md`, which appears as a pinned **HANDOFF** document on the project. Files over 256 KB are skipped. If you update the tracker, run `npm run hook:install` again so your copy of the hook is replaced by the new version.
+
 **You should see:** `✓` lines and a successful test.
 Then **restart Claude Code**, and on Windows open a new terminal window, so the new settings are picked up.
 

@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 // Claude Code SessionEnd hook → project tracker (SPEC §10). No dependencies; Windows-safe; always exits 0.
 //
-// Reads the hook JSON from stdin (session_id, cwd, reason), collects git facts for cwd, attaches <cwd>/session.md
-// (≤ 256 KB) and POSTs to ${TRACKER_URL}/api/hooks/claude-code with the Access service-token headers.
+// Reads the hook JSON from stdin (session_id, cwd, reason), collects git facts for cwd, attaches the host name and <cwd>/session.md
+// and <cwd>/HANDOFF.md (each ≤ 256 KB) and POSTs to ${TRACKER_URL}/api/hooks/claude-code with the Access service-token headers.
 // SessionEnd hooks share a ~1.5 s budget, so every step has a deadline. Set TRACKER_DEBUG=1 to see errors on stderr.
 import { execFileSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
+import { hostname } from "node:os";
 import { join, resolve } from "node:path";
 
 const started = Date.now();
@@ -66,11 +67,20 @@ function gitFacts(cwd) {
   };
 }
 
-function sessionFile(cwd) {
-  const file = join(cwd, "session.md");
+/** <cwd>/<name> as {name, content}; null when missing, unreadable or over 256 KB. */
+function contextFile(cwd, name) {
+  const file = join(cwd, name);
   try {
     if (statSync(file).size > MAX_CONTEXT_BYTES) return null;
-    return { name: "session.md", content: readFileSync(file, "utf8") };
+    return { name, content: readFileSync(file, "utf8") };
+  } catch {
+    return null;
+  }
+}
+
+function hostName() {
+  try {
+    return hostname().trim().slice(0, 64) || null; // the server accepts up to 100; 64 is the Linux HOST_NAME_MAX
   } catch {
     return null;
   }
@@ -95,8 +105,10 @@ async function main() {
     reason: input.reason ?? null,
     ...gitFacts(cwd),
   };
-  const ctx = sessionFile(cwd);
-  if (ctx) body.context_file = ctx;
+  const host = hostName();
+  if (host) body.host = host;
+  const files = ["session.md", "HANDOFF.md"].map((n) => contextFile(cwd, n)).filter(Boolean);
+  if (files.length) body.context_files = files;
 
   const timeout = Math.max(100, Math.min(FETCH_MAX_MS, BUDGET_MS - elapsed()));
   const res = await fetch(`${TRACKER_URL.replace(/\/+$/, "")}/api/hooks/claude-code`, {

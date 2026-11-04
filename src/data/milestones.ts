@@ -31,10 +31,16 @@ export type DecisionOut = {
 };
 /** none = no gate, or a gate neither reached nor decided; pending = reached gate without a decision; else the latest decision. */
 export type DecisionState = "none" | "pending" | Decision;
+/** A linked live WP as shown with its milestone (requires_status / unlocks_status, in WP sort order). */
+export type LinkedWpStatus = { id: string; code: string | null; title: string; status: string; progress: number };
 export type MilestoneOut = Omit<MilestoneRow, "gate"> & {
   requires: string[];
   unlocks: string[];
+  requires_status: LinkedWpStatus[];
+  unlocks_status: LinkedWpStatus[];
   done: boolean;
+  /** reached_at is set; a gate opens only when reached and decided go (spec §19). */
+  reached: boolean;
   gate: boolean;
   decision_state: DecisionState;
   decisions: DecisionOut[];
@@ -133,7 +139,7 @@ export async function listMilestones(db: D1Database, projectId: string): Promise
       .bind(projectId),
     db
       .prepare(
-        `SELECT l.* FROM milestone_link l JOIN milestone m ON m.id = l.milestone_id JOIN workpackage w ON w.id = l.workpackage_id
+        `SELECT l.*, w.code, w.title, w.status, w.progress, w.sort FROM milestone_link l JOIN milestone m ON m.id = l.milestone_id JOIN workpackage w ON w.id = l.workpackage_id
          WHERE m.project_id = ? AND ${LIVE("m")} AND ${LIVE("w")} ORDER BY l.workpackage_id`,
       )
       .bind(projectId),
@@ -145,12 +151,21 @@ export async function listMilestones(db: D1Database, projectId: string): Promise
       )
       .bind(projectId),
   ]);
+  type LinkRow = { milestone_id: string; workpackage_id: string; role: string; sort: number } & Omit<LinkedWpStatus, "id">;
   const by = new Map<string, { requires: string[]; unlocks: string[] }>();
-  for (const l of links.results as Array<{ milestone_id: string; workpackage_id: string; role: string }>) {
+  const statusBy = new Map<string, { requires_status: LinkRow[]; unlocks_status: LinkRow[] }>();
+  for (const l of links.results as LinkRow[]) {
     const e = by.get(l.milestone_id) ?? { requires: [], unlocks: [] };
     (l.role === "requires" ? e.requires : e.unlocks).push(l.workpackage_id);
     by.set(l.milestone_id, e);
+    const st = statusBy.get(l.milestone_id) ?? { requires_status: [], unlocks_status: [] };
+    (l.role === "requires" ? st.requires_status : st.unlocks_status).push(l);
+    statusBy.set(l.milestone_id, st);
   }
+  const bySort = (a: LinkRow, b: LinkRow) =>
+    a.sort - b.sort || (a.title < b.title ? -1 : a.title > b.title ? 1 : 0) || (a.workpackage_id < b.workpackage_id ? -1 : 1);
+  const statusOut = (rows: LinkRow[] = []): LinkedWpStatus[] =>
+    [...rows].sort(bySort).map((l) => ({ id: l.workpackage_id, code: l.code, title: l.title, status: l.status, progress: l.progress }));
   const hist = new Map<string, DecisionOut[]>();
   for (const d of decisions.results as DecisionRow[]) hist.set(d.milestone_id, [...(hist.get(d.milestone_id) ?? []), decisionOut(d)]);
   return (ms.results as Array<MilestoneRow & { done: number }>).map((m) => {
@@ -161,6 +176,9 @@ export async function listMilestones(db: D1Database, projectId: string): Promise
       ...m,
       done: m.done === 1,
       ...(by.get(m.id) ?? { requires: [], unlocks: [] }),
+      requires_status: statusOut(statusBy.get(m.id)?.requires_status),
+      unlocks_status: statusOut(statusBy.get(m.id)?.unlocks_status),
+      reached: m.reached_at !== null,
       gate,
       decision_state: !gate ? "none" : last ? last.decision : m.reached_at ? "pending" : "none",
       decisions: list,
@@ -279,10 +297,10 @@ export async function upsertMilestone(
       throw new ConflictError("version conflict", await getOne(db, projectId, existing.id));
     const current = await getOne(db, projectId, existing.id);
     // F5: agents never lift a gate lock, so they may not clear the gate flag or drop unlocked WPs while
-    // the gate is undecided. The UPDATE re-checks the gate state (a hold recorded meanwhile → conflict).
+    // the gate is closed (not reached, or not decided go). The UPDATE re-checks the gate state (a hold recorded meanwhile → conflict).
     const agentRemoval =
       isAgent(by) && (fields.gate === 0 || (unlocks !== undefined && current.unlocks.some((id) => !unlocks.includes(id))));
-    if (agentRemoval && current.gate && gatesEnforced() && !(OPENING_DECISIONS as string[]).includes(current.decision_state))
+    if (agentRemoval && current.gate && gatesEnforced() && (!current.reached || !(OPENING_DECISIONS as string[]).includes(current.decision_state)))
       throw agentGateRemovalError(existing.title);
     const gateGuard = agentRemoval && gatesEnforced() ? ` AND NOT ${gateClosedSql("milestone")}` : "";
     const next = { ...existing, ...fields } as Record<string, unknown>;

@@ -7,16 +7,20 @@ import { api } from "./api.js";
 import { h, clear, toastError } from "./dom.js";
 import { renderGrid } from "./grid.js";
 import { renderGantt } from "./gantt.js";
+import { renderMyDashboard } from "./mydash.js";
 import { renderUpcoming, renderMyWps, loadSummary } from "./portfolio.js";
 import { renderInbox } from "./inbox.js";
 import { openProject } from "./project.js";
 import { renderPeople } from "./people.js";
 import { renderTrash } from "./trash.js";
+import { sidebarModel, renderSidebar, createDrawer, goHome } from "./sidebar.js";
+import { PROJECT_CATEGORIES, catLabel } from "./categories.js";
 
 document.getElementById("logo").src = `/instance/${config.app.logo}`;
 document.getElementById("favicon").href = `/instance/${config.app.favicon}`;
 const main = document.getElementById("main");
 const nav = document.getElementById("nav");
+const navToggle = document.getElementById("nav-toggle");
 const searchForm = document.getElementById("search");
 const userbar = document.getElementById("userbar");
 
@@ -60,23 +64,35 @@ async function updateInboxCount() {
 }
 
 function renderNav() {
-  const link = (view, href, label, extra) => h("a", { href, "aria-current": state.view === view ? "page" : null }, label, extra || null);
-  clear(
-    nav,
-    link("grid", "#/", t("navProjects")),
-    link("gantt", "#/gantt", t("navGantt")),
-    link("upcoming", "#/upcoming", t("navUpcoming")),
-    link("mine", "#/mine", t("navMine")),
-    link("people", "#/people", t("navPeople")),
-    link("trash", "#/trash", t("navTrash")),
-    link(
-      "inbox",
-      "#/inbox",
-      t("navInbox"),
-      state.inboxCount ? h("span.count", { "aria-label": String(state.inboxCount) }, String(state.inboxCount)) : null,
-    ),
-  );
+  const model = sidebarModel({
+    view: state.view,
+    categories: PROJECT_CATEGORIES,
+    filterCategory: state.filter.category,
+    inboxCount: state.inboxCount,
+    hostname: location.hostname,
+  });
+  renderSidebar(nav, model, { h, clear, t, catLabel, onCategory: pickCategory });
+  navToggle.textContent = t("navMenu");
 }
+
+/** Category entry: set the grid category filter and show the grid. */
+function pickCategory(ev, key) {
+  ev.preventDefault();
+  state.filter.category = key;
+  closeDrawer();
+  if (location.hash === "#/" || location.hash === "" || location.hash === "#") route();
+  else location.hash = "#/";
+}
+
+const drawer = createDrawer({ doc: document, nav, toggle: navToggle });
+const closeDrawer = drawer.close;
+
+// Logo/title: home. Reset filters, close dialogs, scroll to top (also when already on #/).
+document
+  .getElementById("home")
+  .addEventListener("click", () =>
+    goHome({ filter: state.filter, getStorage: () => localStorage, doc: document, win: window, closeDrawer, hash: location.hash, route }),
+  );
 
 /** Shell texts come from the instance config and the UI locale (index.html carries no brand text). Re-run after a language switch. */
 function renderShell() {
@@ -142,13 +158,14 @@ function parseHash() {
 
 async function renderView() {
   const { parts, params } = parseHash();
-  const view = ["gantt", "inbox", "search", "people", "trash", "upcoming", "mine"].includes(parts[0]) ? parts[0] : "grid";
+  const view = ["gantt", "inbox", "search", "people", "trash", "upcoming", "mine", "my"].includes(parts[0]) ? parts[0] : "grid";
   state.view = view;
   renderNav();
   if (view === "people") await renderPeople(main, state);
   else if (view === "trash") await renderTrash(main, state);
   else if (view === "upcoming") await renderUpcoming(main);
   else if (view === "mine") await renderMyWps(main);
+  else if (view === "my") await renderMyDashboard(main, state);
   else if (view === "gantt") await renderGantt(main, state);
   else if (view === "inbox") await renderInbox(main, state);
   else if (view === "search") await renderSearchResults(params.get("q") || "");

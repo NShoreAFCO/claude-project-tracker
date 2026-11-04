@@ -141,6 +141,8 @@ export async function logProgress(
     progress?: number | null;
     effort_pd?: number | null;
     session_id?: string | null;
+    /** Hook only: stored with the session id in the same batch (own event when it changed). */
+    local_host?: string | null;
   },
   by: Caller,
 ): Promise<{ event_id: number; workpackage?: WorkpackageRow }> {
@@ -155,6 +157,7 @@ export async function logProgress(
     throw new ValidationError("progress must be 0..100");
   }
   const ts = now();
+  const today = ts.slice(0, 10);
   const stmts: D1PreparedStatement[] = [];
   // Spec F8: log_progress is progress on the WP and the project; system callers update no activity data.
   const act = activitySet(by, ts, true);
@@ -190,6 +193,8 @@ export async function logProgress(
   const signOffGuarded = mayComplete && !!verifier && !canDo(by, "verify_sign_off");
   const verifyGuard =
     !wp || !mayComplete ? [] : !verifier ? [verificationGuardStmt(db, wp.id)] : signOffGuarded ? [signOffGuardStmt(db, wp.id)] : [];
+  // A done WP with an actual end but no start: use the end as the start, so end >= start holds.
+  const startDay = wp?.status === "done" && wp.actual_end ? wp.actual_end : today;
   if (wp && progress !== null) {
     const verify = "? >= 100 AND status != 'done' AND verification != 'none' AND verified_by IS NULL";
     stmts.push(
@@ -198,17 +203,25 @@ export async function logProgress(
           `UPDATE workpackage SET progress = ?, status = CASE WHEN ? >= 100 THEN 'done' WHEN status = 'todo' THEN 'doing' ELSE status END,
             blocked_since = CASE WHEN ? >= 100 THEN NULL ELSE blocked_since END, waiting_reason = CASE WHEN ? >= 100 THEN NULL ELSE waiting_reason END,
             verified_by = CASE WHEN ${verify} THEN ? ELSE verified_by END, verified_at = CASE WHEN ${verify} THEN ? ELSE verified_at END,
+            actual_start = COALESCE(actual_start, ?), actual_end = CASE WHEN ? >= 100 AND status != 'done' THEN ? ELSE actual_end END,
             version = version + 1, updated_at = ?${act.sql} WHERE id = ?`,
         )
-        .bind(progress, progress, progress, progress, progress, verifier, progress, ts, ts, ...act.params, wp.id),
+        .bind(progress, progress, progress, progress, progress, verifier, progress, ts, startDay, progress, today, ts, ...act.params, wp.id),
     );
   } else if (wp && wp.status === "todo" && !autoStartLocked) {
     stmts.push(
       db
         .prepare(
-          `UPDATE workpackage AS w SET status = 'doing', version = version + 1, updated_at = ?${act.sql} WHERE w.id = ? AND w.status = 'todo' AND NOT ${gateLockedSql("w")}`,
+          `UPDATE workpackage AS w SET status = 'doing', actual_start = COALESCE(actual_start, ?), version = version + 1, updated_at = ?${act.sql} WHERE w.id = ? AND w.status = 'todo' AND NOT ${gateLockedSql("w")}`,
         )
-        .bind(ts, ...act.params, wp.id),
+        .bind(today, ts, ...act.params, wp.id),
+    );
+  } else if (wp && !wp.actual_start && wp.status !== "todo" && wp.status !== "dropped") {
+    // A log on a WP that is already under way but has no actual start (older rows): record it once.
+    stmts.push(
+      db
+        .prepare(`UPDATE workpackage SET actual_start = COALESCE(actual_start, ?), version = version + 1, updated_at = ?${act.sql} WHERE id = ?`)
+        .bind(startDay, ts, ...act.params, wp.id),
     );
   }
   if (wp && effort !== null) stmts.push(effortStmt(db, wp.id, effort, ts, by));
@@ -216,16 +229,44 @@ export async function logProgress(
   if (wp && effort !== null) diff.effort_actual_pd = [wp.effort_actual_pd ?? null, (wp.effort_actual_pd ?? 0) + effort];
   if (wp && progress !== null) diff.progress = [wp.progress, progress];
   if (wp && nextStatus !== wp.status) diff.status = [wp.status, nextStatus];
+  // Spec D2: the first log (or progress) on a WP is its actual start; reaching 100 is its actual end.
+  if (wp && !wp.actual_start && (progress !== null || nextStatus === "doing" || (wp.status !== "todo" && wp.status !== "dropped"))) diff.actual_start = [null, startDay];
+  if (wp && progress !== null && progress >= 100 && wp.status !== "done") diff.actual_end = [wp.actual_end ?? null, today];
+  // The automatic dates must leave a valid pair (end not before start); refuse before anything is written.
+  if (wp && (diff.actual_start || diff.actual_end)) {
+    const finalStart = diff.actual_start ? startDay : wp.actual_start;
+    const finalEnd = diff.actual_end ? today : wp.actual_end;
+    if (finalStart && finalEnd && finalEnd < finalStart) throw new ValidationError("actual_end cannot be before actual_start");
+  }
   if (needsVerifier) {
     diff.verified_by = [null, verifier];
     diff.verified_at = [null, ts];
   }
-  if (input.session_id) {
+  const newHost = typeof input.local_host === "string" ? input.local_host : null;
+  const oldHost = newHost
+    ? ((await db.prepare("SELECT local_host FROM project WHERE id = ?").bind(input.project_id).first<{ local_host: string | null }>())?.local_host ?? null)
+    : null;
+  const hostChanged = !!newHost && newHost !== oldHost;
+  if (input.session_id || hostChanged) {
     stmts.push(
       db
-        .prepare(`UPDATE project SET session_id = ?, version = version + 1, updated_at = ?${act.sql} WHERE id = ?`)
-        .bind(input.session_id, ts, ...act.params, input.project_id),
+        .prepare(
+          `UPDATE project SET session_id = COALESCE(?, session_id), local_host = ${hostChanged ? "?" : "local_host"}, version = version + 1, updated_at = ?${act.sql} WHERE id = ?`,
+        )
+        .bind(input.session_id || null, ...(hostChanged ? [newHost] : []), ts, ...act.params, input.project_id),
     );
+    if (hostChanged)
+      stmts.push(
+        eventStmt(db, {
+          by,
+          project_id: input.project_id,
+          entity: "project",
+          entity_id: input.project_id,
+          action: "update",
+          summary: "Host name updated by session hook",
+          diff: { local_host: [oldHost, newHost] },
+        }),
+      );
   } else {
     stmts.push(db.prepare(`UPDATE project SET updated_at = ?${act.sql} WHERE id = ?`).bind(ts, ...act.params, input.project_id));
   }

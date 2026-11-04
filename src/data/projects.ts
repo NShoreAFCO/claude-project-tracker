@@ -37,7 +37,7 @@ import {
   projectLinks,
   TransitionError,
 } from "./rules";
-import { gateClosedSql, gateLockedWpIds } from "./gates";
+import { gateClosedSql, gateLockedWpIds, latestDecisionSql } from "./gates";
 import { isAgent } from "../auth/caller";
 import { requireAction } from "../auth/permissions";
 import { POLICY } from "../policy";
@@ -65,6 +65,7 @@ export const PROJECT_FIELDS = [
   "origin",
   "repo_url",
   "local_path",
+  "local_host",
   "context_file",
   "session_id",
   "start_date",
@@ -105,6 +106,7 @@ const ORIGINS = ["claude-web", "claude-code", "manual", "mixed"];
 const MODES = ["derived", "manual"];
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const LOCAL_HOST_MAX = 100;
 
 export type ProjectCard = {
   /** Open risks, highest open score, and open risks scored 15+ without an action (spec F6). */
@@ -132,6 +134,11 @@ export type ProjectCard = {
   /** Number of waiting WPs (deferrals), for the card's Waiting chip. */
   waiting_count: number;
   next_milestone: { id: string; title: string; due_date: string | null } | null;
+  /**
+   * The earliest-due live gate that is not (reached and decided go / go_with_conditions); null when none.
+   * decision_state as on milestones: the latest decision, else pending (reached) or none.
+   */
+  current_gate: CurrentGate | null;
   /** Last progress (log_progress, status change, WP done); not touched by system writes. */
   last_activity: string | null;
   /** Active project without progress for stale_days (policy, per-category override). */
@@ -141,6 +148,7 @@ export type ProjectCard = {
   blocked: string[];
   repo_url: string | null;
   local_path: string | null;
+  local_host: string | null;
   session_id: string | null;
   version: number;
 };
@@ -156,6 +164,11 @@ function normalise(input: ProjectInput): Partial<Record<ProjectField, unknown>> 
       // true/false, or null to follow the policy default (spec F4)
       if (v !== null && typeof v !== "boolean") throw new ValidationError("schedule_strict must be true, false or null");
       v = v === null ? null : v ? 1 : 0;
+    } else if (f === "local_host") {
+      // Host name of the machine that holds local_path (spec D3): trimmed, max 100 characters, "" or null clears.
+      if (v !== null && typeof v !== "string") throw new ValidationError("local_host must be a string");
+      v = typeof v === "string" ? v.trim() || null : null;
+      if (typeof v === "string" && v.length > LOCAL_HOST_MAX) throw new ValidationError(`local_host must be at most ${LOCAL_HOST_MAX} characters`);
     } else if (f === "language") {
       // Report language (spec F2, §4.4): one of the instance's offered locales, null = instance default.
       if (v === "") v = null;
@@ -299,6 +312,9 @@ export function setBeforeProjectWriteForTesting(f: (() => Promise<void>) | null)
   beforeProjectWrite = f;
 }
 
+/** Card field current_gate (D7). */
+export type CurrentGate = { id: string; title: string; due_date: string | null; reached: boolean; decision_state: string };
+
 export async function getProjectRow(db: D1Database, id: string): Promise<ProjectRow> {
   const p = await db.prepare(`SELECT * FROM project WHERE id = ? AND ${LIVE()}`).bind(id).first<ProjectRow>();
   if (!p) throw new NotFoundError(`project ${id} not found`);
@@ -311,7 +327,7 @@ export async function listProjects(
   /** The reader; viewers get cards without the internal fields (spec F12). Omitted = internal read. */
   by?: Caller,
 ): Promise<ProjectCard[]> {
-  const [projects, wps, branches, docs, ms] = await db.batch([
+  const [projects, wps, branches, docs, ms, gates] = await db.batch([
     filter.status
       ? db.prepare(`SELECT * FROM project WHERE status = ? AND ${LIVE()} ORDER BY updated_at DESC`).bind(filter.status)
       : db.prepare(`SELECT * FROM project WHERE ${LIVE()} ORDER BY updated_at DESC`),
@@ -321,7 +337,21 @@ export async function listProjects(
     db.prepare(
       `SELECT m.project_id, m.id, m.title, m.due_date FROM milestone m WHERE ${LIVE("m")} AND NOT (${QUALIFIES}) ORDER BY m.due_date IS NULL, m.due_date, m.sort, m.title`,
     ),
+    db.prepare(
+      `SELECT m.project_id, m.id, m.title, m.due_date, m.reached_at, ${latestDecisionSql("m")} AS latest FROM milestone m
+       WHERE ${gateClosedSql("m")} ORDER BY m.due_date IS NULL, m.due_date, m.sort, m.title, m.id`,
+    ),
   ]);
+  const currentGate = new Map<string, CurrentGate>();
+  for (const g of gates.results as Array<{ project_id: string; id: string; title: string; due_date: string | null; reached_at: string | null; latest: string | null }>)
+    if (!currentGate.has(g.project_id))
+      currentGate.set(g.project_id, {
+        id: g.id,
+        title: g.title,
+        due_date: g.due_date,
+        reached: g.reached_at !== null,
+        decision_state: g.latest ?? (g.reached_at ? "pending" : "none"),
+      });
   const nextMs = new Map<string, { id: string; title: string; due_date: string | null }>();
   for (const m of ms.results as Array<{ project_id: string; id: string; title: string; due_date: string | null }>)
     if (!nextMs.has(m.project_id)) nextMs.set(m.project_id, { id: m.id, title: m.title, due_date: m.due_date });
@@ -368,6 +398,7 @@ export async function listProjects(
             .sort()[0] ?? null,
         waiting_count: list.filter((w) => !w.deleted_at && w.status === "waiting").length,
         next_milestone: nextMs.get(p.id) ?? null,
+        current_gate: currentGate.get(p.id) ?? null,
         last_activity: p.last_progress_at ?? p.created_at,
         stale: projectStale(p),
         open_branches: openBranches.get(p.id) ?? 0,
@@ -377,6 +408,7 @@ export async function listProjects(
           .map((w) => w.blocked_by!.trim()),
         repo_url: p.repo_url,
         local_path: p.local_path,
+        local_host: p.local_host ?? null,
         session_id: p.session_id,
         version: p.version,
       };
@@ -514,6 +546,7 @@ export async function createProject(db: D1Database, input: ProjectInput, by: Cal
     origin: "manual",
     repo_url: null,
     local_path: null,
+    local_host: null,
     context_file: null,
     session_id: null,
     start_date: null,

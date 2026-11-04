@@ -18,6 +18,8 @@ vi.mock("../public/js/dom.js", () => ({
   h: (...a: unknown[]) => ({ args: a }),
   formDialog: mocks.formDialog,
   toast: mocks.toast,
+  statusChip: (s: string) => ({ chip: s }),
+  progressBar: (pct: number, label: string) => ({ bar: pct, label }),
 }));
 
 function gateErr(endpoint?: string) {
@@ -160,5 +162,50 @@ describe("guardedWrite", () => {
 
     await expect(guardedWrite(wp, run, "p1")).rejects.toBe(error);
     expect(run).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("decisionDialog gate info", () => {
+  const flat = (x: unknown): string => JSON.stringify(x);
+  const ms = (over: Record<string, unknown>) => ({
+    id: "m1",
+    title: "Go/No-go",
+    reached: false,
+    requires_status: [
+      { id: "a", code: "WP1", title: "Build", status: "doing", progress: 40 },
+      { id: "b", code: "WP2", title: "Old", status: "dropped", progress: 0 },
+    ],
+    unlocks_status: [{ id: "c", code: "WP3", title: "Launch", status: "todo", progress: 0 }],
+    ...over,
+  });
+
+  async function open(m: unknown) {
+    mocks.formDialog.mockResolvedValue(null);
+    // @ts-expect-error untyped JS module
+    const { decisionDialog } = await import("../public/js/gates-ui.js");
+    await decisionDialog({ project: { id: "p1" }, milestone: m });
+    return mocks.formDialog.mock.calls[0][0];
+  }
+
+  it("lists required and opened work packages and warns when not reached", async () => {
+    const opts = await open(ms({}));
+    const s = flat(opts.intro);
+    expect(s).toContain("WP1 Build");
+    expect(s).toContain("WP2 Old");
+    expect(s).toContain("WP3 Launch");
+    expect(s).toContain("gate-warn");
+    expect(s).toContain('"bar":40');
+    expect(s).toContain("st-dropped");
+    expect(opts.submitLabel).toBeDefined();
+    expect(opts.fields.some((f: { disabled?: boolean }) => f.disabled)).toBe(false);
+  });
+
+  it("shows no warning when the gate is reached", async () => {
+    const opts = await open(
+      ms({ reached: true, requires_status: [{ id: "a", code: "WP1", title: "Build", status: "done", progress: 100 }] }),
+    );
+    const s = flat(opts.intro);
+    expect(s).toContain("WP1 Build");
+    expect(s).not.toContain("gate-warn");
   });
 });

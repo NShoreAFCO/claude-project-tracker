@@ -102,7 +102,7 @@ export async function buildReport(db: D1Database, projectId: string, today = new
     for (const w of (kids.get(parent) ?? []).sort((a, b) => a.sort - b.sort || a.title.localeCompare(b.title))) {
       flat.push({
         level,
-        title: w.title,
+        title: w.code ? `${w.code} ${w.title}` : w.title,
         status: w.status,
         progress: w.progress,
         start_date: w.start_date,

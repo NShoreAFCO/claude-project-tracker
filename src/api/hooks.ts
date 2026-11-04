@@ -23,10 +23,21 @@ export interface HookBody {
   worktree?: boolean;
   /** Optional (sent by the hook script): the repo's default branch from origin/HEAD, e.g. "main". */
   default_branch?: string | null;
+  /** Optional (hook script): host name of the machine; stored as project.local_host on a match (max 100 chars). */
+  host?: string | null;
   context_file?: { name?: string; content?: string } | null;
+  /** Up to two files: session.md and HANDOFF.md; other names are ignored. */
+  context_files?: { name?: string; content?: string }[] | null;
   /** Optional: id or email of the person the session ran for; recorded as event.person_id (spec §4.1). */
   on_behalf_of?: string | null;
 }
+
+const HOST_MAX = 100;
+/** Hook file name → context doc slug, title and pinning on creation. */
+const HOOK_FILES: Record<string, { slug: string; title: string; pinned: boolean }> = {
+  "session.md": { slug: "session-md", title: "session.md", pinned: false },
+  "HANDOFF.md": { slug: "handoff", title: "HANDOFF", pinned: true },
+};
 
 const str = (v: unknown, max: number): string | null => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
 
@@ -89,42 +100,76 @@ export async function handleClaudeCodeHook(body: HookBody, env: Env): Promise<Re
     result.branch_id = b.id;
   }
 
+  let hostToStore: string | null = null;
+  if (body.host !== undefined && body.host !== null) {
+    const host = typeof body.host === "string" ? body.host.trim() : "";
+    if (host && host.length <= HOST_MAX) hostToStore = host;
+    else result.host = host ? `ignored: longer than ${HOST_MAX} characters` : "ignored: not a non-empty string";
+  }
+
+  // The host is stored in the same batch as the session id.
   await logProgress(
     db,
-    { project_id: project.id, summary: `Claude Code session ended (${reason})${branch ? ` on ${branch}` : ""}`, session_id: sessionId },
+    {
+      project_id: project.id,
+      summary: `Claude Code session ended (${reason})${branch ? ` on ${branch}` : ""}`,
+      session_id: sessionId,
+      local_host: hostToStore,
+    },
     by,
   );
 
-  const file = body.context_file;
-  if (file && typeof file.content === "string") {
-    const name = str(file.name, 200) ?? "session.md";
+  // The old single context_file is session.md-style input; context_files (max 2) is the current form.
+  const files: { name?: string; content?: string }[] = Array.isArray(body.context_files) ? body.context_files.slice(0, 2) : [];
+  if (body.context_file) files.unshift(body.context_file);
+  const results: Record<string, string> = {};
+  for (const file of files) {
+    if (!file || typeof file.content !== "string") continue;
+    const rawName = str(file.name, 200) ?? (body.context_file === file ? "session.md" : "");
+    const spec = (Object.hasOwn(HOOK_FILES, rawName) ? HOOK_FILES[rawName] : undefined) ?? (body.context_file === file ? HOOK_FILES["session.md"] : undefined);
+    if (!spec) continue; // unknown name: ignored
+    const name = rawName;
     const unchanged = await db
       .prepare(
-        "SELECT id FROM context_doc WHERE owner_kind = 'project' AND owner_id = ? AND slug = 'session-md' AND content_md = ? AND deleted_at IS NULL",
+        "SELECT id FROM context_doc WHERE owner_kind = 'project' AND owner_id = ? AND slug = ? AND content_md = ? AND deleted_at IS NULL",
       )
-      .bind(project.id, file.content)
+      .bind(project.id, spec.slug, file.content)
       .first<{ id: string }>();
+    let outcome: string;
     if (unchanged) {
-      result.context_doc_id = unchanged.id;
-      result.context_file = "unchanged";
+      outcome = "unchanged";
+      if (spec.slug === "session-md") result.context_doc_id = unchanged.id;
     } else if (utf8Bytes(file.content) > CONTEXT_DOC_MAX_BYTES) {
-      result.context_file = "skipped: larger than 256 KB";
+      outcome = "skipped: larger than 256 KB";
     } else {
+      // Pin only on creation, so a user who unpinned HANDOFF keeps it unpinned.
+      const exists = spec.pinned
+        ? await db
+            .prepare("SELECT id FROM context_doc WHERE owner_kind = 'project' AND owner_id = ? AND slug = ? AND deleted_at IS NULL")
+            .bind(project.id, spec.slug)
+            .first()
+        : null;
       const doc = await writeContext(
         db,
         {
           owner_kind: "project",
           owner_id: project.id,
-          slug: "session-md",
-          title: name,
+          slug: spec.slug,
+          title: spec.slug === "session-md" ? name : spec.title,
           content_md: file.content,
           source: "sync",
           filename: name,
+          ...(spec.pinned && !exists ? { pinned: true } : {}),
         },
         by,
       );
-      result.context_doc_id = doc.id;
+      outcome = "written";
+      if (spec.slug === "session-md") result.context_doc_id = doc.id;
+      else result.handoff_doc_id = doc.id;
     }
+    results[spec.slug] = outcome;
+    if (spec.slug === "session-md" && outcome !== "written") result.context_file = outcome;
   }
+  if (Object.keys(results).length) result.context_files = results;
   return result;
 }

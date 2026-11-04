@@ -81,9 +81,42 @@ export function denylistHits(files, read, deny, skip = [], allow = []) {
  * Skips subjects GitHub writes itself: "Merge pull request #N from <owner>/<branch>" (the owner is the
  * hosting account) and "Merge branch 'main' into <branch>" (the branch-update button).
  */
-export function commitLogHits(log, deny) {
+export function commitLogHits(log, deny, ownSlug = null) {
+  // GitHub adds "Co-authored-by: <login> <id+login@users.noreply.github.com>" for the repo owner on squash
+  // merges; the owner login is already public in the repo slug, so exactly that trailer is skipped
+  const owner = ownSlug ? ownSlug.split("/")[0] : null;
+  const ownerTrailer = owner
+    ? new RegExp(`^Co-authored-by: ${escapeRe(owner)} <\\d+\\+${escapeRe(owner)}@users\\.noreply\\.github\\.com>$`, "i")
+    : null;
   return log
     .split("\n")
     .filter((l) => !/^Merge branch '[^']+' into \S+$/.test(l))
+    .filter((l) => !(ownerTrailer && ownerTrailer.test(l.trim())))
     .filter((l) => deny.test(l.replace(/^Merge pull request #\d+ from [^/\s]+\//, "")));
+}
+
+export const UNDERLAY_TOKENS = ["underlay-wp", "underlay-milestone", "underlay-gate"];
+
+const channel = (hex, i) => {
+  const v = parseInt(hex.slice(i, i + 2), 16) / 255;
+  return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+};
+const luminance = (hex) => 0.2126 * channel(hex, 1) + 0.7152 * channel(hex, 3) + 0.0722 * channel(hex, 5);
+
+/** Problems of the underlay tokens in a parsed theme ({ name: value }): missing, not #rrggbb, or --color-text-strong below 7:1. */
+export function underlayProblems(vars, min = 7) {
+  const fg = vars["color-text-strong"];
+  const hexRe = /^#[0-9a-fA-F]{6}$/;
+  const problems = [];
+  for (const k of UNDERLAY_TOKENS) {
+    const bg = vars[k];
+    if (bg === undefined) problems.push(`${k}: missing`);
+    else if (!hexRe.test(bg) || !hexRe.test(fg ?? "")) problems.push(`${k}: not a #rrggbb colour`);
+    else {
+      const [x, y] = [luminance(fg), luminance(bg)].sort((p, q) => q - p);
+      const ratio = (x + 0.05) / (y + 0.05);
+      if (ratio < min) problems.push(`${k}: text-strong ${ratio.toFixed(2)}:1 < ${min}:1`);
+    }
+  }
+  return problems;
 }
