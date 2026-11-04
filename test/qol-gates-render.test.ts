@@ -9,6 +9,9 @@ vi.mock("../public/js/dom.js", async (orig) => ({ ...(await orig<Record<string, 
 
 // @ts-expect-error untyped JS module
 const { gateLinksBlock, decisionDialog } = await import("../public/js/gates-ui.js");
+// @ts-expect-error untyped JS module
+const { setLocale } = await import("../public/js/i18n.js");
+setLocale("en"); // expectations below are English; instances may default to another locale
 
 const wp = (id: string, status: string, progress: number) => ({ id, code: id.toUpperCase(), title: `T-${id}`, status, progress });
 const ms = (over: Record<string, unknown> = {}) => ({
