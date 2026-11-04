@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.3.2 — 2026-11-04 (dashboard list fixes)
+
+No migration. Deploy only.
+
+### Fixed
+
+- Deadlines, My work packages and the my-dashboard open human tasks showed a work package's stored progress, so parents (stored 0) showed 0 % and parents whose children were all done stayed listed as open. They now show the effective progress as on the project page and leave such finished parents out. `GET /api/workpackages/upcoming` applies `limit` after that filter.
+- My dashboard, my active projects: the Due column was always empty because it read `end_date`; it now shows the project's `target_date`.
+
 ## v0.3.1 — 2026-11-04 (log and date rules)
 
 Read "Breaking" before you deploy. Migration 0007 is unchanged in name; if you have not applied it yet, apply this version of it. Details: `docs/SPEC.md` section 25 (log rules, schema).

@@ -204,7 +204,7 @@ export async function renderMyDashboard(main, state) {
         h("td", h("a", { href: `#/p/${encodeURIComponent(row.id)}` }, row.title)),
         h("td", row.title),
         h("td", t(`status.${row.status}`)),
-        h("td", fmtDate(row.end_date)),
+        h("td", fmtDate(row.target_date)),
         h("td", row.owner_initials || t("none")),
       );
     }
