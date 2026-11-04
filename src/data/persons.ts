@@ -49,13 +49,17 @@ function personEventDiff(before: Record<string, unknown> | null, after: Record<s
   return diff;
 }
 
+/** Columns read into PersonRow: every column but dashboard_prefs (own-record route only, spec D4). */
+const PERSON_COLS =
+  "id, name, display_name, company, email, phone, contact_note, internal, function, comment, access_role, locale, version, created_at, updated_at, deleted_at, deleted_by";
+
 export type PersonRef = { person_id: string | null; text: string | null };
 
 const roleFor = (email: string): Role => (POLICY.admins.includes(email) ? "admin" : POLICY.default_role);
 
 /** A live person (404 for a person in the trash). */
 export async function getPerson(db: D1Database, id: string): Promise<PersonRow> {
-  const p = await db.prepare(`SELECT * FROM person WHERE id = ? AND ${LIVE()}`).bind(id).first<PersonRow>();
+  const p = await db.prepare(`SELECT ${PERSON_COLS} FROM person WHERE id = ? AND ${LIVE()}`).bind(id).first<PersonRow>();
   if (!p) throw new NotFoundError(`person ${id} not found`);
   return p;
 }
@@ -63,7 +67,7 @@ export async function getPerson(db: D1Database, id: string): Promise<PersonRow> 
 /** Person with this email (case-insensitive), live rows first. */
 async function findByEmail(db: D1Database, email: string): Promise<PersonRow | null> {
   return db
-    .prepare("SELECT * FROM person WHERE email IS NOT NULL AND lower(email) = ? ORDER BY deleted_at IS NOT NULL LIMIT 1")
+    .prepare(`SELECT ${PERSON_COLS} FROM person WHERE email IS NOT NULL AND lower(email) = ? ORDER BY deleted_at IS NOT NULL LIMIT 1`)
     .bind(email.trim().toLowerCase())
     .first<PersonRow>();
 }
@@ -362,7 +366,7 @@ export async function listPersons(db: D1Database, opts: { users_only?: boolean; 
   if (!opts.include_deleted) where.push("deleted_at IS NULL");
   if (opts.users_only) where.push("access_role IS NOT NULL AND email IS NOT NULL");
   const { results } = await db
-    .prepare(`SELECT * FROM person${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY name COLLATE NOCASE, id`)
+    .prepare(`SELECT ${PERSON_COLS} FROM person${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY name COLLATE NOCASE, id`)
     .all<PersonRow>();
   return results;
 }

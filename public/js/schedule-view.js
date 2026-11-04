@@ -104,7 +104,7 @@ export function milestoneItem(ms, { today, titleOf, requiresText, unlocksText, a
   actionNodes.push(...actions);
 
   return h(
-    "li.ms",
+    "li.ms." + (gate ? "underlay-gate" : "underlay-milestone"),
     h("span.ms-diamond." + state, { "aria-hidden": "true", class: gate ? "gate" : "" }),
     h("strong", ms.title),
     h("span.ms-state." + state, stateLabel),
@@ -116,4 +116,53 @@ export function milestoneItem(ms, { today, titleOf, requiresText, unlocksText, a
     issueList(ms, titleOf),
     h("div.actions", actionNodes),
   );
+}
+
+/** Keeps only the WPs in `shown` (a Set of ids; null = all) at every depth, so a hidden descendant never anchors a milestone. */
+export function pruneTree(list, shown) {
+  return list
+    .filter((w) => !shown || shown.has(w.id))
+    .map((w) => (w.children?.length ? { ...w, children: pruneTree(w.children, shown) } : w));
+}
+
+/**
+ * Places milestone and gate rows in a work package tree (running context, D13).
+ * `tree` is the list of top-level WPs as shown (children nested); `isOpen(wp)` tells whether a parent is unfolded.
+ * Returns { before: Map<wpId, ms[]>, after: Map<wpId, ms[]>, tail: ms[] }: gate rows go before the first WP they
+ * unlock, milestone rows after the last of their `requires` WPs (a WP inside a folded parent counts as the outermost
+ * folded parent), else after the attached WP, else at the end. Links to WPs that are not shown are ignored.
+ */
+export function placeMilestones(tree, milestones, isOpen = () => true) {
+  const order = new Map(); // displayed node id -> position
+  const rep = new Map(); // any shown WP id -> displayed node id
+  const walk = (list, shownAs) => {
+    for (const w of list) {
+      const node = shownAs ?? w.id;
+      if (!shownAs) order.set(w.id, order.size);
+      rep.set(w.id, node);
+      if (w.children?.length) walk(w.children, shownAs ?? (isOpen(w) ? null : w.id));
+    }
+  };
+  walk(tree, null);
+
+  const before = new Map();
+  const after = new Map();
+  const tail = [];
+  const add = (map, key, ms) => map.set(key, [...(map.get(key) ?? []), ms]);
+  const pick = (ids, last) => {
+    const nodes = [...new Set((ids ?? []).map((id) => rep.get(id)).filter((x) => x !== undefined))];
+    if (!nodes.length) return null;
+    return nodes.reduce((a, b) => (order.get(b) > order.get(a) === last ? b : a));
+  };
+  for (const ms of milestones) {
+    const first = ms.gate ? pick(ms.unlocks, false) : null;
+    if (first !== null) {
+      add(before, first, ms);
+      continue;
+    }
+    const last = pick(ms.requires, true) ?? (ms.workpackage_id ? (rep.get(ms.workpackage_id) ?? null) : null);
+    if (last !== null) add(after, last, ms);
+    else tail.push(ms);
+  }
+  return { before, after, tail };
 }

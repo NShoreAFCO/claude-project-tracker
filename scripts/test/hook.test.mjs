@@ -1,5 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import { spawn } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -111,4 +113,52 @@ test("installHook explains a 302/401 from Access", async () => {
   });
   assert.equal(r.ok, false);
   assert.match(lines.join("\n"), /service token/i);
+});
+
+// Runs the real hook script against a local server (or an unreachable port) and returns what it posted.
+function runHook(cwd, url) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [join(repo, "hooks", "tracker-session-end.mjs")], {
+      env: { ...process.env, TRACKER_URL: url, TRACKER_CF_CLIENT_ID: "id", TRACKER_CF_CLIENT_SECRET: "s" },
+      stdio: ["pipe", "ignore", "ignore"],
+    });
+    child.on("close", (code) => resolve(code));
+    child.stdin.end(JSON.stringify({ session_id: "s1", cwd, reason: "other" }));
+  });
+}
+
+test("hook body carries host and both files; skips a file over 256 KB; exits 0", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "hookcwd-"));
+  writeFileSync(join(dir, "session.md"), "# session");
+  writeFileSync(join(dir, "HANDOFF.md"), "# handoff");
+  let posted = null;
+  const srv = createServer((req, res) => {
+    let b = "";
+    req.on("data", (c) => (b += c));
+    req.on("end", () => {
+      posted = JSON.parse(b);
+      res.end("{}");
+    });
+  });
+  await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+  const url = `http://127.0.0.1:${srv.address().port}`;
+  try {
+    assert.equal(await runHook(dir, url), 0);
+    assert.ok(typeof posted.host === "string" && posted.host.length > 0 && posted.host.length <= 64);
+    assert.deepEqual(posted.context_files, [
+      { name: "session.md", content: "# session" },
+      { name: "HANDOFF.md", content: "# handoff" },
+    ]);
+    posted = null;
+    writeFileSync(join(dir, "HANDOFF.md"), "x".repeat(256 * 1024 + 1));
+    assert.equal(await runHook(dir, url), 0);
+    assert.deepEqual(posted.context_files, [{ name: "session.md", content: "# session" }]);
+  } finally {
+    srv.close();
+  }
+});
+
+test("hook exits 0 when the server is unreachable", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "hookcwd-"));
+  assert.equal(await runHook(dir, "http://127.0.0.1:9"), 0);
 });

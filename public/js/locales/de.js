@@ -618,4 +618,74 @@ export default {
   verifiedByHint: "Wer das Ergebnis geprüft hat. Nötig, wenn die Verifizierung nicht „none“ ist.",
   verifiedTip: "Geprüft von {name} am {date}",
   unverifiedTip: "Erledigt, aber die Verifizierung fehlt",
+  // qol:t09
+  gateRequires: "Voraussetzung für den Abschluss",
+  gateOpens: "Schaltet frei",
+  gateProgressOf: "Fortschritt von {name}",
+  gateNotReached:
+    "Die Entscheidung kann jetzt erfasst werden, das Gate bleibt aber geschlossen, bis diese Arbeitspakete abgeschlossen oder verworfen sind: {list}.",
+  // /qol:t09
+  // qol:t06
+  navDashboard: "Übersicht",
+  navMy: "Mein Dashboard",
+  navCategories: "Kategorien",
+  navLogout: "Abmelden",
+  navMenu: "Menü",
+  // /qol:t06
+  // qol:t10
+  ganttLegendPlanned: "Geplant",
+  ganttLegendActual: "Ist",
+  ganttLegendProgress: "Fortschritt",
+  ganttLegendOverdue: "Überfällig",
+  ganttOngoing: "laufend",
+  // /qol:t10
+  // qol:t07
+  noDate: "kein Datum",
+  filterCompleted: "Abgeschlossene Projekte",
+  completed: { hide: "Abgeschlossene ausblenden", only: "Nur abgeschlossene", all: "Alle" },
+  filterTagsBtn: "Tags ({n})",
+  filterTagsClear: "Zurücksetzen",
+  filterTagsNone: "Noch keine Tags.",
+  // /qol:t07
+  // qol:t11
+  ganttUnplaced: "Nicht zugeordnet",
+  // /qol:t11
+  // qol:t12
+  mydTitle: "Mein Dashboard",
+  mydKind: {
+    my_tasks: "Meine anstehenden Aufgaben",
+    my_human_tasks: "Meine menschlichen Aufgaben",
+    my_decisions: "Meine fälligen Entscheidungen",
+    all_decisions: "Alle offenen Entscheidungen",
+    all_human_tasks: "Alle offenen menschlichen Aufgaben",
+    active_projects: "Meine aktiven Projekte",
+  },
+  mydProject: "Projekt",
+  mydAllProjects: "Alle Projekte",
+  mydSavedViews: "Gespeicherte Ansichten",
+  mydNoViews: "Noch keine gespeicherten Ansichten.",
+  mydSaveView: "Aktuelle Ansicht speichern",
+  mydViewName: "Name der Ansicht",
+  mydRename: "Umbenennen",
+  mydMoveUp: "Nach oben",
+  mydMoveDown: "Nach unten",
+  mydDefault: "Standard",
+  mydSetDefault: "Als Standard setzen",
+  mydConfirmDelete: "Gespeicherte Ansicht \"{name}\" löschen?",
+  mydActiveProjects: "Aktive Projekte",
+  mydPickProjects: "Projekte, die in dieser Option angezeigt werden",
+  mydEmpty: "Hier gibt es nichts anzuzeigen.",
+  mydLoadFailed: "Das Dashboard konnte nicht geladen werden: {error}",
+  mydSaveFailed: "Speichern fehlgeschlagen: {error}",
+  mydColProject: "Projekt",
+  mydColStatus: "Status",
+  mydColDue: "Fällig",
+  mydColOwner: "Verantwortlich",
+  mydColDecisionMaker: "Entscheider",
+  mydGateOpen: "Offen",
+  mydGateReached: "Erreicht",
+  // /qol:t12
+  // qol:t16
+  mydColItem: "Eintrag",
+  // /qol:t16
 };

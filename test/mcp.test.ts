@@ -43,6 +43,8 @@ describe("MCP server", () => {
     expect(r.status).toBe(200);
     expect(r.result.serverInfo.name).toBe("project-tracker");
     expect(r.result.instructions).toContain("get_context_bundle");
+    expect(r.result.instructions).toContain("PROJECT-STRUCTURE.md");
+    expect(r.result.instructions.length).toBeLessThanOrEqual(1800);
   });
 
   it("lists all 28 tools", async () => {

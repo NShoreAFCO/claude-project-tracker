@@ -4,6 +4,7 @@ One Cloudflare Worker that tracks projects you work on with Claude, across claud
 
 - **Dashboard** (`/`): projects, work packages, milestones, branches, scorecards, token cost, Gantt chart, inbox, and a context repository per project, work package and branch.
 - **People and rules**: every change is attributed to a person (owner, sponsor, decision maker, priority stakeholders); projects close only with a closure note and no open work packages; blocked and waiting work packages are told apart; deletes go to a trash with restore; context documents carry a draft / released / obsolete status.
+- **Usability (v0.3.0)**: sidebar shell, grid filters and redesigned cards, a personal dashboard (`#/my`), work package codes and actual dates, gates inside the work package tree, and a Gantt chart with planned, actual and overdue bars.
 - **Remote MCP server** (`/mcp`): 28 tools plus `tracker://context/{doc_id}` resources, for claude.ai connectors and Claude Code.
 - **REST API** (`/api/*`): used by the dashboard and the Claude Code SessionEnd hook.
 - **GitHub webhook** (`/webhooks/github`): branches, pushes, pull requests and forks (HMAC-checked).
@@ -90,7 +91,7 @@ Rules worth knowing:
 | [`docs/CUSTOMISING.md`](docs/CUSTOMISING.md) | the `instance/` folder: name, language, texts, demo data |
 | [`docs/THEMING.md`](docs/THEMING.md) | applying a corporate design (theme tokens, contrast rules, worked example) |
 | [`docs/UPDATING.md`](docs/UPDATING.md) | receiving updates from the package and contributing fixes back |
-| [`docs/ai/`](docs/ai/) | playbooks for your AI assistant (setup, customising) and text for claude.ai projects |
+| [`docs/ai/`](docs/ai/) | playbooks for your AI assistant (setup, customising), [how to structure a project](docs/ai/PROJECT-STRUCTURE.md) and text for claude.ai projects |
 | [`docs/SPEC.md`](docs/SPEC.md), [`docs/VERIFIED.md`](docs/VERIFIED.md) | technical specification, verified API versions and Cloudflare calls |
 
 **Quick start:** create your own copy (`gh repo create <name> --private --template <this-repo> --clone`), `npm install`, prepare Cloudflare and create an API token (INSTALL §5–6), then run `npm run setup` in your terminal. With Claude Code, just say *"Help me set up this tracker. Follow docs/ai/SETUP-PLAYBOOK.md."*

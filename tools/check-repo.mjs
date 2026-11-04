@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { loadInstance } from "../scripts/lib/instance.mjs";
-import { migrationProblems, denylistHits, commitLogHits, loadDenylist, ownRepoSlug } from "./lib/repo-checks.mjs";
+import { migrationProblems, denylistHits, commitLogHits, loadDenylist, ownRepoSlug, underlayProblems } from "./lib/repo-checks.mjs";
 
 const failures = [];
 const ok = [];
@@ -68,6 +68,9 @@ const CONTRACT = [
   "risk-critical",
   "risk-nc",
   "risk-opportunity",
+  "underlay-wp",
+  "underlay-milestone",
+  "underlay-gate",
   "font",
   "font-heading",
   "font-size-base",
@@ -141,6 +144,7 @@ pairCheck(
   "risk fills carry text-strong ≥ 7:1",
   CONTRACT.filter((k) => k.startsWith("risk-")).map((k) => ["color-text-strong", k, 7]),
 );
+check("underlay tokens present, text-strong ≥ 7:1", underlayProblems(themeVars).length === 0, underlayProblems(themeVars).join("; "));
 const surface = hexOf("color-surface");
 const weakCat = [...inst.categories.project, ...inst.categories.workpackage].filter(
   (c) => surface && contrast(c.color.toLowerCase(), surface) < 3,
@@ -165,7 +169,7 @@ if (inst.checks?.denylist !== false) {
       log = execFileSync("git", ["log", "--format=%s%n%b"], { encoding: "utf8" });
     } catch {}
     // GitHub writes "Merge pull request #N from <owner>/<branch>" and "Merge branch 'main' into <branch>" itself
-    const logHits = commitLogHits(log, DENY);
+    const logHits = commitLogHits(log, DENY, slug);
     check("denylist: no identity in commit messages", logHits.length === 0, logHits.slice(0, 5).join(" | "));
   }
   const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;

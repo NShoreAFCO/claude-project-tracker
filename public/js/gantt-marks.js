@@ -98,3 +98,147 @@ export function barTooltip(base, entity, titleOf) {
 
   return lines.join("\n");
 }
+
+const DAY_MS = 86400000;
+
+/** Day number (days since epoch, UTC) of a YYYY-MM-DD string. */
+export function dayOf(ymd) {
+  const [y, m, d] = ymd.slice(0, 10).split("-").map(Number);
+  return Date.UTC(y, m - 1, d) / DAY_MS;
+}
+
+/**
+ * Pure bar geometry for one work package. Spans are `{ from, to }` in day numbers, `to` exclusive.
+ * `today` is a YYYY-MM-DD string or a day number. Returns null when there is nothing to draw
+ * (dates are never invented).
+ */
+export function barParts(wp, today) {
+  const todayDay = typeof today === "number" ? today : dayOf(today);
+  const hasPlan = Boolean(wp.start_date && wp.end_date && wp.end_date >= wp.start_date);
+  const hasStart = Boolean(wp.actual_start);
+  const hasEnd = Boolean(wp.actual_end);
+
+  if (!hasPlan && !hasStart && !hasEnd) return null;
+
+  const planned = hasPlan ? { from: dayOf(wp.start_date), to: dayOf(wp.end_date) + 1 } : null;
+  const actualFrom = hasStart ? dayOf(wp.actual_start) : null;
+  const actualTo = hasStart ? Math.max(actualFrom + 1, hasEnd ? dayOf(wp.actual_end) + 1 : todayDay + 1) : null;
+
+  const parts = { planned, actual: null, progress: null, overdue: null, solid: null, block: null, extent: null };
+
+  if (hasStart && !hasPlan) {
+    parts.solid = { from: actualFrom, to: actualTo };
+  } else if (hasStart) {
+    if (actualFrom < planned.to) parts.actual = { from: actualFrom, to: Math.min(actualTo, planned.to) };
+    if (actualTo > planned.to) {
+      parts.overdue = { from: Math.max(actualFrom, planned.to), to: actualTo, closed: hasEnd };
+    }
+  } else if (hasEnd) {
+    const at = dayOf(wp.actual_end);
+    parts.block = { from: at, to: at + 1 };
+  }
+
+  if (hasPlan) {
+    const pct = wp.status === "done" ? 100 : Math.max(0, Math.min(100, wp.progress || 0));
+    const to = Math.min(planned.to, planned.from + ((planned.to - planned.from) * pct) / 100);
+    parts.progress = { from: planned.from, to };
+  }
+
+  const spans = [parts.planned, parts.actual, parts.overdue, parts.solid, parts.block].filter(Boolean);
+  parts.extent = { from: Math.min(...spans.map((p) => p.from)), to: Math.max(...spans.map((p) => p.to)) };
+  return parts;
+}
+
+// qol:t11
+const linkId = (x) => (typeof x === "string" ? x : (x?.workpackage_id ?? x?.id ?? null));
+
+/** Date a milestone is drawn at: due date, else the reached date of a done one. */
+export function markDate(m) {
+  return m.due_date || (m.done && m.reached_at ? m.reached_at.slice(0, 10) : null);
+}
+
+/**
+ * Decide on which Gantt row each milestone / gate is drawn (pure).
+ * `rows`: the visible work package rows (`{ w: { id } }`); `topOf`: Map wpId -> top-level wpId;
+ * `entries`: `{ m, p }` per milestone (m.requires / m.unlocks are WP ids, m.workpackage_id the attached WP).
+ * A milestone is drawn once, on the topmost row of its WP rows (attached WP and `requires`; a sub-WP without a row
+ * counts as its main WP's row). A gate is drawn on every row it unlocks (that WP's row, else its main WP's row),
+ * falling back to the milestone rule when it unlocks nothing visible (R6). Labels `M<n>` / `G<n>` count
+ * per project by date (ties keep input order). Returns `{ placed: Map(row -> marks[]), unplaced: marks[] }`,
+ * a mark being `{ m, p, kind, label, date, row }`.
+ */
+export function placeMarks(rows, entries, topOf = new Map()) {
+  const rowOf = new Map();
+  for (const r of rows) if (r.w) rowOf.set(r.w.id, r);
+  const ownOrMain = (id) => rowOf.get(id) ?? rowOf.get(topOf.get(id)) ?? null;
+  const index = new Map(rows.map((r, i) => [r, i]));
+
+  const counters = new Map();
+  const order = entries
+    .map((e, i) => ({ e, i, date: markDate(e.m) }))
+    .sort((a, b) => (a.date === b.date ? a.i - b.i : a.date === null ? 1 : b.date === null ? -1 : a.date < b.date ? -1 : 1));
+
+  const placed = new Map();
+  const unplaced = [];
+  for (const { e, date } of order) {
+    const { m, p } = e;
+    const kind = m.gate ? "gate" : "milestone";
+    const key = `${p?.id ?? m.project_id ?? ""}|${kind}`;
+    const n = (counters.get(key) ?? 0) + 1;
+    counters.set(key, n);
+    const base = { m, p, kind, label: `${kind === "gate" ? "G" : "M"}${n}`, date };
+
+    const requires = (m.requires || []).map(linkId).filter(Boolean);
+    // R6: a gate is drawn on every row it unlocks; a milestone once, on the topmost of its WP rows
+    const targets = [];
+    const add = (r) => r && !targets.includes(r) && targets.push(r);
+    if (kind === "gate") for (const id of (m.unlocks || []).map(linkId)) if (id) add(ownOrMain(id));
+    if (!targets.length) {
+      const cands = [m.workpackage_id, ...requires].filter(Boolean).map(ownOrMain).filter(Boolean);
+      if (cands.length) targets.push(cands.reduce((a, b) => (index.get(b) < index.get(a) ? b : a)));
+    }
+
+    if (!targets.length) {
+      unplaced.push({ ...base, row: null });
+      continue;
+    }
+    for (const target of targets) {
+      if (!placed.has(target)) placed.set(target, []);
+      placed.get(target).push({ ...base, row: target });
+    }
+  }
+  return { placed, unplaced };
+}
+
+/** Half height of a mark's glyph: gate flag pole 9, milestone diamond 8 (10 when done). */
+export function markHalf(kind, done = false) {
+  return kind === "gate" ? 9 : done ? 10 : 8;
+}
+
+/**
+ * Dependency arrows WP -> mark (pure). `placed`: Map(row -> marks) from placeMarks; `resolve`: WP id -> its visible
+ * row or null. A mark with several flags (gate) gets an arrow per flag from every required WP; same-row pairs are
+ * skipped. Returns `{ from: row, mark, fromId, toId }[]` (toId = the milestone id, the issue-edge key is `fromId>toId`).
+ */
+export function markEdges(placed, resolve) {
+  const edges = [];
+  for (const marks of placed.values()) {
+    for (const mark of marks) {
+      for (const id of (mark.m.requires || []).map(linkId).filter(Boolean)) {
+        const from = resolve(id);
+        if (from && from !== mark.row) edges.push({ from, mark, fromId: id, toId: mark.m.id });
+      }
+    }
+  }
+  return edges;
+}
+
+/**
+ * Path of an arrow from a WP bar end (sx, sy) to a mark centred on (cx, cy): along the source row, then vertically into
+ * the top vertex when the source row is above, the bottom vertex when below.
+ */
+export function markArrowPath(sx, sy, cx, cy, half) {
+  const ey = sy < cy ? cy - half : cy + half;
+  return `M ${sx} ${sy} H ${cx} V ${ey}`;
+}
+// /qol:t11

@@ -5,7 +5,7 @@ import { h, clear, statusChip, toastError } from "./dom.js";
 import { openProject } from "./project.js";
 import { WP_CATEGORIES, catVar, catDot, catLabel } from "./categories.js";
 import { collectIssues } from "./schedule-ui.js";
-import { issueEdgeKeys, ghostBar, ghostDiamond, gateRing, issueMark, slipMark, barTooltip } from "./gantt-marks.js";
+import { issueEdgeKeys, ghostBar, ghostDiamond, issueMark, slipMark, barTooltip, barParts, placeMarks, markDate, markEdges, markArrowPath, markHalf } from "./gantt-marks.js";
 
 const NS = "http://www.w3.org/2000/svg";
 const s = (tag, attrs = {}, ...children) => {
@@ -30,7 +30,7 @@ let showCritical = false;
 /** Query of the current hash route (#/gantt?project=<id>): the project filter lives in the URL. */
 const hashParams = () => new URLSearchParams(location.hash.split("?")[1] || "");
 
-const milestoneDate = (m) => m.due_date || (m.done && m.reached_at ? m.reached_at.slice(0, 10) : null);
+const milestoneDate = markDate;
 
 const milestoneState = (m, today) => {
   if (m.done) return "done";
@@ -95,11 +95,13 @@ export async function renderGantt(main, state) {
     on: { change: (e) => ((showCritical = e.target.checked), rerender()) },
   });
 
+  const todayYmd = new Date().toISOString().slice(0, 10);
   const rows = [];
   const undated = [];
   const visibleByWp = new Map();
   const allWps = [];
   const milestones = [];
+  const topOf = new Map();
   const titles = new Map();
   const issues = [];
 
@@ -133,15 +135,31 @@ export async function renderGantt(main, state) {
       return start && end ? { start_date: start, end_date: end } : null;
     };
 
+    const actualSpan = (w) => {
+      const from = w.actual_start || w.actual_end;
+      if (!from) return null;
+      return { start_date: from, end_date: w.actual_end || (from > todayYmd ? from : todayYmd) };
+    };
+
     const walkAll = (w, depth, top) => {
       allWps.push(w);
       const validOwn = w.start_date && w.end_date && w.end_date >= w.start_date;
 
       if (level === "main") {
         if (depth === 0) {
-          const span = validOwn ? { start_date: w.start_date, end_date: w.end_date } : collectDescendantSpan(w);
+          const ownActual = validOwn ? null : actualSpan(w);
+          const descendants = validOwn || ownActual ? null : collectDescendantSpan(w);
+          const span = validOwn ? { start_date: w.start_date, end_date: w.end_date } : ownActual || descendants;
           if (span) {
-            const row = { type: "wp", w, depth: 0, p, start_date: span.start_date, end_date: span.end_date };
+            const row = {
+              type: "wp",
+              w,
+              depth: 0,
+              p,
+              start_date: span.start_date,
+              end_date: span.end_date,
+              actualOnly: !validOwn && !descendants,
+            };
             projectRows.push(row);
             visibleByWp.set(w.id, row);
             top = row;
@@ -157,14 +175,16 @@ export async function renderGantt(main, state) {
         return;
       }
 
-      if (validOwn) {
+      const own = validOwn ? { start_date: w.start_date, end_date: w.end_date } : actualSpan(w);
+      if (own) {
         const row = {
           type: "wp",
           w,
           depth,
           p,
-          start_date: w.start_date,
-          end_date: w.end_date,
+          start_date: own.start_date,
+          end_date: own.end_date,
+          actualOnly: !validOwn,
         };
         projectRows.push(row);
         visibleByWp.set(w.id, row);
@@ -175,18 +195,39 @@ export async function renderGantt(main, state) {
       for (const child of w.children || []) walkAll(child, depth + 1, null);
     };
 
+    const markTop = (w, rootId) => (topOf.set(w.id, rootId), (w.children || []).forEach((c) => markTop(c, rootId)));
+    for (const w of roots) markTop(w, w.id);
     for (const w of roots) walkAll(w, 0, null);
 
     for (const m of projectMilestones) {
-      const date = milestoneDate(m);
-      const entry = { m, p };
-      milestones.push(entry);
-      if (date) projectRows.push({ type: "milestone", m, p, date });
-      else undated.push({ type: "milestone", m, p });
+      milestones.push({ m, p });
     }
 
     if (projectRows.length) rows.push({ type: "project", p }, ...projectRows);
   }
+
+  // milestones and gates ride on WP rows (D14); undated plain milestones go to the table, the rest unplaced
+  const { placed, unplaced } = placeMarks(
+    rows.filter((r) => r.type === "wp"),
+    milestones,
+    topOf,
+  );
+  // an undated gate is only drawn when it unlocks a WP (it sits at that WP's start); other undated gates are legend-only (G2 R5)
+  const drawable = (mk) => mk.date || (mk.kind === "gate" && (mk.m.unlocks || []).length > 0);
+  const legendOnly = [];
+  const skip = (mk) => (mk.kind === "gate" ? legendOnly.push(mk) : undated.push({ type: "milestone", m: mk.m, p: mk.p }));
+  for (const [row, marks] of placed) {
+    for (const mk of marks.filter((x) => !drawable(x))) skip(mk);
+    placed.set(row, marks.filter(drawable));
+  }
+  const unplacedDated = [];
+  for (const mk of unplaced) (mk.date ? unplacedDated.push(mk) : skip(mk));
+  if (unplacedDated.length) rows.push({ type: "unplaced", marks: unplacedDated });
+  // a gate drawn on several rows is listed once
+  const allMarks = [...new Map([...[...placed.values()].flat(), ...unplacedDated, ...legendOnly].map((mk) => [mk.m.id, mk])).values()].sort((a, b) =>
+    a.kind === b.kind ? Number(a.label.slice(1)) - Number(b.label.slice(1)) : a.kind === "milestone" ? -1 : 1,
+  );
+  const marksCtx = { placed };
 
   const body = [];
   if (!rows.length) {
@@ -194,8 +235,8 @@ export async function renderGantt(main, state) {
   } else {
     body.push(
       showBaseline && noBaseline ? h("p.meta", { role: "status" }, t("ganttNoBaseline")) : null,
-      h("div.gantt-wrap", chart(rows, visibleByWp, allWps, milestones, opts)),
-      legend(),
+      h("div.gantt-wrap", chart(rows, visibleByWp, allWps, { ...opts, ...marksCtx })),
+      legend(allMarks),
     );
   }
 
@@ -265,12 +306,25 @@ export async function renderGantt(main, state) {
   );
 }
 
-function chart(rows, visibleByWp, allWps, milestones, { titleOf, issueKeys }) {
-  const datedRows = rows.filter((r) => r.type === "wp" || r.type === "milestone");
+function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
+  const datedRows = rows.filter((r) => r.type === "wp");
   const today = Math.floor(Date.now() / DAY);
 
-  let min = Math.min(...datedRows.map((r) => (r.type === "wp" ? toDay(r.start_date) : toDay(r.date))));
-  let max = Math.max(...datedRows.map((r) => (r.type === "wp" ? toDay(r.end_date) + 1 : toDay(r.date) + 1)));
+  const partsOf = (r) =>
+    barParts(
+      r.actualOnly ? { ...r.w, start_date: null, end_date: null } : { ...r.w, start_date: r.start_date, end_date: r.end_date },
+      today,
+    );
+  const extents = datedRows.map((r) => partsOf(r)?.extent ?? { from: toDay(r.start_date), to: toDay(r.end_date) + 1 });
+  for (const r of rows) {
+    if (r.type === "unplaced") for (const mk of r.marks) extents.push({ from: toDay(mk.date), to: toDay(mk.date) + 1 });
+  }
+  for (const marks of placed.values()) {
+    for (const mk of marks) if (mk.date) extents.push({ from: toDay(mk.date), to: toDay(mk.date) + 1 });
+  }
+
+  let min = Math.min(...extents.map((e) => e.from));
+  let max = Math.max(...extents.map((e) => e.to));
 
   min -= 3;
   max += 3;
@@ -306,7 +360,7 @@ function chart(rows, visibleByWp, allWps, milestones, { titleOf, issueKeys }) {
     for (let day = min + ((4 - (min % 7) + 7) % 7); day <= max; day += 7) {
       svg.append(
         s("line", { class: "grid-line", x1: x(day), x2: x(day), y1: TOP - 6, y2: height }),
-        s("text", { x: x(day) + 3, y: 18 }, dm.format(new Date(day * DAY))),
+        s("text", { x: x(day) + 3, y: 13 }, dm.format(new Date(day * DAY))),
       );
     }
   }
@@ -321,17 +375,12 @@ function chart(rows, visibleByWp, allWps, milestones, { titleOf, issueKeys }) {
     if (day < min || span <= 120) continue;
     svg.append(
       s("line", { class: "grid-line", x1: x(day), x2: x(day), y1: TOP - 6, y2: height }),
-      s("text", { x: x(day) + 4, y: 18 }, monthFmt().format(d)),
+      s("text", { x: x(day) + 4, y: 13 }, monthFmt().format(d)),
     );
   }
 
   const rowIndex = new Map();
   rows.forEach((r, i) => rowIndex.set(r, i));
-
-  const milestoneRows = new Map();
-  for (const r of rows) {
-    if (r.type === "milestone") milestoneRows.set(r.m.id, r);
-  }
 
   const wpPoint = (row, side) => {
     const day = side === "right" ? toDay(row.end_date) + 1 : toDay(row.start_date);
@@ -341,17 +390,9 @@ function chart(rows, visibleByWp, allWps, milestones, { titleOf, issueKeys }) {
     };
   };
 
-  const msPoint = (row, side) => {
-    const state = milestoneState(row.m, today);
-    const half = state === "done" ? 10 : 8;
-    const center = x(toDay(row.date) + 0.5);
-    return {
-      x: center + (side === "right" ? half : -half),
-      y: TOP + rowIndex.get(row) * ROW + ROW / 2,
-    };
-  };
-
-  const pointFor = (row, side) => (row.type === "milestone" ? msPoint(row, side) : wpPoint(row, side));
+  const pointFor = wpPoint;
+  const markX = (mk) =>
+    mk.kind === "gate" ? x((partsOf(mk.row)?.extent ?? { from: toDay(mk.row.start_date) }).from) - 4 : x(toDay(mk.date) + 0.5);
 
   if (showDeps) {
     const defs = s(
@@ -399,22 +440,26 @@ function chart(rows, visibleByWp, allWps, milestones, { titleOf, issueKeys }) {
       }
     }
 
-    for (const { m } of milestones) {
-      const msRow = milestoneRows.get(m.id);
-      if (!msRow) continue;
-
-      for (const wpId of m.requires || []) {
-        const source = visibleByWp.get(wpId);
-        if (source && source !== msRow) edges.push([source, msRow, wpId, m.id]);
-      }
-
-      for (const wpId of m.unlocks || []) {
-        const target = visibleByWp.get(wpId);
-        if (target && target !== msRow) edges.push([msRow, target, m.id, wpId]);
-      }
+    const isCritical = (row) => row.w.critical;
+    const arrow = (d, conflict, crit) =>
+      svg.append(
+        s("path", {
+          class: `dep${conflict ? " issue" : ""}${crit ? " critical" : ""}`,
+          d,
+          "marker-end": conflict ? "url(#gantt-arrow-issue)" : "url(#gantt-arrow)",
+        }),
+      );
+    // R6: WP -> milestone diamond / gate flags
+    for (const { from, mark, fromId, toId } of markEdges(placed, (id) => visibleByWp.get(id))) {
+      const start = pointFor(from, "right");
+      const cy = TOP + rowIndex.get(mark.row) * ROW + ROW / 2;
+      const half = markHalf(mark.kind, milestoneState(mark.m, today) === "done");
+      arrow(
+        markArrowPath(start.x, start.y, markX(mark), cy, half),
+        issueKeys.has(`${fromId}>${toId}`),
+        showCritical && isCritical(from) && mark.m.critical,
+      );
     }
-
-    const isCritical = (row) => (row.type === "milestone" ? row.m.critical : row.w.critical);
     for (const [sourceRow, targetRow, fromId, toId] of edges) {
       const start = pointFor(sourceRow, "right");
       const end = pointFor(targetRow, "left");
@@ -430,7 +475,55 @@ function chart(rows, visibleByWp, allWps, milestones, { titleOf, issueKeys }) {
     }
   }
 
-  rows.forEach((r, i) => {
+  const drawMark = (mk, cx, y) => {
+    const cy = y + ROW / 2;
+    const m = mk.m;
+    const state = milestoneState(m, today);
+    const crit = showCritical && m.critical ? " critical" : "";
+    const gateText = m.gate ? ` · ${t("ganttGate")}: ${t(`decisionState.${m.decision_state}`)}` : "";
+    const tip = () =>
+      s(
+        "title",
+        {},
+        barTooltip(
+          `${mk.label} ${m.title}${mk.date ? `: ${fmtDate(mk.date)}` : ""} · ${milestoneStateLabel(state)}${gateText}`,
+          m,
+          titleOf,
+        ),
+      );
+    if (mk.kind === "gate") {
+      const top = cy - 9;
+      const bot = cy + 9;
+      svg.append(
+        s(
+          "g",
+          { class: `gate-mark decision-${m.decision_state}${crit}` },
+          s("path", { class: "gate-pole", d: `M${cx},${bot} V${top}` }),
+          s("path", { class: "gate-flag", d: `M${cx},${top} h8 l-3,4 l3,4 h-8 z` }),
+          s("text", { class: "mark-label", x: cx - 3, y: cy + 4, "text-anchor": "end" }, mk.label),
+          tip(),
+        ),
+      );
+      return;
+    }
+    const half = state === "done" ? 10 : 8;
+    if (showBaseline && m.baseline_end && m.baseline_end !== mk.date)
+      svg.append(ghostDiamond(s, { cx: x(toDay(m.baseline_end) + 0.5), cy, half: 5 }));
+    svg.append(
+      s(
+        "g",
+        {},
+        s("polygon", {
+          class: `ms ms-${state}${crit}`,
+          points: `${cx},${cy - half} ${cx + half},${cy} ${cx},${cy + half} ${cx - half},${cy}`,
+        }),
+        s("text", { class: "mark-label", x: cx + half + 3, y: cy + 4 }, mk.label),
+        tip(),
+      ),
+    );
+  };
+
+  const drawRow = (r, i) => {
     const y = TOP + i * ROW;
 
     if (r.type === "project") {
@@ -441,76 +534,39 @@ function chart(rows, visibleByWp, allWps, milestones, { titleOf, issueKeys }) {
       return;
     }
 
-    if (r.type === "milestone") {
-      const state = milestoneState(r.m, today);
-      const half = state === "done" ? 10 : 8;
-      const cx = x(toDay(r.date) + 0.5);
-      const cy = y + ROW / 2;
-      const gateText = r.m.gate ? ` · ${t("ganttGate")}: ${t(`decisionState.${r.m.decision_state}`)}` : "";
-      const diamond = s(
-        "polygon",
-        {
-          class: `ms ms-${state}${showCritical && r.m.critical ? " critical" : ""}`,
-          points: `${cx},${cy - half} ${cx + half},${cy} ${cx},${cy + half} ${cx - half},${cy}`,
-        },
-        s("title", {}, barTooltip(`${r.m.title}: ${fmtDate(r.date)} · ${milestoneStateLabel(state)}${gateText}`, r.m, titleOf)),
-      );
-
-      svg.append(
-        ...[
-          s("text", { x: 16, y: y + 20 }, truncate(r.m.title, 28)),
-          issueMark(s, { x: LABEL - 16, y: y + 20, entity: r.m, titleOf }),
-        ].filter(Boolean),
-      );
-      if (showBaseline && r.m.baseline_end && r.m.baseline_end !== r.date) {
-        svg.append(ghostDiamond(s, { cx: x(toDay(r.m.baseline_end) + 0.5), cy, half: 5 }));
-      }
-      if (r.m.gate) {
-        const ring = gateRing(s, { cx, cy, half });
-        ring.classList.add(`decision-${r.m.decision_state}`);
-        svg.append(ring);
-      }
-      svg.append(diamond);
+    if (r.type === "unplaced") {
+      svg.append(s("text", { x: 16, y: y + 20 }, t("ganttUnplaced")));
+      for (const mk of r.marks) drawMark(mk, x(toDay(mk.date) + 0.5), y);
       return;
     }
 
     const w = r.w;
+    const parts = partsOf(r);
     const x1 = x(toDay(r.start_date));
     const x2 = x(toDay(r.end_date) + 1);
     const pct = w.status === "done" ? 100 : Math.max(0, Math.min(100, w.progress || 0));
-    const title = s("title", {}, barTooltip(`${w.title}: ${fmtDate(r.start_date)} – ${fmtDate(r.end_date)} · ${fmtPct(pct)}`, w, titleOf));
+    const range = r.actualOnly
+      ? `${fmtDate(w.actual_start || w.actual_end)} – ${w.actual_end ? fmtDate(w.actual_end) : t("ganttOngoing")}`
+      : `${fmtDate(r.start_date)} – ${fmtDate(r.end_date)}`;
+    const title = () => s("title", {}, barTooltip(`${w.code ? `${w.code} ${w.title}` : w.title}: ${range} · ${fmtPct(pct)}`, w, titleOf));
     const colour = catVar("w", w.bar_category);
-
-    const bg = s(
-      "rect",
-      {
-        class: "bar-bg",
-        x: x1,
-        y: y + 7,
-        width: Math.max(2, x2 - x1),
-        height: ROW - 14,
-        rx: 3,
-        "fill-opacity": 0.3,
-      },
-      title,
-    );
-    if (showCritical && w.critical) bg.classList.add("critical");
-    bg.style.setProperty("fill", colour);
-    bg.style.setProperty("stroke", colour);
-
-    const fill = s("rect", {
-      class: "bar-fill",
-      x: x1,
-      y: y + 7,
-      width: Math.max(0, ((x2 - x1) * pct) / 100),
-      height: ROW - 14,
-      rx: 3,
-    });
-    fill.style.setProperty("fill", colour);
+    const barY = y + 7;
+    const barH = ROW - 14;
+    const rect = (cls, span, extra = {}) => {
+      const el = s(
+        "rect",
+        { class: cls, x: x(span.from), y: barY, width: Math.max(2, x(span.to) - x(span.from)), height: barH, rx: 3, ...extra },
+        title(),
+      );
+      const outline = cls === "bar-actual";
+      el.style.setProperty("fill", outline ? "none" : colour);
+      el.style.setProperty("stroke", cls.startsWith("bar-fill") ? "none" : colour);
+      return el;
+    };
 
     svg.append(
       ...[
-        s("text", { x: 16 + r.depth * 14, y: y + 20 }, truncate(w.title, 28 - r.depth * 2)),
+        s("text", { x: 16 + r.depth * 14, y: y + 20 }, truncate(w.code ? `${w.code} ${w.title}` : w.title, 28 - r.depth * 2)),
         issueMark(s, { x: LABEL - 16, y: y + 20, entity: w, titleOf }),
       ].filter(Boolean),
     );
@@ -519,20 +575,59 @@ function chart(rows, visibleByWp, allWps, milestones, { titleOf, issueKeys }) {
       const slip = slipMark(s, { x: x2 + 4, y: y + 20, days: w.slip_days });
       if (slip) svg.append(slip);
     }
-    svg.append(bg, fill);
+    if (!parts) return;
+    if (parts.planned) {
+      const bg = rect("bar-bg", parts.planned);
+      if (showCritical && w.critical) bg.classList.add("critical");
+      svg.append(bg);
+    }
+    if (parts.progress && parts.progress.to > parts.progress.from) svg.append(rect("bar-fill", parts.progress));
+    for (const [key, cls] of [
+      ["solid", "bar-fill bar-actual-solid"],
+      ["block", "bar-fill bar-actual-block"],
+    ]) {
+      if (!parts[key]) continue;
+      const el = rect(cls, parts[key]);
+      if (showCritical && w.critical) {
+        el.classList.add("critical");
+        el.style.setProperty("stroke", "var(--status-blocked)");
+        el.style.setProperty("stroke-width", "3");
+      }
+      svg.append(el);
+    }
+    if (parts.actual) svg.append(rect("bar-actual", parts.actual));
+    if (parts.overdue) {
+      const { from, to, closed } = parts.overdue;
+      const yTop = barY;
+      const yBot = barY + barH;
+      const d = closed
+        ? `M${x(from)},${yTop} H${x(to)} V${yBot} H${x(from)}`
+        : `M${x(from)},${yTop} H${x(to)} M${x(from)},${yBot} H${x(to)}`;
+      const od = s("path", { class: "bar-overdue", d }, title());
+      od.style.setProperty("stroke", colour);
+      svg.append(od);
+    }
+  };
+
+  rows.forEach((r, i) => {
+    drawRow(r, i);
+    const marks = r.type === "wp" ? placed.get(r) : null;
+    if (!marks) return;
+    const y = TOP + i * ROW;
+    for (const mk of marks) drawMark(mk, markX(mk), y);
   });
 
   if (today >= min && today <= max) {
     svg.append(
       s("line", { class: "today", x1: x(today), x2: x(today), y1: TOP - 6, y2: height }),
-      s("text", { x: x(today) + 3, y: TOP - 8 }, t("ganttToday")),
+      s("text", { x: x(today) + 3, y: TOP - 4 }, t("ganttToday")),
     );
   }
 
   return svg;
 }
 
-function legend() {
+function legend(allMarks = []) {
   return h(
     "div.gantt-legend",
     h("strong", `${t("legend")}:`),
@@ -541,9 +636,19 @@ function legend() {
     h("span", h("span.ms-diamond.open"), t("msOpen")),
     h("span", h("span.ms-diamond.overdue"), t("overdue")),
     h("span", h("span.ms-diamond.gate"), t("ganttGate")),
+    h("span", h("span.legend-planned"), t("ganttLegendPlanned")),
+    h("span", h("span.legend-actual"), t("ganttLegendActual")),
+    h("span", h("span.legend-progress"), t("ganttLegendProgress")),
+    h("span", h("span.legend-overdue"), t("ganttLegendOverdue")),
     h("span", h("span.legend-ghost"), t("ganttBaseline")),
     h("span", h("span.legend-critical"), t("ganttCritical")),
     h("span", h("span.legend-issue", { "aria-hidden": "true" }, "⚠"), t("ganttIssues")),
+    allMarks.length
+      ? h(
+          "ul.gantt-marklist",
+          allMarks.map((mk) => h("li", `${mk.label} ${mk.m.title}${mk.date ? ` (${fmtDate(mk.date)})` : ""}`)),
+        )
+      : null,
   );
 }
 

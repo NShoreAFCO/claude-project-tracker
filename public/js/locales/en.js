@@ -613,4 +613,74 @@ export default {
   verifiedByHint: "Who verified the result. Needed when verification is not none.",
   verifiedTip: "Verified by {name} on {date}",
   unverifiedTip: "Done, but verification is missing",
+  // qol:t09
+  gateRequires: "Required for completion",
+  gateOpens: "Opens",
+  gateProgressOf: "Progress of {name}",
+  gateNotReached:
+    "You can record the decision now, but the gate stays closed until these work packages are complete or dropped: {list}.",
+  // /qol:t09
+  // qol:t06
+  navDashboard: "Dashboard",
+  navMy: "My dashboard",
+  navCategories: "Categories",
+  navLogout: "Log out",
+  navMenu: "Menu",
+  // /qol:t06
+  // qol:t10
+  ganttLegendPlanned: "Planned",
+  ganttLegendActual: "Actual",
+  ganttLegendProgress: "Progress",
+  ganttLegendOverdue: "Overdue",
+  ganttOngoing: "ongoing",
+  // /qol:t10
+  // qol:t07
+  noDate: "no date",
+  filterCompleted: "Completed projects",
+  completed: { hide: "Hide completed", only: "Only completed", all: "All" },
+  filterTagsBtn: "Tags ({n})",
+  filterTagsClear: "Clear",
+  filterTagsNone: "No tags yet.",
+  // /qol:t07
+  // qol:t11
+  ganttUnplaced: "Unplaced",
+  // /qol:t11
+  // qol:t12
+  mydTitle: "My dashboard",
+  mydKind: {
+    my_tasks: "My upcoming tasks",
+    my_human_tasks: "My human tasks",
+    my_decisions: "My due decisions",
+    all_decisions: "All open decisions",
+    all_human_tasks: "All open human tasks",
+    active_projects: "My active projects",
+  },
+  mydProject: "Project",
+  mydAllProjects: "All projects",
+  mydSavedViews: "Saved views",
+  mydNoViews: "No saved views yet.",
+  mydSaveView: "Save current view",
+  mydViewName: "View name",
+  mydRename: "Rename",
+  mydMoveUp: "Move up",
+  mydMoveDown: "Move down",
+  mydDefault: "Default",
+  mydSetDefault: "Make default",
+  mydConfirmDelete: "Delete the saved view \"{name}\"?",
+  mydActiveProjects: "Active projects",
+  mydPickProjects: "Projects shown in this option",
+  mydEmpty: "Nothing to show here.",
+  mydLoadFailed: "Could not load the dashboard: {error}",
+  mydSaveFailed: "Could not save: {error}",
+  mydColProject: "Project",
+  mydColStatus: "Status",
+  mydColDue: "Due",
+  mydColOwner: "Owner",
+  mydColDecisionMaker: "Decision maker",
+  mydGateOpen: "Open",
+  mydGateReached: "Reached",
+  // /qol:t12
+  // qol:t16
+  mydColItem: "Item",
+  // /qol:t16
 };

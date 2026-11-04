@@ -34,6 +34,11 @@
   --risk-nc: #c7b6e8;              /* nonconformity type chip */
   --risk-opportunity: #9cd0ec;     /* opportunity type chip */
 
+  /* underlays: soft fills behind work packages, milestones and gates; --color-text-strong on each >= 7:1 */
+  --underlay-wp: #dbe9f4;
+  --underlay-milestone: #fbe8c4;
+  --underlay-gate: #e0f0d4;
+
   /* type and shape */
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-heading: var(--font);

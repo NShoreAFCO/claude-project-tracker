@@ -1650,3 +1650,479 @@ details.cat-empty[open] > summary.cat-head::before {
     margin-left: 0;
   }
 }
+
+/* qol:t09 */
+.gate-dialog-info {
+  margin: 0 0 1rem;
+}
+.gate-dialog-info h4 {
+  margin: 0.6rem 0 0.3rem;
+}
+.gate-wps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.gate-wps li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+}
+.gate-wps li.dropped .gate-wp-name {
+  text-decoration: line-through;
+}
+.gate-wps .progress-row {
+  flex: 1 1 8rem;
+  min-width: 8rem;
+}
+.callout.gate-warn {
+  border-left-color: var(--status-waiting, var(--status-hold));
+  margin: 0.6rem 0 0;
+}
+/* /qol:t09 */
+/* qol:t06 */
+/* header overrides: the logo/title link replaces the old top nav, the menu button is shown by the narrow-screen rules */
+.top h1 {
+  flex: 0 1 auto;
+}
+.top .home {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  color: var(--color-text-strong);
+  text-decoration: none;
+}
+.top .nav-toggle {
+  display: none;
+}
+.shell {
+  display: flex;
+  align-items: flex-start;
+}
+.shell > main {
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
+}
+.sidebar {
+  flex: 0 0 13.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 1rem 0.6rem;
+  position: sticky;
+  top: 0;
+  max-height: 100vh;
+  overflow-y: auto;
+  border-right: 1px solid var(--color-border);
+}
+.sidebar a {
+  font-weight: 600;
+  text-transform: var(--button-transform);
+  letter-spacing: var(--button-letter-spacing);
+  font-size: 0.85rem;
+  text-decoration: none;
+  color: var(--color-text-strong);
+  padding: 0.45rem 0.7rem;
+  border-radius: var(--radius);
+  border-left: 3px solid transparent;
+}
+.sidebar a:hover {
+  background: var(--color-tint);
+}
+.sidebar a[aria-current="page"] {
+  border-left-color: var(--color-primary);
+  color: var(--color-primary-strong);
+  background: var(--color-tint);
+}
+.sidebar .count {
+  display: inline-block;
+  min-width: 1.4em;
+  margin-left: 0.3rem;
+  padding: 0 0.35rem;
+  border-radius: 1em;
+  background: var(--color-primary-strong);
+  color: var(--color-on-primary);
+  font-size: 0.75rem;
+  text-align: center;
+}
+.sidebar .nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.sidebar .nav-heading {
+  margin: 0.8rem 0.7rem 0.2rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+.sidebar .nav-group a {
+  padding-left: 1.2rem;
+}
+.sidebar .nav-rule {
+  width: 100%;
+  margin: 0.6rem 0;
+  border: 0;
+  border-top: 1px solid var(--color-border);
+}
+.sidebar .nav-logout {
+  margin-top: auto;
+  border-top: 1px solid var(--color-border);
+  border-radius: 0;
+}
+.underlay-wp,
+.underlay-milestone,
+.underlay-gate {
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius);
+  color: var(--color-text-strong);
+}
+.underlay-wp {
+  background: var(--underlay-wp);
+}
+.underlay-milestone {
+  background: var(--underlay-milestone);
+}
+.underlay-gate {
+  background: var(--underlay-gate);
+}
+@media (max-width: 900px) {
+  .top .nav-toggle {
+    display: inline-block;
+  }
+  .sidebar {
+    position: fixed;
+    z-index: 20;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(16rem, 85vw);
+    max-height: none;
+    background: var(--color-surface);
+    border-right: 1px solid var(--color-border);
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform 0.15s ease, visibility 0.15s;
+  }
+  .nav-open .sidebar {
+    transform: none;
+    visibility: visible;
+  }
+}
+/* /qol:t06 */
+/* qol:t10 */
+.gantt .bar-bg {
+  fill-opacity: 0.3;
+  stroke-width: 1;
+}
+.gantt .bar-actual {
+  fill: none;
+  stroke-width: 2.5;
+}
+.gantt .bar-actual-solid,
+.gantt .bar-actual-block {
+  stroke: none;
+}
+.gantt .bar-overdue {
+  fill: none;
+  stroke-width: 2.5;
+  stroke-dasharray: 4 3;
+}
+.legend-planned,
+.legend-actual,
+.legend-progress,
+.legend-overdue {
+  display: inline-block;
+  width: 1.4rem;
+  height: 0.7rem;
+  margin: 0 0.3rem;
+  border: 1px solid var(--color-primary);
+  border-radius: 3px;
+  vertical-align: middle;
+}
+.legend-planned {
+  background: var(--color-tint);
+}
+.legend-actual {
+  border-width: 3px;
+}
+.legend-progress {
+  background: var(--color-primary);
+}
+.legend-overdue {
+  border: 2px dashed var(--color-primary);
+}
+/* /qol:t10 */
+/* qol:t07 */
+.seg-control {
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.seg-control .seg {
+  border: 0;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+}
+.seg-control .seg:last-child {
+  border-right: 0;
+}
+.seg-control .seg[aria-pressed="true"] {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+.seg-control .seg:focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: -3px;
+}
+.tag-filter {
+  position: relative;
+}
+.tag-pop {
+  position: absolute;
+  z-index: 15;
+  top: 100%;
+  left: 0;
+  margin-top: 0.25rem;
+  min-width: 200px;
+  max-height: 20rem;
+  overflow: auto;
+  padding: 0.5rem 0.75rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.tag-pop[hidden] {
+  display: none;
+}
+.tag-opt {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+.card-target {
+  font-size: 0.9rem;
+}
+.card .card-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+.card .box-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.card .box-title {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card .box-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.75rem;
+  font-size: 0.9rem;
+}
+.card .card-minor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+}
+.card .card-minor .initials,
+.card .card-minor .chip {
+  font-size: 0.7rem;
+  opacity: 0.85;
+}
+/* /qol:t07 */
+
+/* qol:t11 */
+.gantt .gate-mark .gate-pole {
+  fill: none;
+  stroke: var(--color-text-strong);
+  stroke-width: 2;
+}
+.gantt .gate-mark .gate-flag {
+  fill: var(--color-surface);
+  stroke: var(--color-text-strong);
+  stroke-width: 1.5;
+}
+.gantt .gate-mark.decision-pending .gate-flag,
+.gantt .gate-mark.decision-none .gate-flag {
+  stroke-dasharray: 3 2;
+}
+.gantt .gate-mark.decision-go .gate-flag,
+.gantt .gate-mark.decision-go_with_conditions .gate-flag {
+  fill: var(--ms-done);
+  stroke: var(--ms-done);
+}
+.gantt .gate-mark.decision-hold .gate-flag,
+.gantt .gate-mark.decision-stop .gate-flag {
+  fill: var(--ms-overdue);
+  stroke: var(--ms-overdue);
+}
+.gantt .mark-label {
+  font-size: 10px;
+  font-weight: 700;
+}
+.gantt-marklist {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.85em;
+}
+/* /qol:t11 */
+
+/* qol:t08 */
+.tabs .gantt-link {
+  margin-left: auto;
+  align-self: center;
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: var(--button-transform);
+  letter-spacing: var(--button-letter-spacing);
+  padding: 0.5rem 0.8rem;
+  color: var(--color-primary-strong);
+}
+.chev,
+.fold-toggle {
+  min-width: 32px;
+  min-height: 32px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1em;
+  line-height: 1;
+}
+.fold-toggle {
+  justify-content: flex-start;
+  gap: 0.35em;
+}
+.chev {
+  width: auto;
+}
+.wp-code {
+  font-family: ui-monospace, Consolas, monospace;
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+.tree > li.ms,
+.tree ul > li.ms {
+  list-style: none;
+  margin: 0.25rem 0;
+}
+/* /qol:t08 */
+/* qol:t12 */
+.mydash-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4em;
+  margin: 0.5em 0;
+}
+.mydash-kinds button.active {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+.mydash-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6em;
+  align-items: center;
+  margin: 0.5em 0;
+}
+.mydash-views {
+  margin: 0.5em 0;
+  padding: 0;
+  list-style: none;
+}
+.mydash-views li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4em;
+  align-items: center;
+  padding: 0.2em 0;
+}
+.mydash-views .is-default {
+  font-weight: 600;
+}
+.mydash-projects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2em 1em;
+  margin: 0.5em 0;
+}
+.mydash-error {
+  color: var(--color-danger);
+}
+/* /qol:t12 */
+/* qol:t16 */
+/* R3: bigger fold arrows (about 2x), tap target >= 24 px */
+.fold-glyph {
+  display: inline-block;
+  font-size: 2em;
+  line-height: 0.6;
+  width: 1em;
+  text-align: center;
+}
+.chev,
+.fold-toggle {
+  min-width: 28px;
+  min-height: 28px;
+}
+.fold-toggle {
+  gap: 0.2em;
+}
+/* R1/R2/R4: milestone and gate rows inside the work package tree */
+.tree li.ms {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.7rem;
+  padding: 0.5rem 0.75rem;
+}
+.tree li.ms > .meta,
+.tree li.ms > .actions,
+.tree li.ms > .last-decision {
+  flex-basis: 100%;
+  margin: 0;
+}
+.ms-diamond,
+.ms-diamond.done {
+  width: 0.7em;
+  height: 0.7em;
+  margin: 0 0.35rem;
+  border-width: 2px;
+}
+.ms-diamond.gate {
+  margin: 0 0.45rem;
+  box-shadow:
+    0 0 0 1.5px var(--color-surface),
+    0 0 0 3px var(--color-text-strong);
+}
+.gantt-legend .ms-diamond {
+  margin: 0 0.3rem;
+}
+/* /qol:t16 */
