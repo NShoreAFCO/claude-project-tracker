@@ -4,7 +4,7 @@
 // Reads the hook JSON from stdin (session_id, cwd, reason), collects git facts for cwd, attaches the host name and <cwd>/session.md
 // and <cwd>/HANDOFF.md (each ≤ 256 KB) and POSTs to ${TRACKER_URL}/api/hooks/claude-code with the Access service-token headers.
 // SessionEnd hooks share a 1.5 s budget unless settings.json gives the hook a longer `timeout`; every step has a deadline.
-// `--budget-ms <n>` sets this hook's own budget (default 1100, which fits the 1.5 s default incl. node start-up);
+// `--budget-ms <n>` sets this hook's own budget (default 900, which fits the 1.5 s default incl. node start-up);
 // `npm run hook:install` passes 4000 together with `"timeout": 5`. Set TRACKER_DEBUG=1 to see errors on stderr.
 // A 409 GATE_LOCKED / WP_DONE is retried once as a note. A log the server could not take (network error, 5xx, 429) is kept
 // in a pending file in the hook's state folder (TRACKER_HOOK_STATE_DIR, default ~/.claude/hooks) and resent on a later run.
@@ -18,7 +18,7 @@ const elapsed = () => Date.now() - started;
 const debug = process.env.TRACKER_DEBUG === "1";
 const log = (...a) => debug && console.error("[tracker-hook]", ...a);
 
-const DEFAULT_BUDGET_MS = 1100; // with ~150-300 ms node start-up this stays under Claude Code's default 1.5 s
+const DEFAULT_BUDGET_MS = 900; // leaves ~600 ms of Claude Code's default 1.5 s for the shell, node start-up and AV scans
 const MAX_BUDGET_MS = 55000; // Claude Code caps a hook timeout at 60 s
 /** `--budget-ms <n>` from argv, clamped to 300..55000; anything else → the default. */
 function budgetFromArgs(argv) {
@@ -154,12 +154,14 @@ const transient = (status) => status === 0 || (status >= 300 && status < 400) ||
 
 /** POST one hook body → {ok, status (0 = no response), code (409 current.code)}. */
 async function post(base, headers, body) {
+  const left = BUDGET_MS - SPOOL_RESERVE_MS - elapsed();
+  if (left < 100) return { ok: false, status: 0, code: null }; // no time for a POST: keep the log for the next run
   try {
     const res = await fetch(`${base}/api/hooks/claude-code`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...headers },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(Math.max(100, BUDGET_MS - SPOOL_RESERVE_MS - elapsed())),
+      signal: AbortSignal.timeout(left),
       redirect: "manual", // an Access login redirect means the service token was rejected
     });
     log("POST", res.status, `${elapsed()} ms`);

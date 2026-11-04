@@ -1,5 +1,6 @@
 // Merges the tracker SessionEnd hook into a Claude Code settings.json object (pure, never mutates its input).
-const isTrackerHook = (h) => typeof h?.command === "string" && /tracker-session-end\.mjs"?(\s+--budget-ms\s+\d+)?$/.test(h.command.trim());
+// Any command that runs tracker-session-end.mjs (quoted or not, with flags or a suffix) is the tracker hook.
+const isTrackerHook = (h) => typeof h?.command === "string" && /(^|[\s"'/\\])tracker-session-end\.mjs(["'\s]|$)/.test(h.command);
 
 /** The hook's own budget and the settings.json `timeout` (seconds) that lets Claude Code wait for it (SessionEnd default: 1.5 s). */
 export const HOOK_BUDGET_MS = 4000;

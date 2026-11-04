@@ -47,11 +47,18 @@ export async function installHook({
   const cfgFile = join(root, "instance", "instance.config.json");
   const configUrl = existsSync(cfgFile) ? JSON.parse(readFileSync(cfgFile, "utf8")).deploy?.publicUrl : undefined;
   // A deployment set up by hand (INSTALL without `npm run setup`) has no hook token in the secrets store; it already
-  // keeps the hook's values as user environment variables. Use those then, and leave them as they are.
+  // keeps the hook's values as user environment variables. Use all three from there then, and never write them.
   const fromStore = Boolean(secrets.HOOK_CLIENT_ID && secrets.HOOK_CLIENT_SECRET);
-  const publicUrl = configUrl || procEnv.TRACKER_URL;
+  const publicUrl = fromStore ? configUrl : procEnv.TRACKER_URL;
   const clientId = fromStore ? secrets.HOOK_CLIENT_ID : procEnv.TRACKER_CF_CLIENT_ID;
   const clientSecret = fromStore ? secrets.HOOK_CLIENT_SECRET : procEnv.TRACKER_CF_CLIENT_SECRET;
+  const bare = (u) => String(u ?? "").replace(/\/+$/, "");
+  if (!fromStore && publicUrl && configUrl && bare(publicUrl) !== bare(configUrl)) {
+    say(
+      `TRACKER_URL (${publicUrl}) is not this deployment's address (${configUrl}), so its service token belongs to another tracker. Nothing was changed. Set the three TRACKER_* variables for this tracker, or run \`npm run setup\`.`,
+    );
+    return { ok: false };
+  }
   if (!publicUrl || !clientId || !clientSecret) {
     say(
       "The deployment is not set up yet (public URL or hook service token missing). Run `npm run setup` first, or set TRACKER_URL, TRACKER_CF_CLIENT_ID and TRACKER_CF_CLIENT_SECRET as user environment variables.",
@@ -81,7 +88,7 @@ export async function installHook({
     say(changed ? "  ✓ settings.json updated (backup saved next to it)" : "  ✓ settings.json already up to date");
 
     const env = { TRACKER_URL: publicUrl, TRACKER_CF_CLIENT_ID: clientId, TRACKER_CF_CLIENT_SECRET: clientSecret };
-    if (fromStore || publicUrl !== procEnv.TRACKER_URL) {
+    if (fromStore) {
       const where = await setUserEnv(env, { platform, home });
       say(`  ✓ environment variables stored (${where ?? "user environment"})`);
     } else say("  ✓ using the hook's existing environment variables (no hook token in the secrets store)");

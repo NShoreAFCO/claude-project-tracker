@@ -48,6 +48,8 @@ test("mergeSettings: replaces a hand-made entry (no flag, no timeout) and a flag
   for (const command of [
     'node "C:/Users/Jane Doe/.claude/hooks/tracker-session-end.mjs"',
     "node C:/x/tracker-session-end.mjs --budget-ms 900",
+    "node 'C:/x/tracker-session-end.mjs' --budget-ms=4000",
+    "node C:\\x\\tracker-session-end.mjs 2>/dev/null || true",
   ]) {
     const r = mergeSettings({ hooks: { SessionEnd: [{ hooks: [{ type: "command", command }] }] } }, CMD);
     assert.deepEqual(r.settings.hooks.SessionEnd, [{ hooks: [{ type: "command", command: CMD, timeout: HOOK_TIMEOUT_S }] }]);
@@ -172,6 +174,41 @@ test("installHook without a hook token in the secrets store uses the existing TR
   assert.match(hook.command, /--budget-ms 4000$/);
 });
 
+test("installHook without a stored token refuses a TRACKER_URL of another tracker and changes nothing", async () => {
+  const home = mkdtempSync(join(tmpdir(), "home-"));
+  const envSet = [];
+  const lines = [];
+  const procEnv = {
+    TRACKER_URL: "https://other.example.workers.dev",
+    TRACKER_CF_CLIENT_ID: "env-id.access",
+    TRACKER_CF_CLIENT_SECRET: "env-secret-value-456",
+  };
+  const r = await installHook({ root: hookRoot(), home, procEnv, setUserEnv: async (v) => envSet.push(v), log: (l) => lines.push(l) });
+  assert.equal(r.ok, false);
+  assert.equal(envSet.length, 0);
+  assert.equal(existsSync(join(home, ".claude", "settings.json")), false);
+  assert.match(lines.join("\n"), /another tracker/);
+});
+
+test("installHook with env values hides the secret when the test event fails", async () => {
+  const lines = [];
+  const procEnv = {
+    TRACKER_URL: "https://t.example.workers.dev/",
+    TRACKER_CF_CLIENT_ID: "env-id.access",
+    TRACKER_CF_CLIENT_SECRET: "env-secret-value-456",
+  };
+  const r = await installHook({
+    root: hookRoot(),
+    home: mkdtempSync(join(tmpdir(), "home-")),
+    procEnv,
+    setUserEnv: async () => {},
+    runHook: async () => ({ code: 1, stdout: "", stderr: "boom env-secret-value-456" }),
+    log: (l) => lines.push(l),
+  });
+  assert.equal(r.ok, false);
+  assert.ok(!lines.join("\n").includes("env-secret-value-456"));
+});
+
 test("installHook with neither a stored token nor TRACKER_* variables explains both ways", async () => {
   const lines = [];
   const r = await installHook({
@@ -292,6 +329,7 @@ test("hook budget: a slow server is waited for with --budget-ms, and kept for la
     assert.equal(await runHook(dir, url, okState, "s-long", ["--budget-ms", "4000"]), 0);
     assert.ok(Date.now() - t0 < 4500, "stays within the budget");
     assert.equal(existsSync(join(okState, "tracker-pending.json")), false);
+    assert.ok(taken >= 1, "the slow server answered the long-budget run");
   } finally {
     srv.closeAllConnections?.();
     srv.close();
