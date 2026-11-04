@@ -89,7 +89,9 @@ describe("migration 0007", () => {
     };
     const ev = (id: string, ts: string, action: string, diff: unknown) =>
       db
-        .prepare("INSERT INTO event (ts, actor, project_id, entity, entity_id, action, diff_json) VALUES (?, 'test', ?, 'workpackage', ?, ?, ?)")
+        .prepare(
+          "INSERT INTO event (ts, actor, project_id, entity, entity_id, action, diff_json) VALUES (?, 'test', ?, 'workpackage', ?, ?, ?)",
+        )
         .bind(ts, p.id, id, action, diff === null ? null : JSON.stringify(diff))
         .run();
     await mk("bf-both", "done");
@@ -110,7 +112,7 @@ describe("migration 0007", () => {
 
     const mig = env.TEST_MIGRATIONS.find((m) => m.name.startsWith("0007"))!;
     const backfill = mig.queries.filter((q) => /UPDATE workpackage SET/i.test(q));
-    expect(backfill.length).toBe(2);
+    expect(backfill.length).toBeGreaterThanOrEqual(2);
     await db.prepare("UPDATE workpackage SET actual_start = NULL, actual_end = NULL WHERE project_id = ?").bind(p.id).run();
     for (const q of backfill) await db.prepare(q).run();
 
@@ -119,10 +121,155 @@ describe("migration 0007", () => {
     expect(await get("bf-progress")).toMatchObject({ actual_start: "2026-03-05", actual_end: null });
     expect(await get("bf-log")).toMatchObject({ actual_start: "2026-04-07", actual_end: null });
     expect(await get("bf-reopened")).toMatchObject({ actual_start: "2026-05-01", actual_end: "2026-05-09" });
-    expect(await get("bf-legacy")).toMatchObject({ actual_start: null, actual_end: null });
+    // No events: D21 (e) falls back to the project (created_at here, no start date).
+    expect(await get("bf-legacy")).toMatchObject({ actual_start: await projCreated(p.id), actual_end: null });
     expect(await get("bf-todo")).toMatchObject({ actual_start: null, actual_end: null });
   });
+
+  it("D21 (e) fallback chain, todo exclusion (h), notes, override before the gate, end clamp; idempotent", async () => {
+    const p = await proj();
+    await db.prepare("UPDATE project SET start_date = NULL, created_at = '2026-01-20T08:00:00Z' WHERE id = ?").bind(p.id).run();
+    const mk = (id: string, status: string, parent: string | null = null) =>
+      db
+        .prepare(
+          "INSERT INTO workpackage (id, project_id, parent_id, title, status, progress, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .bind(id, p.id, parent, id, status)
+        .run();
+    const ev = (id: string, ts: string, action: string, diff: unknown) =>
+      db
+        .prepare(
+          "INSERT INTO event (ts, actor, project_id, entity, entity_id, action, diff_json) VALUES (?, 'test', ?, 'workpackage', ?, ?, ?)",
+        )
+        .bind(ts, p.id, id, action, diff === null ? null : JSON.stringify(diff))
+        .run();
+    const gate = async (mid: string, reached: string | null, goAt: string | null, wps: string[]) => {
+      await db
+        .prepare(
+          "INSERT INTO milestone (id, project_id, title, gate, reached_at, created_at, updated_at) VALUES (?, ?, ?, 1, ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .bind(mid, p.id, mid, reached)
+        .run();
+      for (const w of wps)
+        await db.prepare("INSERT INTO milestone_link (milestone_id, workpackage_id, role) VALUES (?, ?, 'unlocks')").bind(mid, w).run();
+      if (goAt)
+        await db
+          .prepare(
+            "INSERT INTO decision (id, project_id, milestone_id, decision, decided_by, decided_at, actor, created_at) VALUES (?, ?, ?, 'go', 'x', ?, 'test', ?)",
+          )
+          .bind(`dec-${mid}`, p.id, mid, goAt, goAt)
+          .run();
+    };
+    // 1: own event wins; a note before it does not count.
+    await mk("fc-event", "done");
+    await ev("fc-event", "2026-02-01T09:00:00Z", "note", { progress: [0, 10] });
+    await ev("fc-event", "2026-02-05T09:00:00Z", "progress", null);
+    // 1: log before the gate opening (override) wins over the gate.
+    await mk("fc-override", "doing");
+    await ev("fc-override", "2026-02-02T09:00:00Z", "progress", null);
+    await gate("fc-g0", "2026-03-01T00:00:00Z", "2026-03-04T10:00:00Z", ["fc-override"]);
+    // 2: later of reached and go (go later; then reached later).
+    await mk("fc-gate-go", "done");
+    await gate("fc-g1", "2026-03-01T00:00:00Z", "2026-03-04T10:00:00Z", ["fc-gate-go"]);
+    await mk("fc-gate-reached", "doing");
+    await gate("fc-g2", "2026-03-09T00:00:00Z", "2026-03-02T10:00:00Z", ["fc-gate-reached"]);
+    // Two open gates unlock the WP: it opens with the later one (D6: all its gates must be open).
+    await mk("fc-two-gates", "doing");
+    await db.prepare("INSERT INTO milestone_link (milestone_id, workpackage_id, role) VALUES ('fc-g1', 'fc-two-gates', 'unlocks')").run();
+    await gate("fc-g5", "2026-03-12T00:00:00Z", "2026-03-10T10:00:00Z", ["fc-two-gates"]);
+    // A gate with no go decision, or not reached, does not count: falls through to the parent.
+    await mk("fc-gate-nogo", "doing");
+    await gate("fc-g3", "2026-03-01T00:00:00Z", null, ["fc-gate-nogo"]);
+    // A go followed by a hold does not open the gate (falls through), whether reached before or after.
+    await mk("fc-gate-hold", "doing");
+    await gate("fc-g4", "2026-03-01T00:00:00Z", "2026-03-04T10:00:00Z", ["fc-gate-hold"]);
+    await db
+      .prepare(
+        "INSERT INTO decision (id, project_id, milestone_id, decision, decided_by, decided_at, actor, created_at) VALUES ('dec-hold', ?, 'fc-g4', 'hold', 'x', '2026-03-06T10:00:00Z', 'test', '2026-03-06T10:00:00Z')",
+      )
+      .bind(p.id)
+      .run();
+    // 3: three-level chain, children inserted before parents (insertion-order independence); only the root has a start.
+    // (rows are inserted deepest first, parent_id links are set afterwards, so row order is child before parent)
+    await mk("fc-l3", "doing");
+    await mk("fc-l2", "doing");
+    await mk("fc-l1", "doing");
+    await mk("fc-l0", "doing");
+    await ev("fc-l0", "2026-02-07T09:00:00Z", "progress", null);
+    for (const [c, par] of [
+      ["fc-l3", "fc-l2"],
+      ["fc-l2", "fc-l1"],
+      ["fc-l1", "fc-l0"],
+    ])
+      await db.prepare("UPDATE workpackage SET parent_id = ? WHERE id = ?").bind(par, c).run();
+    // 3: parent actual_start.
+    await mk("fc-parent", "doing");
+    await db.prepare("UPDATE workpackage SET actual_start = '2026-02-11' WHERE id = 'fc-parent'").run();
+    await mk("fc-child", "doing", "fc-parent");
+    // 4: project start date.
+    const p2 = await proj();
+    await db.prepare("UPDATE project SET start_date = '2026-01-15', created_at = '2026-01-20T08:00:00Z' WHERE id = ?").bind(p2.id).run();
+    await db
+      .prepare(
+        "INSERT INTO workpackage (id, project_id, title, status, progress, created_at, updated_at) VALUES ('fc-pstart', ?, 'x', 'waiting', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+      )
+      .bind(p2.id)
+      .run();
+    // 5: project created_at.
+    await mk("fc-created", "blocked");
+    // (h): todo WP with old progress events gets no start.
+    await mk("fc-todo", "todo");
+    await ev("fc-todo", "2026-02-03T09:00:00Z", "progress", null);
+    // (h): a dropped WP with progress history keeps its first event as start.
+    await mk("fc-dropped", "dropped");
+    await ev("fc-dropped", "2026-02-04T09:00:00Z", "progress", null);
+    // Clamp: fallback start later than the end.
+    await mk("fc-clamp", "done");
+    await ev("fc-clamp", "2026-01-25T09:00:00Z", "update", { status: ["doing", "done"] });
+    await db.prepare("UPDATE workpackage SET actual_start = NULL, actual_end = NULL WHERE project_id IN (?, ?)").bind(p.id, p2.id).run();
+    await db.prepare("UPDATE workpackage SET actual_start = '2026-02-11' WHERE id = 'fc-parent'").run();
+
+    const mig = env.TEST_MIGRATIONS.find((m) => m.name.startsWith("0007"))!;
+    const backfill = mig.queries.filter((q) => /UPDATE workpackage SET/i.test(q));
+    const run = async () => {
+      for (const q of backfill) await db.prepare(q).run();
+    };
+    await run();
+    const snap = async () =>
+      (
+        await db
+          .prepare("SELECT id, actual_start, actual_end FROM workpackage WHERE project_id IN (?, ?) ORDER BY id")
+          .bind(p.id, p2.id)
+          .all()
+      ).results;
+    const get = async (id: string) => (await row(id))!.actual_start;
+    expect(await get("fc-event")).toBe("2026-02-05");
+    expect(await get("fc-override")).toBe("2026-02-02");
+    expect(await get("fc-gate-go")).toBe("2026-03-04");
+    expect(await get("fc-gate-reached")).toBe("2026-03-09");
+    expect(await get("fc-two-gates")).toBe("2026-03-12");
+    expect(await get("fc-gate-nogo")).toBe("2026-01-20");
+    expect(await get("fc-child")).toBe("2026-02-11");
+    expect(await get("fc-gate-hold")).toBe("2026-01-20");
+    for (const id of ["fc-l0", "fc-l1", "fc-l2", "fc-l3"]) expect(await get(id)).toBe("2026-02-07");
+    expect(await get("fc-pstart")).toBe("2026-01-15");
+    expect(await get("fc-created")).toBe("2026-01-20");
+    expect(await get("fc-todo")).toBeNull();
+    expect(await get("fc-dropped")).toBe("2026-02-04");
+    expect(await row("fc-clamp")).toMatchObject({ actual_start: "2026-01-25", actual_end: "2026-01-25" });
+    // Force a later fallback than the end: end 2026-01-10 with the project created 2026-01-20.
+    await db.prepare("UPDATE workpackage SET actual_start = NULL, actual_end = '2026-01-10' WHERE id = 'fc-created'").run();
+    await run();
+    expect(await row("fc-created")).toMatchObject({ actual_start: "2026-01-10", actual_end: "2026-01-10" });
+    const before = await snap();
+    await run();
+    expect(await snap()).toEqual(before);
+  });
 });
+
+async function projCreated(id: string): Promise<string> {
+  return (await db.prepare("SELECT substr(created_at, 1, 10) AS d FROM project WHERE id = ?").bind(id).first<{ d: string }>())!.d;
+}
 
 describe("actual dates", () => {
   it("status change sets actual_start once; done sets actual_end; reopening clears only the end", async () => {
@@ -145,12 +292,16 @@ describe("actual dates", () => {
     expect(restarted.actual_start).toBe("2026-01-05");
   });
 
-  it("a plain log on a done WP with actual_end and no actual_start uses the end as the start", async () => {
+  it("a log on a done WP with actual_end and no actual_start sets no start (progress log 409, note moves nothing)", async () => {
     const p = await proj();
     const w = await upsertWorkpackage(db, p.id, { title: "legacy done", status: "done" }, SYS);
     await db.prepare("UPDATE workpackage SET actual_start = NULL, actual_end = '2026-01-05' WHERE id = ?").bind(w.id).run();
-    const r = await logProgress(db, { project_id: p.id, workpackage_id: w.id, summary: "note" }, SYS);
-    expect(r.workpackage!.actual_start).toBe("2026-01-05");
+    await expect(logProgress(db, { project_id: p.id, workpackage_id: w.id, summary: "late" }, SYS)).rejects.toMatchObject({
+      status: 409,
+      current: expect.objectContaining({ code: "WP_DONE" }),
+    });
+    const r = await logProgress(db, { project_id: p.id, workpackage_id: w.id, summary: "note", note: true }, SYS);
+    expect(r.workpackage!.actual_start).toBeNull();
     expect(r.workpackage!.actual_end).toBe("2026-01-05");
   });
 
@@ -218,8 +369,12 @@ describe("actual dates", () => {
     expect(await row(w.id)).toMatchObject({ status: "todo", actual_start: null, actual_end: "2026-01-05" });
     const events = async () => (await db.prepare("SELECT COUNT(*) AS n FROM event WHERE project_id = ?").bind(p.id).first<any>()).n;
     const n0 = await events();
-    await expect(logProgress(db, { project_id: p.id, workpackage_id: w.id, summary: "x", session_id: "s-inv" }, SYS)).rejects.toThrow(ValidationError);
-    await expect(logProgress(db, { project_id: p.id, workpackage_id: w.id, summary: "x", progress: 40 }, SYS)).rejects.toThrow(ValidationError);
+    await expect(logProgress(db, { project_id: p.id, workpackage_id: w.id, summary: "x", session_id: "s-inv" }, SYS)).rejects.toThrow(
+      ValidationError,
+    );
+    await expect(logProgress(db, { project_id: p.id, workpackage_id: w.id, summary: "x", progress: 40 }, SYS)).rejects.toThrow(
+      ValidationError,
+    );
     expect(await row(w.id)).toMatchObject({ status: "todo", actual_start: null, progress: 0, actual_end: "2026-01-05" });
     expect(await events()).toBe(n0);
     expect((await db.prepare("SELECT session_id FROM project WHERE id = ?").bind(p.id).first<any>()).session_id).not.toBe("s-inv");
@@ -227,13 +382,23 @@ describe("actual dates", () => {
 
   it("REST and MCP: actual_end round-trips; an invalid code is 400", async () => {
     const p = await proj();
-    const ok = await rest(EDITOR, "POST", "/api/workpackages", { project_id: p.id, title: "e", actual_start: "2026-03-01", actual_end: "2026-03-05" });
+    const ok = await rest(EDITOR, "POST", "/api/workpackages", {
+      project_id: p.id,
+      title: "e",
+      actual_start: "2026-03-01",
+      actual_end: "2026-03-05",
+    });
     expect(ok.status).toBe(201);
     const w = (await ok.json()) as any;
     expect(w).toMatchObject({ actual_end: "2026-03-05" });
     const list = (await (await rest(EDITOR, "GET", `/api/workpackages?project_id=${p.id}`)).json()) as any[];
     expect(list.find((x) => x.id === w.id)).toMatchObject({ actual_end: "2026-03-05" });
-    const m = await mcpTool(EDITOR, "upsert_workpackage", { project_id: p.id, title: "m", actual_start: "2026-03-01", actual_end: "2026-03-07" });
+    const m = await mcpTool(EDITOR, "upsert_workpackage", {
+      project_id: p.id,
+      title: "m",
+      actual_start: "2026-03-01",
+      actual_end: "2026-03-07",
+    });
     expect(m.isError).toBeFalsy();
     expect(m.body).toMatchObject({ actual_end: "2026-03-07" });
     const bad = await rest(EDITOR, "POST", "/api/workpackages", { project_id: p.id, title: "c", code: "bad code" });
@@ -306,7 +471,11 @@ describe("code", () => {
 
 describe("local_host", () => {
   it("round-trips for editors and is absent for viewers in list, detail, events and MCP", async () => {
-    const p = await createProject(db, { title: "QoL1 host", owner: "Owner", local_path: "C:/work/qol1", local_host: "  zz-host-name  " }, SYS);
+    const p = await createProject(
+      db,
+      { title: "QoL1 host", owner: "Owner", local_path: "C:/work/qol1", local_host: "  zz-host-name  " },
+      SYS,
+    );
     expect(p.local_host).toBe("zz-host-name");
 
     const eList = (await (await rest(EDITOR, "GET", "/api/projects")).json()) as any[];

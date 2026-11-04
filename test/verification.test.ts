@@ -191,7 +191,7 @@ describe("verification of work packages (F2)", () => {
 
   it("log_progress refuses a completion after a reopen with sign_off between read and write", async () => {
     const { p, wp } = await setup("none");
-    await upsertWorkpackage(db, p.id, { id: wp.id, status: "done" }, SYS);
+    await upsertWorkpackage(db, p.id, { id: wp.id, status: "doing", progress: 50 }, SYS);
     const bare = await svc();
     const { setBeforeProgressWriteForTesting } = await import("../src/data/logs");
     setBeforeProgressWriteForTesting(async () => {

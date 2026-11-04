@@ -64,3 +64,29 @@ git cherry-pick <commit>        # commits that only touch core
 ```
 
 Commits that touch both core and `instance/` must be split first. Run `npm run check` before pushing; it fails if a deployment's name slipped into core.
+
+## Reconstructing actual dates (one-off, after updating to 0.3.x)
+
+Work packages created before the actual dates existed may lack `actual_start` / `actual_end`. `scripts/reconstruct-timeline.mjs` proposes them from the tracker's own history. It is a dry run unless you pass `--apply`.
+
+The script reads and writes through `/api/*`, which takes only a person's login (editor or above), not the hook's service token. Log in with `cloudflared` and pass your own Access token (it expires; fetch a new one if the script reports a 302 or 401):
+
+```powershell
+$env:TRACKER_URL = "https://<your-tracker-host>"
+cloudflared access login $env:TRACKER_URL
+$env:TRACKER_ACCESS_TOKEN = cloudflared access token "-app=$env:TRACKER_URL"
+```
+
+Then, per project:
+
+```powershell
+node scripts/reconstruct-timeline.mjs --project <project-id>                      # table only
+node scripts/reconstruct-timeline.mjs --project <project-id> --git <path-to-repo> # add commit dates of linked branches
+node scripts/reconstruct-timeline.mjs --project <project-id> --apply              # write the changes
+```
+
+The table lists, per work package, the current and proposed start and end, and where each proposed value comes from. Check it before using `--apply`.
+
+Start of a work package without one, first match wins: the earliest progress event (notes do not count), the opening of a gate that unlocks it (the latest such opening when several gates unlock it), the nearest ancestor's start, the project start date, the project creation date. A work package that is still `todo` gets no start; a `dropped` one only from its own events or commits. With `--git`, the first commit date on a linked branch replaces the gate, parent and project fallbacks and any later event date. The end is set for done work packages only: the date it was set to done, else the last commit, else the last progress event. The start is never later than the end. A gate counts as opening only if its latest decision is go. If `--git` is given and git fails (bad repository path, git missing, timeout), the script prints the error and exits with code 2 without proposing or writing anything.
+
+`--apply` writes only the fields that change, as explicit sets through the REST API, and never overwrites an existing date. Exit codes: 0 success, 1 the tracker could not be read or a write failed, 2 bad usage or missing environment variables.

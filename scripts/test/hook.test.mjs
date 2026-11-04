@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -116,14 +116,15 @@ test("installHook explains a 302/401 from Access", async () => {
 });
 
 // Runs the real hook script against a local server (or an unreachable port) and returns what it posted.
-function runHook(cwd, url) {
+// The pending file goes to a temp state folder, never the real home folder.
+function runHook(cwd, url, stateDir = mkdtempSync(join(tmpdir(), "hookstate-")), sessionId = "s1") {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [join(repo, "hooks", "tracker-session-end.mjs")], {
-      env: { ...process.env, TRACKER_URL: url, TRACKER_CF_CLIENT_ID: "id", TRACKER_CF_CLIENT_SECRET: "s" },
+      env: { ...process.env, TRACKER_URL: url, TRACKER_CF_CLIENT_ID: "id", TRACKER_CF_CLIENT_SECRET: "s", TRACKER_HOOK_STATE_DIR: stateDir },
       stdio: ["pipe", "ignore", "ignore"],
     });
     child.on("close", (code) => resolve(code));
-    child.stdin.end(JSON.stringify({ session_id: "s1", cwd, reason: "other" }));
+    child.stdin.end(JSON.stringify({ session_id: sessionId, cwd, reason: "other" }));
   });
 }
 
@@ -161,4 +162,104 @@ test("hook body carries host and both files; skips a file over 256 KB; exits 0",
 test("hook exits 0 when the server is unreachable", async () => {
   const dir = mkdtempSync(join(tmpdir(), "hookcwd-"));
   assert.equal(await runHook(dir, "http://127.0.0.1:9"), 0);
+});
+
+// A server that answers each POST with the next [status, body] from `replies` (then 200) and records the bodies.
+async function scripted(replies) {
+  const posts = [];
+  const srv = createServer((req, res) => {
+    let b = "";
+    req.on("data", (c) => (b += c));
+    req.on("end", () => {
+      posts.push(JSON.parse(b));
+      const [status, body] = replies.shift() ?? [200, { ok: true }];
+      res.writeHead(status, { "Content-Type": "application/json" }).end(JSON.stringify(body));
+    });
+  });
+  await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+  return { posts, url: `http://127.0.0.1:${srv.address().port}`, close: () => srv.close() };
+}
+const conflict409 = (code) => [409, { error: "conflict", message: "refused", current: { code } }];
+
+for (const code of ["GATE_LOCKED", "WP_DONE"])
+  test(`hook retries a 409 ${code} once as a note`, async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hookcwd-"));
+    const stateDir = mkdtempSync(join(tmpdir(), "hookstate-"));
+    const s = await scripted([conflict409(code)]);
+    try {
+      assert.equal(await runHook(dir, s.url, stateDir), 0);
+      assert.equal(s.posts.length, 2);
+      assert.equal(s.posts[0].note, undefined);
+      assert.equal(s.posts[1].note, true);
+      assert.equal(s.posts[1].session_id, "s1");
+      assert.equal(existsSync(join(stateDir, "tracker-pending.json")), false);
+    } finally {
+      s.close();
+    }
+  });
+
+test("hook does not retry other 409s", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "hookcwd-"));
+  const s = await scripted([conflict409("VERSION")]);
+  try {
+    assert.equal(await runHook(dir, s.url), 0);
+    assert.equal(s.posts.length, 1);
+  } finally {
+    s.close();
+  }
+});
+
+test("hook keeps a log the server did not take (5xx, unreachable) and resends it as a note on the next run", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "hookcwd-"));
+  writeFileSync(join(dir, "session.md"), "# session");
+  const stateDir = mkdtempSync(join(tmpdir(), "hookstate-"));
+  const file = join(stateDir, "tracker-pending.json");
+  // 409 → note retry → 503: kept
+  const down = await scripted([conflict409("GATE_LOCKED"), [503, { error: "unavailable" }]]);
+  try {
+    assert.equal(await runHook(dir, down.url, stateDir, "s-lost"), 0);
+  } finally {
+    down.close();
+  }
+  let pending = JSON.parse(readFileSync(file, "utf8"));
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].session_id, "s-lost");
+  assert.equal(pending[0].note, true);
+  assert.equal(pending[0].context_files, undefined); // files are re-read on the next run
+  // unreachable: kept as well
+  assert.equal(await runHook(dir, "http://127.0.0.1:9", stateDir, "s-offline"), 0);
+  pending = JSON.parse(readFileSync(file, "utf8"));
+  assert.deepEqual(pending.map((e) => e.session_id), ["s-lost", "s-offline"]);
+  // next run: the current log first, then the pending ones as notes without session_id
+  const up = await scripted([]);
+  try {
+    assert.equal(await runHook(dir, up.url, stateDir, "s-now"), 0);
+    assert.equal(up.posts[0].session_id, "s-now");
+    const resent = up.posts.slice(1);
+    assert.ok(resent.length >= 1, "at least one pending entry resent within the budget");
+    for (const r of resent) assert.equal(r.note, true), assert.equal(r.session_id, undefined);
+    assert.equal(JSON.parse(readFileSync(file, "utf8")).length, 2 - resent.length);
+  } finally {
+    up.close();
+  }
+});
+
+test("T24: a 429 or an Access redirect keeps the log; credentials in an https remote are never sent or kept", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "hookcwd-"));
+  execFileSync("git", ["init", "-q", dir]);
+  execFileSync("git", ["-C", dir, "remote", "add", "origin", "https://someone:tok-123@example.com/o/r.git"]);
+  const stateDir = mkdtempSync(join(tmpdir(), "hookstate-"));
+  const file = join(stateDir, "tracker-pending.json");
+  const busy = await scripted([[429, { error: "rate_limited" }], [302, {}]]);
+  try {
+    assert.equal(await runHook(dir, busy.url, stateDir, "s-429"), 0);
+    assert.equal(await runHook(dir, busy.url, stateDir, "s-302"), 0);
+  } finally {
+    busy.close();
+  }
+  // (git has a 300 ms budget in the hook; under heavy load it may give no facts, then only the spool part is checked)
+  for (const p of busy.posts) if (p.repo_url) assert.equal(p.repo_url, "https://example.com/o/r.git");
+  const text = readFileSync(file, "utf8");
+  assert.doesNotMatch(text, /tok-123/);
+  assert.deepEqual(JSON.parse(text).map((e) => e.session_id), ["s-429", "s-302"]);
 });
