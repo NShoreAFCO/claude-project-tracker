@@ -680,4 +680,7 @@ export default {
   mydGateOpen: "Open",
   mydGateReached: "Reached",
   // /qol:t12
+  // qol:t16
+  mydColItem: "Item",
+  // /qol:t16
 };

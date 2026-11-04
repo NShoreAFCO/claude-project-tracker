@@ -685,4 +685,7 @@ export default {
   mydGateOpen: "Offen",
   mydGateReached: "Erreicht",
   // /qol:t12
+  // qol:t16
+  mydColItem: "Eintrag",
+  // /qol:t16
 };

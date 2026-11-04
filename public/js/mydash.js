@@ -182,7 +182,7 @@ export async function renderMyDashboard(main, state) {
           "thead",
           h(
             "tr",
-            h("th", ""),
+            h("th", t("mydColItem")),
             h("th", t("mydColProject")),
             h("th", t("mydColStatus")),
             h("th", t("mydColDue")),

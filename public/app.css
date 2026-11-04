@@ -2078,3 +2078,51 @@ details.cat-empty[open] > summary.cat-head::before {
   color: var(--color-danger);
 }
 /* /qol:t12 */
+/* qol:t16 */
+/* R3: bigger fold arrows (about 2x), tap target >= 24 px */
+.fold-glyph {
+  display: inline-block;
+  font-size: 2em;
+  line-height: 0.6;
+  width: 1em;
+  text-align: center;
+}
+.chev,
+.fold-toggle {
+  min-width: 28px;
+  min-height: 28px;
+}
+.fold-toggle {
+  gap: 0.2em;
+}
+/* R1/R2/R4: milestone and gate rows inside the work package tree */
+.tree li.ms {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.7rem;
+  padding: 0.5rem 0.75rem;
+}
+.tree li.ms > .meta,
+.tree li.ms > .actions,
+.tree li.ms > .last-decision {
+  flex-basis: 100%;
+  margin: 0;
+}
+.ms-diamond,
+.ms-diamond.done {
+  width: 0.7em;
+  height: 0.7em;
+  margin: 0 0.35rem;
+  border-width: 2px;
+}
+.ms-diamond.gate {
+  margin: 0 0.45rem;
+  box-shadow:
+    0 0 0 1.5px var(--color-surface),
+    0 0 0 3px var(--color-text-strong);
+}
+.gantt-legend .ms-diamond {
+  margin: 0 0.3rem;
+}
+/* /qol:t16 */
