@@ -3,7 +3,9 @@
 //
 // Reads the hook JSON from stdin (session_id, cwd, reason), collects git facts for cwd, attaches the host name and <cwd>/session.md
 // and <cwd>/HANDOFF.md (each ≤ 256 KB) and POSTs to ${TRACKER_URL}/api/hooks/claude-code with the Access service-token headers.
-// SessionEnd hooks share a ~1.5 s budget, so every step has a deadline. Set TRACKER_DEBUG=1 to see errors on stderr.
+// SessionEnd hooks share a 1.5 s budget unless settings.json gives the hook a longer `timeout`; every step has a deadline.
+// `--budget-ms <n>` sets this hook's own budget (default 1100, which fits the 1.5 s default incl. node start-up);
+// `npm run hook:install` passes 4000 together with `"timeout": 5`. Set TRACKER_DEBUG=1 to see errors on stderr.
 // A 409 GATE_LOCKED / WP_DONE is retried once as a note. A log the server could not take (network error, 5xx, 429) is kept
 // in a pending file in the hook's state folder (TRACKER_HOOK_STATE_DIR, default ~/.claude/hooks) and resent on a later run.
 import { execFileSync } from "node:child_process";
@@ -16,10 +18,18 @@ const elapsed = () => Date.now() - started;
 const debug = process.env.TRACKER_DEBUG === "1";
 const log = (...a) => debug && console.error("[tracker-hook]", ...a);
 
-const BUDGET_MS = 750; // incl. ~150 ms node start-up this keeps the hook under 1 s (Claude Code allows ~1.5 s)
+const DEFAULT_BUDGET_MS = 1100; // with ~150-300 ms node start-up this stays under Claude Code's default 1.5 s
+const MAX_BUDGET_MS = 55000; // Claude Code caps a hook timeout at 60 s
+/** `--budget-ms <n>` from argv, clamped to 300..55000; anything else → the default. */
+function budgetFromArgs(argv) {
+  const i = argv.indexOf("--budget-ms");
+  const n = i >= 0 ? Number(argv[i + 1]) : NaN;
+  return Number.isFinite(n) && n > 0 ? Math.min(MAX_BUDGET_MS, Math.max(300, Math.round(n))) : DEFAULT_BUDGET_MS;
+}
+const BUDGET_MS = budgetFromArgs(process.argv.slice(2));
 const GIT_TIMEOUT_MS = 300;
 const GIT_PHASE_MS = 600; // no new git call after this point
-const FETCH_MAX_MS = 800;
+const SPOOL_RESERVE_MS = 100; // budget kept back so a timed-out log can still be written to the pending file
 const MAX_CONTEXT_BYTES = 256 * 1024;
 const PENDING_MAX = 50; // oldest entries beyond this are dropped
 const RESEND_MIN_MS = 200; // resend a pending entry only with at least this much budget left
@@ -149,7 +159,7 @@ async function post(base, headers, body) {
       method: "POST",
       headers: { "Content-Type": "application/json", ...headers },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(Math.max(100, Math.min(FETCH_MAX_MS, BUDGET_MS - elapsed()))),
+      signal: AbortSignal.timeout(Math.max(100, BUDGET_MS - SPOOL_RESERVE_MS - elapsed())),
       redirect: "manual", // an Access login redirect means the service token was rejected
     });
     log("POST", res.status, `${elapsed()} ms`);
@@ -190,7 +200,7 @@ function writePending(list) {
 // No process.exit() on the normal path: on Windows, exiting while undici is still closing its TLS socket aborts
 // node with "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)". Let the event loop drain instead; the
 // unref'd timer is only a fallback if something keeps the process alive.
-setTimeout(() => process.exit(0), 1200).unref();
+setTimeout(() => process.exit(0), BUDGET_MS + 300).unref();
 main()
   .catch((e) => log("failed:", e?.name || "", e?.message || e))
   .finally(() => {

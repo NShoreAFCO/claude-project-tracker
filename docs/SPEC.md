@@ -312,10 +312,11 @@ Optional. It runs only when both `AUDIT_REPO` and `AUDIT_GITHUB_TOKEN` are set. 
   1. Read the stdin JSON (`session_id`, `cwd`, `reason`).
   2. Run `git -C <cwd>` (`execFileSync`, timeout about 300 ms) to get the remote URL (credentials in an https remote are removed), branch and last commit subject. If `cwd` is not a repo, still send `cwd`; matching by `local_path` covers repos without a remote.
   3. If `<cwd>/session.md` exists and is ≤ 256 KB, include it as `context_file`.
-  4. POST to `${TRACKER_URL}/api/hooks/claude-code` with headers `CF-Access-Client-Id: ${TRACKER_CF_CLIENT_ID}` and `CF-Access-Client-Secret: ${TRACKER_CF_CLIENT_SECRET}`, and `AbortSignal.timeout(800)`.
+  4. POST to `${TRACKER_URL}/api/hooks/claude-code` with headers `CF-Access-Client-Id: ${TRACKER_CF_CLIENT_ID}` and `CF-Access-Client-Secret: ${TRACKER_CF_CLIENT_SECRET}`, and a timeout from the hook's budget (below).
   5. On 409 `GATE_LOCKED` or `WP_DONE`, retry once with `note: true`. A log the server did not take (network error, timeout, 5xx, 408, 429, or Access refusing the token: 3xx, 401, 403) is kept, without its files, in `tracker-pending.json` in the hook's state folder (`TRACKER_HOOK_STATE_DIR`, default `~/.claude/hooks`, at most 50 entries) and resent as a note without `session_id` on a later run, after the current log, while the time budget allows.
   6. Always exit 0.
-- SessionEnd hooks share a ~1.5 s budget.
+- SessionEnd hooks share a 1.5 s budget unless a hook in `settings.json` has a longer `timeout` (Claude Code then waits up to that, at most 60 s). The hook's own budget is `--budget-ms <n>` (default 1100 ms, fits the default); the POST may use all of it but 100 ms, kept back to write the pending file. `npm run hook:install` writes the command with `--budget-ms 4000` and `"timeout": 5`.
+- `npm run hook:install` takes the hook's service token from the secrets store; on a deployment set up by hand (no token there) it uses the existing `TRACKER_URL`, `TRACKER_CF_CLIENT_ID` and `TRACKER_CF_CLIENT_SECRET` environment variables and leaves them unchanged.
 - The `settings.json` snippet uses an absolute path with forward slashes.
 
 ## 13. Acceptance

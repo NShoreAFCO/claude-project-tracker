@@ -7,13 +7,13 @@ import os from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readSecrets, scrubber } from "./lib/secrets.mjs";
-import { hookCommand, mergeSettings } from "./lib/settings-merge.mjs";
+import { HOOK_BUDGET_MS, hookCommand, mergeSettings } from "./lib/settings-merge.mjs";
 import { setUserEnv as realSetUserEnv } from "./lib/user-env.mjs";
 
-function realRunHook(hookFile, root) {
+function realRunHook(hookFile, root, budgetMs) {
   return (env) =>
     new Promise((done) => {
-      const child = spawn(process.execPath, [hookFile], {
+      const child = spawn(process.execPath, [hookFile, "--budget-ms", String(budgetMs)], {
         env: { ...process.env, ...env },
         stdio: ["pipe", "pipe", "pipe"],
         timeout: 10000,
@@ -39,14 +39,23 @@ export async function installHook({
   setUserEnv = realSetUserEnv,
   runHook,
   log = console.log,
+  procEnv = process.env,
 }) {
   const secrets = readSecrets(root);
-  const scrub = scrubber(secrets);
+  const scrub = scrubber({ ...secrets, TRACKER_CF_CLIENT_SECRET: procEnv.TRACKER_CF_CLIENT_SECRET });
   const say = (l) => log(scrub(l));
   const cfgFile = join(root, "instance", "instance.config.json");
-  const publicUrl = existsSync(cfgFile) ? JSON.parse(readFileSync(cfgFile, "utf8")).deploy?.publicUrl : undefined;
-  if (!publicUrl || !secrets.HOOK_CLIENT_ID || !secrets.HOOK_CLIENT_SECRET) {
-    say("The deployment is not set up yet (public URL or hook service token missing). Run `npm run setup` first.");
+  const configUrl = existsSync(cfgFile) ? JSON.parse(readFileSync(cfgFile, "utf8")).deploy?.publicUrl : undefined;
+  // A deployment set up by hand (INSTALL without `npm run setup`) has no hook token in the secrets store; it already
+  // keeps the hook's values as user environment variables. Use those then, and leave them as they are.
+  const fromStore = Boolean(secrets.HOOK_CLIENT_ID && secrets.HOOK_CLIENT_SECRET);
+  const publicUrl = configUrl || procEnv.TRACKER_URL;
+  const clientId = fromStore ? secrets.HOOK_CLIENT_ID : procEnv.TRACKER_CF_CLIENT_ID;
+  const clientSecret = fromStore ? secrets.HOOK_CLIENT_SECRET : procEnv.TRACKER_CF_CLIENT_SECRET;
+  if (!publicUrl || !clientId || !clientSecret) {
+    say(
+      "The deployment is not set up yet (public URL or hook service token missing). Run `npm run setup` first, or set TRACKER_URL, TRACKER_CF_CLIENT_ID and TRACKER_CF_CLIENT_SECRET as user environment variables.",
+    );
     return { ok: false };
   }
   try {
@@ -71,15 +80,13 @@ export async function installHook({
     if (changed) writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + "\n");
     say(changed ? "  ✓ settings.json updated (backup saved next to it)" : "  ✓ settings.json already up to date");
 
-    const env = {
-      TRACKER_URL: publicUrl,
-      TRACKER_CF_CLIENT_ID: secrets.HOOK_CLIENT_ID,
-      TRACKER_CF_CLIENT_SECRET: secrets.HOOK_CLIENT_SECRET,
-    };
-    const where = await setUserEnv(env, { platform, home });
-    say(`  ✓ environment variables stored (${where ?? "user environment"})`);
+    const env = { TRACKER_URL: publicUrl, TRACKER_CF_CLIENT_ID: clientId, TRACKER_CF_CLIENT_SECRET: clientSecret };
+    if (fromStore || publicUrl !== procEnv.TRACKER_URL) {
+      const where = await setUserEnv(env, { platform, home });
+      say(`  ✓ environment variables stored (${where ?? "user environment"})`);
+    } else say("  ✓ using the hook's existing environment variables (no hook token in the secrets store)");
 
-    const run = runHook ?? realRunHook(target, root);
+    const run = runHook ?? realRunHook(target, root, HOOK_BUDGET_MS);
     const r = await run({ ...env, TRACKER_DEBUG: "1" });
     const out = `${r.stdout ?? ""}\n${r.stderr ?? ""}`;
     if (out.includes('"ok":true')) say("  ✓ test event accepted by the tracker");

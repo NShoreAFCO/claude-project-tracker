@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.3.3 — 2026-11-04 (session hook timing and installer)
+
+No migration. Deploy is optional (only the hook and the installer changed). Re-run `npm run hook:install` on each machine that uses the session hook.
+
+### Fixed
+
+- The session hook gave up after about 750 ms in total. A post through Cloudflare Access often takes 400–700 ms, so many session ends went into the pending file and only arrived with the next session end. The hook now takes `--budget-ms <n>` (default 1100, which fits Claude Code's 1.5 s default for SessionEnd hooks). `npm run hook:install` sets `--budget-ms 4000` and `"timeout": 5` in `settings.json`, which raises Claude Code's limit for the hook.
+- `npm run hook:install` stopped with "not set up yet" on deployments that were set up by hand, without `npm run setup`, because the hook token is not in the secrets store there. It now uses the existing `TRACKER_URL`, `TRACKER_CF_CLIENT_ID` and `TRACKER_CF_CLIENT_SECRET` user environment variables and leaves them unchanged.
+
 ## v0.3.2 — 2026-11-04 (dashboard list fixes)
 
 No migration. Deploy only.
