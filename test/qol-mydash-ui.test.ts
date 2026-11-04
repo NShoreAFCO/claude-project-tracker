@@ -59,8 +59,8 @@ vi.mock("../public/js/dom.js", () => {
 });
 
 const projects = [
-  { id: "p1", title: "Alpha", status: "active", end_date: "2027-01-01", owner_initials: "AA" },
-  { id: "p2", title: "Beta", status: "idea", end_date: null, owner_initials: null },
+  { id: "p1", title: "Alpha", status: "active", target_date: "2027-01-01", owner_initials: "AA" },
+  { id: "p2", title: "Beta", status: "idea", target_date: null, owner_initials: null },
 ];
 
 const emptyPrefs = {
@@ -333,6 +333,8 @@ describe("My dashboard", () => {
     expect(rows).toHaveLength(1);
     expect(text(rows[0])).toContain("Alpha");
     expect(text(rows[0])).not.toContain("Beta");
+    // Due column shows the project's planned completion date (target_date).
+    expect(text(rows[0])).toContain("2027-01-01");
 
     const picks = findAll(main, (node) => matches(node, "input", "mydash-pick"));
     const beta = picks.find((pick) => pick.attrs.value === "p2")!;

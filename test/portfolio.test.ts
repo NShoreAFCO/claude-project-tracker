@@ -210,6 +210,38 @@ describe("my work packages", () => {
     expect(await mineWorkpackages(db, null, {})).toEqual([]);
   });
 
+  it("WP lists show effective progress and drop parents whose children are all done", async () => {
+    const me = await upsertPerson(db, { name: uniq("Me"), email: `me${n}@example.com` }, A);
+    const p = await proj({ owner: me.id });
+    const parent = await wp(p, { end_date: "2026-11-20" });
+    await wp(p, { parent_id: parent, status: "done" });
+    await wp(p, { parent_id: parent, progress: 50 });
+    const finished = await wp(p, { end_date: "2026-11-20" });
+    await wp(p, { parent_id: finished, status: "done" });
+    const leaf = await wp(p, { end_date: "2026-11-21", progress: 40 });
+
+    const up = await upcomingWorkpackages(db, { project_id: p });
+    expect(up.find((w) => w.id === parent)?.progress).toBe(75);
+    expect(up.find((w) => w.id === leaf)?.progress).toBe(40);
+    expect(up.map((w) => w.id)).not.toContain(finished);
+
+    const mine = await mineWorkpackages(db, me.id, { project_id: p });
+    expect(mine.find((w) => w.id === parent)?.progress).toBe(75);
+    expect(mine.map((w) => w.id)).not.toContain(finished);
+  });
+
+  it("upcoming applies limit after dropping finished parents; all-dropped children keep a parent listed", async () => {
+    const p = await proj();
+    const finished = await wp(p, { end_date: "2026-11-01" });
+    await wp(p, { parent_id: finished, status: "done" });
+    const onlyDropped = await wp(p, { end_date: "2026-11-02", progress: 100 });
+    await wp(p, { parent_id: onlyDropped, status: "dropped", drop_reason: "out of scope" });
+    const next = await wp(p, { end_date: "2026-11-03" });
+    const up = await upcomingWorkpackages(db, { project_id: p, limit: 2 });
+    expect(up.map((w) => w.id)).toEqual([onlyDropped, next]);
+    expect(up[0].progress).toBe(100);
+  });
+
   it("mine sorts by in_progress, start and end", async () => {
     const me = await upsertPerson(db, { name: uniq("Me"), email: `me${n}@example.com` }, A);
     const p = await proj({ owner: me.id });

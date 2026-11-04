@@ -3,6 +3,7 @@
 // child AND its project to be live (a trashed project hides its children even if they kept deleted_at NULL).
 import type { ProjectRow, PersonRefOut, WorkpackageRow } from "../types";
 import { effectiveCategories, isHuman } from "./categories";
+import { computeWpProgress } from "./progress";
 import { LIVE } from "./util";
 import { isStale, staleDaysFor } from "./activity";
 import { INSTANCE } from "../generated/instance";
@@ -195,7 +196,31 @@ async function onlyHuman(db: D1Database, rows: PortfolioWpRow[]): Promise<Portfo
   return rows.filter((r) => isHuman({ human: r.human ?? null }, cats.get(r.id) ?? null));
 }
 
-async function toPortfolioWps(db: D1Database, rows: PortfolioWpRow[]): Promise<PortfolioWp[]> {
+/**
+ * Effective progress of the rows' projects (as on the project page: parents = weighted mean of their
+ * children, 'done' = 100) and the ids of WPs that have live children.
+ */
+async function progressOf(db: D1Database, rows: PortfolioWpRow[]): Promise<{ progress: Map<string, number>; parents: Set<string> }> {
+  const pids = [...new Set(rows.map((r) => r.project_id))];
+  if (!pids.length) return { progress: new Map(), parents: new Set() };
+  const { results } = await db
+    .prepare(
+      `SELECT id, parent_id, status, progress, weight FROM workpackage WHERE deleted_at IS NULL AND project_id IN (SELECT value FROM json_each(?))`,
+    )
+    .bind(JSON.stringify(pids))
+    .all<WorkpackageRow>();
+  // A parent whose children are all dropped is a leaf for progress (its own value counts), so not here.
+  const parents = new Set(results.flatMap((w) => (w.parent_id && w.status !== "dropped" ? [w.parent_id] : [])));
+  return { progress: computeWpProgress(results), parents };
+}
+
+/**
+ * Maps rows to the API shape with effective progress. A parent whose children are all done (effective
+ * progress 100) is done in substance and is dropped from these open lists.
+ */
+async function toPortfolioWps(db: D1Database, allRows: PortfolioWpRow[]): Promise<PortfolioWp[]> {
+  const eff = await progressOf(db, allRows);
+  const rows = allRows.filter((r) => !(eff.parents.has(r.id) && (eff.progress.get(r.id) ?? 0) >= 100));
   const people = await personOuts(
     db,
     rows.flatMap((row) => [row.owner_person_id, row.project_owner_person_id]),
@@ -208,7 +233,7 @@ async function toPortfolioWps(db: D1Database, rows: PortfolioWpRow[]): Promise<P
     code: row.code ?? null,
     title: row.title,
     status: row.status,
-    progress: row.progress,
+    progress: eff.progress.get(row.id) ?? row.progress,
     start_date: row.start_date,
     end_date: row.end_date,
     effective_owner:
@@ -229,8 +254,7 @@ export async function upcomingWorkpackages(db: D1Database, opts: { project_id?: 
     params.push(opts.project_id);
   }
 
-  params.push(limit);
-
+  // No SQL LIMIT: toPortfolioWps drops finished parents, so the limit applies after it.
   const result = await db
     .prepare(
       `
@@ -256,13 +280,12 @@ export async function upcomingWorkpackages(db: D1Database, opts: { project_id?: 
         AND w.status NOT IN ('done', 'dropped')
         ${projectFilter}
       ORDER BY w.end_date, p.title, w.sort, w.id
-      LIMIT ?
     `,
     )
     .bind(...params)
     .all<PortfolioWpRow>();
 
-  return toPortfolioWps(db, result.results);
+  return (await toPortfolioWps(db, result.results)).slice(0, limit);
 }
 
 export async function mineWorkpackages(
