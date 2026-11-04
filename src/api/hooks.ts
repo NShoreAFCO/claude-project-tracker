@@ -30,6 +30,8 @@ export interface HookBody {
   context_files?: { name?: string; content?: string }[] | null;
   /** Optional: id or email of the person the session ran for; recorded as event.person_id (spec §4.1). */
   on_behalf_of?: string | null;
+  /** Optional (hook retry, spec §25): log the session as a note, which never changes a work package. */
+  note?: boolean;
 }
 
 const HOST_MAX = 100;
@@ -115,6 +117,7 @@ export async function handleClaudeCodeHook(body: HookBody, env: Env): Promise<Re
       summary: `Claude Code session ended (${reason})${branch ? ` on ${branch}` : ""}`,
       session_id: sessionId,
       local_host: hostToStore,
+      note: body.note === true,
     },
     by,
   );

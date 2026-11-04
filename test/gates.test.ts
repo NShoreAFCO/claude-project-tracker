@@ -131,8 +131,11 @@ describe("gate lock", () => {
     await expect(
       logProgress(db, { project_id: g.p.id, summary: "worked", workpackage_id: g.wp2, progress: 20 }, await svc()),
     ).rejects.toMatchObject(conflict("GATE_LOCKED"));
-    // auto-start skips the locked WP, the log itself is kept
-    const logged = await logProgress(db, { project_id: g.p.id, summary: "looked at it", workpackage_id: g.wp2 }, await svc());
+    // spec §25 (D21 c): a progress log without progress is refused as well; a note is kept and starts nothing
+    await expect(logProgress(db, { project_id: g.p.id, summary: "looked at it", workpackage_id: g.wp2 }, await svc())).rejects.toMatchObject(
+      conflict("GATE_LOCKED"),
+    );
+    const logged = await logProgress(db, { project_id: g.p.id, summary: "looked at it", workpackage_id: g.wp2, note: true }, await svc());
     expect(logged.workpackage!.status).toBe("todo");
     // edits that do not start the WP stay possible
     expect((await mcp("upsert_workpackage", { project_id: g.p.id, id: g.wp2, title: "WP2 renamed" })).isError).toBeFalsy();
@@ -565,7 +568,8 @@ describe("gate fix round 1", () => {
     await expect(logProgress(db, { project_id: g.p.id, summary: "x", workpackage_id: child.id, progress: 10 }, bot)).rejects.toMatchObject(
       conflict("GATE_LOCKED"),
     );
-    expect((await logProgress(db, { project_id: g.p.id, summary: "x", workpackage_id: child.id }, bot)).workpackage!.status).toBe("todo");
+    await expect(logProgress(db, { project_id: g.p.id, summary: "x", workpackage_id: child.id }, bot)).rejects.toMatchObject(conflict("GATE_LOCKED"));
+    expect((await logProgress(db, { project_id: g.p.id, summary: "x", workpackage_id: child.id, note: true }, bot)).workpackage!.status).toBe("todo");
     // creating a started sub-WP, or moving a started WP under the locked one, is refused; a todo sub-WP is fine
     await expect(upsertWorkpackage(db, g.p.id, { title: "new", parent_id: g.wp2, status: "doing" }, bot)).rejects.toMatchObject(
       conflict("GATE_LOCKED"),

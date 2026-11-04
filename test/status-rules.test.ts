@@ -215,8 +215,8 @@ describe("closed projects stay closed", () => {
     await updateProject(db, p.id, { status: "done", ...CLOSURE }, A);
     const edited = await upsertWorkpackage(db, p.id, { id: w.id, title: "finished (final)", description_md: "Report filed." }, A);
     expect([edited.title, edited.status]).toEqual(["finished (final)", "done"]);
-    // log_progress on a closed project's WP stays allowed and cannot reopen it
-    const r = await logProgress(db, { project_id: p.id, workpackage_id: w.id, summary: "archived the files" }, A);
+    // a note on a closed project's (done) WP stays allowed and cannot reopen it (a progress log is WP_DONE, spec §25)
+    const r = await logProgress(db, { project_id: p.id, workpackage_id: w.id, summary: "archived the files", note: true }, A);
     expect(r.workpackage!.status).toBe("done");
   });
 
