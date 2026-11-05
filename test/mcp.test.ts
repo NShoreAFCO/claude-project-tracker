@@ -136,6 +136,36 @@ describe("MCP server", () => {
     expect(JSON.parse(text(c)).error).toBe("conflict");
   });
 
+  it("get_project views cut the output down and full stays unchanged", async () => {
+    const p = JSON.parse(text(await call("create_project", { title: "MCP Views" })));
+    const parent = JSON.parse(text(await call("upsert_workpackage", { project_id: p.id, title: "Parent", code: "WP3" })));
+    await call("upsert_workpackage", { project_id: p.id, title: "Child", code: "WP3.1", parent_id: parent.id, status: "doing" });
+    const get = async (args: Record<string, unknown>) => JSON.parse(text(await call("get_project", { id: p.id, ...args })));
+
+    const full = await get({});
+    expect(full.workpackages.some((w: { code: string }) => w.code === "WP3")).toBe(true);
+    expect(full.events).toBeDefined();
+    expect(await get({ view: "full" })).toMatchObject({ project: { id: p.id }, branches: [] });
+
+    const summary = await get({ view: "summary" });
+    expect(summary.workpackages).toBeUndefined();
+    expect(summary.counts.doing).toBe(1);
+    expect(summary.counts.items).toBe(full.workpackages.reduce((n: number, w: { children: unknown[] }) => n + 1 + w.children.length, 0));
+
+    const outline = await get({ view: "outline", status: ["doing"] });
+    expect(outline.workpackages.map((w: { code: string }) => w.code)).toEqual(["WP3.1"]);
+    expect(Object.keys(outline.workpackages[0]).sort()).toEqual(
+      ["blocked_by", "code", "end_date", "gate_locked", "id", "overdue", "owner", "parent_id", "progress", "start_date", "status", "title", "version", "waiting_reason"].sort(),
+    );
+
+    const one = await get({ wp: "WP3" });
+    expect(one.workpackage.children[0].code).toBe("WP3.1");
+    const missing = await call("get_project", { id: p.id, wp: "WP99" });
+    expect(JSON.parse(text(missing)).error).toBe("not_found");
+    const bad = await call("get_project", { id: p.id, view: "summary", status: ["todo"] });
+    expect(bad.isError).toBe(true);
+  });
+
   it("delete tools require confirm: true", async () => {
     const r = await rpc("tools/call", { name: "delete_entity", arguments: { kind: "project", id: "mcp-roundtrip", confirm: false } });
     expect(r.result?.isError ?? !!r.error).toBe(true);

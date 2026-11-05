@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Reg } from "./server";
 import { listProjects, getProjectDetail, createProject, updateProject } from "../data/projects";
+import { shapeProjectDetail } from "../data/project-views";
 import { upsertWorkpackage } from "../data/workpackages";
 import { linkBranch } from "../data/branches";
 import { setScores, logTokenCost, logProgress } from "../data/logs";
@@ -165,13 +166,17 @@ export function registerTools(reg: Reg): void {
     "get_project",
     {
       title: "Get project",
-      description: "Get full project details.",
+      description:
+        "Get project details. The default view=full can be very large: prefer view=summary (counts, milestones, risks, context index) or view=outline (one slim row per work package, optionally filtered by status), and wp for one work package in full.",
       inputSchema: z.object({
         id: z.string().describe("Identify the project."),
+        view: z.enum(["full", "summary", "outline"]).optional().describe("Choose the level of detail. Default full."),
+        status: z.array(workpackageStatusSchema).min(1).optional().describe("Keep only these work package statuses (view=outline only)."),
+        wp: z.string().optional().describe("Return one work package with its subtree, by code or id. Takes precedence over view."),
       }),
       readOnly: true,
     },
-    async (args, tc) => getProjectDetail(tc.db, args.id, tc.by),
+    async (args, tc) => shapeProjectDetail(await getProjectDetail(tc.db, args.id, tc.by), args),
   );
 
   reg(
