@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.3.4 — 2026-11-05 (cheaper get_project reads)
+
+No migration. Deploy only. Start a new Claude session afterwards so it sees the new tool parameters.
+
+### Added
+
+- MCP `get_project` takes optional `view`, `status` and `wp` parameters, so agents can read less. Large projects returned 100–173k characters, mostly the work package tree.
+  - `view=summary`: project header, progress, counts by status plus overdue, milestones, risk summary and context index, without the work package tree.
+  - `view=outline`: one slim row per work package; `status` keeps only the listed statuses and works with this view only.
+  - `wp=<code or id>`: one work package in full with its subtree. Takes precedence over `view`.
+- The default stays `view=full`, with unchanged output. The REST API and the dashboard are not affected.
+
 ## v0.3.3 — 2026-11-04 (session hook timing and installer)
 
 No migration. Deploy is optional (only the hook and the installer changed). Re-run `npm run hook:install` on each machine that uses the session hook.
