@@ -20,7 +20,13 @@ export interface BudgetProject {
   leafWp: { id: string; code: string };
 }
 
-export async function buildBudgetProject(call: ToolCall): Promise<BudgetProject> {
+export async function buildBudgetProject(rawCall: ToolCall): Promise<BudgetProject> {
+  // A rejected fixture write would silently shrink the project and invalidate the budgets: fail loudly instead.
+  const call: ToolCall = async (name, args) => {
+    const r = await rawCall(name, args);
+    if (r?.isError) throw new Error(`budget fixture: ${name} failed: ${r.content?.[0]?.text}`);
+    return r;
+  };
   const p = parse(await call("create_project", { title: "Budget Project", summary: filler("summary", 200) }));
   const wps: Array<{ id: string; code: string; level: number }> = [];
   const mk = async (code: string, level: number, parent: string | null, dep: string | null) => {
