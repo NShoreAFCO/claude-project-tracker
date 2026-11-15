@@ -58,8 +58,10 @@ export function errorText(e: unknown): string {
   return JSON.stringify({ error: "internal", message: "Unexpected error" });
 }
 
+import pkg from "../../package.json";
+
 function buildServer(env: Env, props: GrantProps, by: Caller): McpServer {
-  const server = new McpServer({ name: "project-tracker", version: "0.3.2" }, { instructions: SERVER_INSTRUCTIONS });
+  const server = new McpServer({ name: "project-tracker", version: pkg.version }, { instructions: SERVER_INSTRUCTIONS });
   const tc: ToolCtx = { env, db: env.DB, actor: by.actor, email: props.email ?? "", by };
 
   const reg: Reg = (name, config, handler) => {
