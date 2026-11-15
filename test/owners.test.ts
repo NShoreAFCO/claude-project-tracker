@@ -185,7 +185,7 @@ describe("history and on_behalf_of", () => {
 
   it("MCP callers cannot act on behalf of someone else", async () => {
     const other = await upsertPerson(db, { name: uniq("Other"), email: `other${n}@example.org` }, testCaller());
-    const r = await mcp("create_project", { title: uniq("MCP OBO"), on_behalf_of: other.id });
+    const r = await mcp("create_project", { title: uniq("MCP OBO"), on_behalf_of: other.id, return: "full" });
     expect(r.isError).toBeFalsy();
     const p = JSON.parse(r.content[0].text);
     const ev = (await listEvents(db, { project_id: p.id }))[0];
@@ -195,7 +195,7 @@ describe("history and on_behalf_of", () => {
   });
 
   it("existing create_project MCP call shape still succeeds", async () => {
-    const r = await mcp("create_project", { title: "Acceptance via MCP owners" });
+    const r = await mcp("create_project", { title: "Acceptance via MCP owners", return: "full" });
     expect(r.isError).toBeFalsy();
     const p = JSON.parse(r.content[0].text);
     expect(p).toMatchObject({ title: "Acceptance via MCP owners", status: "active", owner: { person_id: me.id } });
@@ -278,7 +278,7 @@ describe("persons API and tools", () => {
     const r = await mcp("upsert_person", { id: p.id, function: "Buyer", expected_version: 99 });
     expect(r.isError).toBe(true);
     const err = JSON.parse(r.content[0].text);
-    expect(err).toMatchObject({ error: "conflict", current: { id: p.id, version: 1 } });
+    expect(err).toMatchObject({ error: "conflict", current: { version: 1 } });
     expect(err.current.phone).toBeUndefined();
     expect(err.current.contact_note).toBeUndefined();
     expect(r.content[0].text).not.toContain("7771");

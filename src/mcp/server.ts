@@ -1,6 +1,6 @@
 import { createMcpHandler } from "agents/mcp/server";
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/server";
-import type { z } from "zod";
+import { z } from "zod";
 import type { Caller, Env } from "../types";
 import { readContext } from "../data/context-read";
 import { ForbiddenError } from "../data/util";
@@ -10,6 +10,7 @@ import { isAllowedEmail } from "../auth/access";
 import { requireAction, toolAction, type Action } from "../auth/permissions";
 import pkg from "../../package.json";
 import { compactResult, dropDuplicateDependsIds } from "./compact";
+import { ack, slimConflict } from "./ack";
 
 export { mcpActor };
 
@@ -41,7 +42,7 @@ export type ToolHandler<S extends z.ZodObject> = (args: z.infer<S>, tc: ToolCtx)
 /** Registration helper handed to registerTools(): wraps results as compact JSON text and errors as tool errors. */
 export type Reg = <S extends z.ZodObject>(
   name: string,
-  config: { title: string; description: string; inputSchema: S; readOnly?: boolean; destructive?: boolean },
+  config: { title: string; description: string; inputSchema: S; readOnly?: boolean; destructive?: boolean; ack?: boolean },
   handler: ToolHandler<S>,
 ) => void;
 
@@ -50,9 +51,10 @@ interface GrantProps {
   clientName?: string;
 }
 
-export function errorText(e: unknown): string {
+/** `args` are the call's arguments: a 409 then carries only the version and the fields the call patched. */
+export function errorText(e: unknown, args?: unknown): string {
   const err = e as { status?: number; message?: string; current?: unknown };
-  if (err?.status === 409) return JSON.stringify({ error: "conflict", message: err.message, current: err.current });
+  if (err?.status === 409) return JSON.stringify({ error: "conflict", message: err.message, current: slimConflict(err.current, args) });
   if (err?.status)
     return JSON.stringify({
       error: err.status === 404 ? "not_found" : err.status === 413 ? "too_large" : err.status === 403 ? "forbidden" : "invalid",
@@ -73,21 +75,32 @@ function buildServer(env: Env, props: GrantProps, by: Caller): McpServer {
       {
         title: config.title,
         description: config.description,
-        inputSchema: config.inputSchema,
+        // Acknowledging tools take `return: "full"` for today's row; the wrapper adds it once.
+        inputSchema: config.ack ? config.inputSchema.extend({ return: z.enum(["ack", "full"]).optional() }) : config.inputSchema,
         annotations: { readOnlyHint: !!config.readOnly, destructiveHint: !!config.destructive },
       },
       // The SDK infers args from the schema; the helper keeps one generic signature for all tools.
       (async (args: unknown) => {
+        let sent: Record<string, unknown> = {};
         try {
           if (!action) throw new ForbiddenError(`no permission is defined for tool ${name}`);
           requireAction(tc.by, action);
           // on_behalf_of is accepted for parity with REST but never honoured: MCP writes belong to the OAuth login's person.
-          const { on_behalf_of: _ignored, ...rest } = (args ?? {}) as Record<string, unknown>;
+          const { on_behalf_of: _ignored, return: want, ...rest } = (args ?? {}) as Record<string, unknown>;
+          sent = rest;
           const out = await handler(rest as never, tc);
-          return { content: [{ type: "text" as const, text: typeof out === "string" ? out : JSON.stringify(compactResult(dropDuplicateDependsIds(out))) }] };
+          const shaped = config.ack && want !== "full" ? ack(out, rest) : out;
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: typeof out === "string" ? out : JSON.stringify(compactResult(dropDuplicateDependsIds(shaped))),
+              },
+            ],
+          };
         } catch (e) {
           if (!(e as { status?: number })?.status) console.error(`tool ${name} failed`, e);
-          return { isError: true, content: [{ type: "text" as const, text: errorText(e) }] };
+          return { isError: true, content: [{ type: "text" as const, text: errorText(e, sent) }] };
         }
       }) as never,
     );

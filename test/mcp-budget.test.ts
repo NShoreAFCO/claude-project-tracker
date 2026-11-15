@@ -10,8 +10,8 @@ import { buildBudgetProject } from "./fixtures/budget-project";
 export const BUDGETS: Record<string, number> = {
   tools_list: 39700,
   def_upsert_workpackage: 7000,
-  res_upsert_wp_update: 1200,
-  res_log_progress_wp: 1100,
+  res_upsert_wp_update: 200,
+  res_log_progress_wp: 200,
   res_get_project_default: 1600,
   res_get_project_full: 78600,
   res_get_project_summary: 1600,
