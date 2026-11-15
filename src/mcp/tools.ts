@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Reg } from "./server";
 import { listProjects, getProjectDetail, createProject, updateProject } from "../data/projects";
+import { getBriefing } from "../data/briefing";
 import { resolveWpCode, shapeProjectDetail } from "../data/project-views";
 import { upsertWorkpackage } from "../data/workpackages";
 import { linkBranch } from "../data/branches";
@@ -189,6 +190,25 @@ export function registerTools(reg: Reg): void {
       readOnly: true,
     },
     async (args, tc) => shapeProjectDetail(await getProjectDetail(tc.db, args.id, tc.by), args),
+  );
+
+  reg(
+    "get_briefing",
+    {
+      title: "Get briefing",
+      description:
+        "Start here: one call gives status, active work packages, next milestone and gate, the last handover section and a context index (max 4000 characters). Give workpackage_id or wp_code to focus on one WP.",
+      inputSchema: z.object({
+        project_id: z.string(),
+        workpackage_id: optionalText(),
+        wp_code: z.string().optional().describe("Work package code, instead of workpackage_id."),
+      }),
+      readOnly: true,
+    },
+    async (args, tc) => {
+      const a = await locateWp(tc.db, args, "workpackage_id");
+      return getBriefing(tc.db, a.project_id, a.workpackage_id ?? undefined, tc.by);
+    },
   );
 
   reg(

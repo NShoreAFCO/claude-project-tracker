@@ -47,7 +47,7 @@ describe("MCP server", () => {
     expect(r.result.instructions.length).toBeLessThanOrEqual(1800);
   });
 
-  it("lists all 28 tools", async () => {
+  it("lists all 29 tools", async () => {
     const r = await rpc("tools/list");
     const names = r.result.tools.map((t: { name: string }) => t.name).sort();
     expect(names).toEqual(
@@ -57,6 +57,7 @@ describe("MCP server", () => {
         "create_project",
         "delete_context",
         "delete_entity",
+        "get_briefing",
         "get_context_bundle",
         "get_portfolio_summary",
         "get_project",
