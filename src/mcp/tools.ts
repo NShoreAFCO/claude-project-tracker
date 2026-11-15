@@ -113,8 +113,9 @@ async function locateWp<T extends { project_id: string; wp_code?: string }>(
   args: T,
   idKey: "id" | "workpackage_id",
 ): Promise<Omit<T, "wp_code">> {
-  const { wp_code, ...rest } = args;
-  if (wp_code === undefined) return rest;
+  const { wp_code: rawCode, ...rest } = args;
+  if (rawCode === undefined) return rest;
+  const wp_code = rawCode.trim();
   if ((rest as Record<string, unknown>)[idKey] != null) throw new ValidationError(`Give ${idKey} or wp_code, not both.`);
   if (!rest.project_id) throw new ValidationError("wp_code needs project_id.");
   return { ...rest, [idKey]: await resolveWpCode(db, rest.project_id, wp_code) };
@@ -174,12 +175,13 @@ export function registerTools(reg: Reg): void {
     {
       title: "Get project",
       description:
-        "Get project details. The default view=full can be very large: prefer view=summary (counts, milestones, risks, context index) or view=outline (one slim row per work package, optionally filtered by status), and wp for one work package in full.",
+        "Get project details. Default view=summary (counts, milestones, risks, context index); view=outline gives one slim row per work package (filter by status); wp gives one work package plus its outline children. view=full is very large.",
       inputSchema: z.object({
         id: z.string(),
-        view: z.enum(["full", "summary", "outline"]).optional().describe("Choose the level of detail. Default full."),
-        status: z.array(workpackageStatusSchema).min(1).optional().describe("Keep only these work package statuses (view=outline only)."),
-        wp: z.string().optional().describe("Return one work package with its subtree, by code or id. Takes precedence over view."),
+        view: z.enum(["full", "summary", "outline"]).optional().describe("Choose the level of detail. Default summary."),
+        status: z.array(workpackageStatusSchema).min(1).optional().describe("Keep only these work package statuses (view=outline, or the rows of wp)."),
+        wp: z.string().optional().describe("Return one work package in full plus its descendants as outline rows, by code or id. Takes precedence over view."),
+        depth: z.number().int().min(1).max(5).optional().describe("With wp: levels of descendants to list as rows (default 1, each row carries its depth)."),
       }),
       readOnly: true,
     },

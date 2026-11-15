@@ -492,9 +492,9 @@ describe("local_host", () => {
     expect(await (await rest(VIEWER, "GET", `/api/events?project_id=${p.id}`)).text()).not.toContain("zz-host-name");
     expect(await (await rest(EDITOR, "GET", `/api/events?project_id=${p.id}`)).text()).toContain("zz-host-name");
 
-    const vMcp = await mcpTool(VIEWER, "get_project", { id: p.id });
+    const vMcp = await mcpTool(VIEWER, "get_project", { id: p.id, view: "full" });
     expect(JSON.stringify(vMcp.body)).not.toContain("zz-host-name");
-    expect((await mcpTool(EDITOR, "get_project", { id: p.id })).body.project.local_host).toBe("zz-host-name");
+    expect((await mcpTool(EDITOR, "get_project", { id: p.id, view: "full" })).body.project.local_host).toBe("zz-host-name");
 
     const viewer = testCaller({ role: "viewer", channel: "dashboard" });
     expect((await getProjectDetail(db, p.id, viewer)).project).not.toHaveProperty("local_host");

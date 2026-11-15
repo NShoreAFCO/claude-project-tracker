@@ -158,10 +158,10 @@ describe("F12 internal fields", () => {
     expect(await (await rest(EDITOR, "GET", `/api/events?project_id=${p.id}`)).text()).toContain("zz-local-dir");
 
     // MCP get_project: same rule.
-    const vMcp = await mcpTool(VIEWER, "get_project", { id: p.id });
+    const vMcp = await mcpTool(VIEWER, "get_project", { id: p.id, view: "full" });
     for (const f of INTERNAL) expect(vMcp.project).not.toHaveProperty(f);
     expect(JSON.stringify(vMcp)).not.toContain("zz-local-dir");
-    const eMcp = await mcpTool(EDITOR, "get_project", { id: p.id });
+    const eMcp = await mcpTool(EDITOR, "get_project", { id: p.id, view: "full" });
     expect(eMcp.project.local_path).toBe("C:/work/zz-local-dir");
 
     // Data layer: an explicit viewer caller gets the filtered shape too.
