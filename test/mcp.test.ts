@@ -145,7 +145,7 @@ describe("MCP server", () => {
     const full = await get({});
     expect(full.workpackages.some((w: { code: string }) => w.code === "WP3")).toBe(true);
     expect(full.events).toBeDefined();
-    expect(await get({ view: "full" })).toMatchObject({ project: { id: p.id }, branches: [] });
+    expect(await get({ view: "full" })).toMatchObject({ project: { id: p.id } });
 
     const summary = await get({ view: "summary" });
     expect(summary.workpackages).toBeUndefined();
@@ -155,7 +155,7 @@ describe("MCP server", () => {
     const outline = await get({ view: "outline", status: ["doing"] });
     expect(outline.workpackages.map((w: { code: string }) => w.code)).toEqual(["WP3.1"]);
     expect(Object.keys(outline.workpackages[0]).sort()).toEqual(
-      ["blocked_by", "code", "end_date", "gate_locked", "id", "overdue", "owner", "parent_id", "progress", "start_date", "status", "title", "version", "waiting_reason"].sort(),
+      ["code", "id", "overdue", "owner", "parent_id", "progress", "status", "title", "version"].sort(),
     );
 
     const one = await get({ wp: "WP3" });

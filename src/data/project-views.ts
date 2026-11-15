@@ -43,6 +43,13 @@ const milestoneRow = (m: Detail["milestones"][number]) => ({
   critical: m.critical,
 });
 
+/** MCP views: rows nested in a project result do not repeat the project id. */
+const dropProjectId = <T extends { project_id?: unknown; children?: unknown }>(w: T): T => {
+  const { project_id: _p, ...rest } = w;
+  const kids = (w.children as T[] | undefined)?.map(dropProjectId);
+  return (kids ? { ...rest, children: kids } : rest) as T;
+};
+
 const header = (d: Detail) => ({
   id: d.project.id,
   title: d.project.title,
@@ -59,9 +66,9 @@ export function shapeProjectDetail(detail: Detail, opts: ProjectViewOptions = {}
   if (wp !== undefined) {
     const workpackage = items.find((w) => w.code === wp || w.id === wp);
     if (!workpackage) throw new NotFoundError(`work package ${wp} not found in project ${detail.project.id}`);
-    return { project: header(detail), workpackage };
+    return { project: header(detail), workpackage: dropProjectId(workpackage) };
   }
-  if (view === "full") return detail;
+  if (view === "full") return { ...detail, workpackages: detail.workpackages.map(dropProjectId), milestones: detail.milestones.map(dropProjectId) };
   const today = now().slice(0, 10);
   if (view === "outline") {
     const rows = status ? items.filter((w) => status.includes(w.status)) : items;

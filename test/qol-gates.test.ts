@@ -1,5 +1,6 @@
 // Gate lock until reached (a go before the gate is reached does not open it), milestone WP status lists,
 // and the project card's current_gate.
+import { compactResult } from "../src/mcp/compact";
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { call, installTestKeys, serviceJwt, testCaller, userJwt } from "./helpers";
@@ -265,7 +266,7 @@ describe("milestone WP status lists", () => {
     expect(restM1.reached).toBe(false);
     const proj = body(await mcp("get_project", { id: g.p.id }));
     const mcpM1 = (proj.milestones as Array<{ id: string; unlocks_status: unknown }>).find((m) => m.id === g.m1)!;
-    expect(mcpM1.unlocks_status).toEqual(m1.unlocks_status);
+    expect(mcpM1.unlocks_status).toEqual(compactResult(m1.unlocks_status));
   });
 });
 
