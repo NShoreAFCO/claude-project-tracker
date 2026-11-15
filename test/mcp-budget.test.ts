@@ -10,14 +10,14 @@ import { buildBudgetProject } from "./fixtures/budget-project";
 export const BUDGETS: Record<string, number> = {
   tools_list: 49100,
   def_upsert_workpackage: 7700,
-  res_upsert_wp_update: 1700,
-  res_log_progress_wp: 1600,
-  res_get_project_default: 127000,
-  res_get_project_summary: 1900,
-  res_get_project_outline: 18500,
-  res_get_project_wp_main: 19100,
+  res_upsert_wp_update: 1200,
+  res_log_progress_wp: 1100,
+  res_get_project_default: 78600,
+  res_get_project_summary: 1600,
+  res_get_project_outline: 12500,
+  res_get_project_wp_main: 11400,
   res_bundle_default: 35300,
-  res_list_projects: 600,
+  res_list_projects: 500,
 };
 
 let id = 0;

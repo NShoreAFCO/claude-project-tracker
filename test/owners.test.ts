@@ -236,7 +236,8 @@ describe("persons API and tools", () => {
     const r = await mcp("upsert_person", { name: uniq("Agent Added"), function: "Reviewer", phone: "+00 99" });
     expect(r.isError).toBeFalsy();
     const p = JSON.parse(r.content[0].text);
-    expect(p).toMatchObject({ function: "Reviewer", access_role: null });
+    expect(p).toMatchObject({ function: "Reviewer" });
+    expect(p.access_role).toBeUndefined();
     expect(p.phone).toBeUndefined();
     const list = JSON.parse((await mcp("list_persons", {})).content[0].text);
     expect(list.some((x: any) => x.id === p.id)).toBe(true);
