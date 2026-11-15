@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.3.5 — 2026-11-15 (smaller MCP results and tool list)
+
+No breaking change. No migration. Deploy only. Start a new Claude session afterwards so it sees the new tool definitions.
+
+### Changed (what MCP clients notice)
+
+- MCP results omit empty fields (null, empty strings, empty lists), so every result is smaller. The REST API and the dashboard are not affected.
+- `on_behalf_of` is no longer in the tool schemas, which shortens the tool list. It is still accepted, so existing callers keep working.
+- Work packages can be addressed by `project_id` + `wp_code` (for example `WP3.2`) instead of the id in four tools: `upsert_workpackage`, `log_progress`, `link_branch` and `log_token_cost`.
+- The MCP server reports its real package version instead of a fixed one.
+
+### Sizes
+
+Characters, before → after: `tools/list` 46,705 → 38,489; `upsert_workpackage` result 1,612 → 1,096; `get_project` full view 120,914 → 74,803 (on the same large project).
+
 ## v0.3.4 — 2026-11-05 (cheaper get_project reads)
 
 No migration. Deploy only. Start a new Claude session afterwards so it sees the new tool parameters.
