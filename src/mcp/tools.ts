@@ -727,7 +727,7 @@ export function registerTools(reg: Reg): void {
         project_id: z.string(),
         workpackage_id: optionalText(),
         branch_id: optionalText(),
-        max_bytes: z.number().int().min(1000).max(1000000).default(60000).describe("Limit the bundle size in bytes."),
+        max_bytes: z.number().int().min(1000).max(1000000).default(12000).describe("Limit the bundle size in bytes."),
         include_obsolete: z.boolean().default(false).describe("Also include documents marked obsolete (drafts are always included)."),
       }),
       readOnly: true,
