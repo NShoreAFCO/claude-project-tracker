@@ -8,6 +8,8 @@ import { registerTools } from "./tools";
 import { mcpActor, mcpCaller } from "../auth/caller";
 import { isAllowedEmail } from "../auth/access";
 import { requireAction, toolAction, type Action } from "../auth/permissions";
+import pkg from "../../package.json";
+import { compactResult, dropDuplicateDependsIds } from "./compact";
 
 export { mcpActor };
 
@@ -58,9 +60,6 @@ export function errorText(e: unknown): string {
     });
   return JSON.stringify({ error: "internal", message: "Unexpected error" });
 }
-
-import pkg from "../../package.json";
-import { compactResult, dropDuplicateDependsIds } from "./compact";
 
 function buildServer(env: Env, props: GrantProps, by: Caller): McpServer {
   const server = new McpServer({ name: "project-tracker", version: pkg.version }, { instructions: SERVER_INSTRUCTIONS });

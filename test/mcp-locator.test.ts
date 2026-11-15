@@ -219,6 +219,24 @@ describe("wp_code locator runs the same checks as the id", () => {
     expect(r.body.current.code).toBe("WP_DONE");
   });
 
+  it("completing a sign_off WP addressed by code needs a decider, as by id", async () => {
+    const t = await twins();
+    await upsertWorkpackage(db, t.p.id, { id: t.b, verification: "sign_off" }, SYS);
+    const login = await ensureUserPerson(db, EMAIL);
+    await db.prepare("UPDATE person SET access_role = 'editor' WHERE id = ?").bind(login.id).run();
+    try {
+      const up = await mcp("upsert_workpackage", { project_id: t.p.id, wp_code: "T02", status: "done" });
+      const log = await mcp("log_progress", { project_id: t.p.id, wp_code: "T02", summary: "x", progress: 100 });
+      expect([up.body.error, log.body.error]).toEqual(["forbidden", "forbidden"]);
+      expect((await wpRow(t.b)).status).toBe("todo");
+      await db.prepare("UPDATE person SET access_role = 'decider' WHERE id = ?").bind(login.id).run();
+      const ok = await mcp("upsert_workpackage", { project_id: t.p.id, wp_code: "T02", status: "done" });
+      expect([ok.body.status, ok.body.verified_by]).toEqual(["done", login.id]);
+    } finally {
+      await db.prepare("UPDATE person SET access_role = ? WHERE email = ?").bind(userRole, EMAIL).run();
+    }
+  });
+
   it("a viewer is forbidden, by code as by id", async () => {
     const t = await twins();
     await db.prepare("UPDATE person SET access_role = 'viewer' WHERE email = ?").bind(EMAIL).run();
