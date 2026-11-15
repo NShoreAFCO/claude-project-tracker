@@ -53,8 +53,10 @@ function optionalText(description?: string) {
   return description ? f.describe(description) : f;
 }
 
-function optionalDate(description?: string) {
-  return description ? dateSchema.describe(description) : dateSchema;
+const DATE_FORMAT = "YYYY-MM-DD";
+
+function optionalDate(description: string = DATE_FORMAT) {
+  return dateSchema.describe(description);
 }
 
 /** Person-or-text field (owner, sponsor, decision maker). */
@@ -274,7 +276,7 @@ export function registerTools(reg: Reg): void {
             start_date: optionalDate(),
             target_date: optionalDate(),
             progress_mode: progressModeSchema.optional(),
-            progress_manual: z.number().min(0).max(100).nullable().optional(),
+            progress_manual: z.number().min(0).max(100).nullable().optional().describe("0-100"),
             progress_manual_reason: optionalText(
               "Explain why progress is set by hand. Required when switching to manual mode or changing the manual progress.",
             ),
@@ -316,7 +318,7 @@ export function registerTools(reg: Reg): void {
         blocked_since: optionalDate("Set when the WP became blocked as YYYY-MM-DD (defaults to today on status blocked)."),
         waiting_reason: optionalText("Set why the WP is deferred (status waiting)."),
         drop_reason: optionalText("Set why the WP is dropped (required for status dropped)."),
-        progress: z.number().min(0).max(100).optional(),
+        progress: z.number().min(0).max(100).optional().describe("0-100"),
         weight: z.number().positive().optional().describe("Set the effort in person-days (PD); it also weights progress."),
         effort_planned_pd: z.number().min(0).nullable().optional().describe("Set the planned effort in person-days."),
         effort_actual_pd: z
@@ -469,8 +471,8 @@ export function registerTools(reg: Reg): void {
         type: z.enum(["risk", "issue", "opportunity", "nc"]).optional(),
         title: optionalText(),
         description_md: optionalText(),
-        probability: z.number().int().min(1).max(5).optional(),
-        impact: z.number().int().min(1).max(5).optional(),
+        probability: z.number().int().min(1).max(5).optional().describe("1-5"),
+        impact: z.number().int().min(1).max(5).optional().describe("1-5"),
         owner: personRef("Set the owner."),
         response: z.enum(["avoid", "reduce", "transfer", "accept", "exploit"]).nullable().optional(),
         action: optionalText(),
@@ -554,7 +556,7 @@ export function registerTools(reg: Reg): void {
         summary: z.string().min(1),
         workpackage_id: optionalText(),
         wp_code: z.string().optional(),
-        progress: z.number().min(0).max(100).optional(),
+        progress: z.number().min(0).max(100).optional().describe("0-100"),
         effort_pd: z
           .number()
           .positive()
@@ -608,12 +610,13 @@ export function registerTools(reg: Reg): void {
           .array(
             z.object({
               criterion: z.string().min(1),
-              value: z.number().min(0).max(10),
+              value: z.number().min(0).max(10).describe("0-10"),
               note: optionalText(),
             }),
           )
           .min(1)
-          .max(20),
+          .max(20)
+          .describe("1-20 scores"),
       }),
     },
     async (args, tc) =>
