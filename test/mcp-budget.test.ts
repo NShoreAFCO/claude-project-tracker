@@ -8,8 +8,8 @@ import { buildBudgetProject } from "./fixtures/budget-project";
 // Lower a budget when a change shrinks it. Never raise one without a reason in the PR.
 // Each line: the measured size in characters + 5 %, rounded up to 100.
 export const BUDGETS: Record<string, number> = {
-  tools_list: 49100,
-  def_upsert_workpackage: 7700,
+  tools_list: 39700,
+  def_upsert_workpackage: 7000,
   res_upsert_wp_update: 1200,
   res_log_progress_wp: 1100,
   res_get_project_default: 78600,
