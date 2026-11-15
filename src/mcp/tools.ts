@@ -8,7 +8,8 @@ import { linkBranch } from "../data/branches";
 import { setScores, logTokenCost, logProgress } from "../data/logs";
 import { deleteEntity, restoreEntity } from "../data/entities";
 import { listContext, readContext, getContextBundle, sectionHeadings, findSection, cutToBytes, tailSections } from "../data/context-read";
-import { writeContext, appendContext, deleteContext, setContextMeta } from "../data/context-write";
+import { writeContext, appendContext, checkAppendFits, deleteContext, setContextMeta } from "../data/context-write";
+import { requireAction, toolAction } from "../auth/permissions";
 import { search } from "../data/search";
 import { upsertMilestone } from "../data/milestones";
 import { listRisks, upsertRisk } from "../data/risks";
@@ -619,9 +620,60 @@ export function registerTools(reg: Reg): void {
           .boolean()
           .optional()
           .describe("Record a note only: no status, date or progress change; allowed on locked and done work packages (no progress or effort_pd)."),
+        handover_md: z
+          .string()
+          .min(1)
+          .max(20000)
+          .optional()
+          .describe("For clients without the session hook: appended to the WP's or project's 'handover' doc; token counts go to token cost."),
+        claude_tokens: z.number().int().min(0).optional(),
+        copilot_prompts: z.number().int().min(0).optional(),
       }),
     },
-    async (args, tc) => logProgress(tc.db, await locateWp(tc.db, args, "workpackage_id"), tc.by),
+    async (args, tc) => {
+      const { handover_md, claude_tokens, copilot_prompts, ...input } = await locateWp(tc.db, args, "workpackage_id");
+      const wpId = input.workpackage_id ?? null;
+      const tokens = claude_tokens !== undefined || copilot_prompts !== undefined;
+      const owner = wpId ? { owner_kind: "workpackage" as const, owner_id: wpId } : { owner_kind: "project" as const, owner_id: input.project_id };
+      const handover = { text: handover_md ?? "", heading: input.session_id ? `Session end ${input.session_id}` : "Session end" };
+      // Every check before any write: each part's permission (central table), owner in the project, size caps.
+      if (handover_md !== undefined) {
+        requireAction(tc.by, toolAction("append_context") ?? "manage_roles");
+        await checkAppendFits(tc.db, { ...owner, slug: "handover" }, input.project_id, handover, tc.by);
+      }
+      if (tokens) requireAction(tc.by, toolAction("log_token_cost") ?? "manage_roles");
+      // Progress first; its own refusals (gate lock, done WP, wrong project) leave the other parts unwritten.
+      const out: Record<string, unknown> = { ...(await logProgress(tc.db, input, tc.by)) };
+      const warnings: string[] = [];
+      if (handover_md !== undefined) {
+        try {
+          const doc = await appendContext(tc.db, { ...owner, slug: "handover", ...handover }, tc.by);
+          out.handover = { doc_id: doc.id, version: doc.version };
+        } catch (e) {
+          warnings.push(`handover not written: ${(e as Error)?.message ?? "error"}`);
+        }
+      }
+      if (tokens) {
+        try {
+          const row = await logTokenCost(
+            tc.db,
+            input.project_id,
+            omitUndefined({
+              claude_tokens,
+              copilot_prompts,
+              workpackage_id: wpId,
+              note: input.session_id ? `session ${input.session_id}` : "session end",
+            }),
+            tc.by,
+          );
+          out.token_cost = { id: row.id };
+        } catch (e) {
+          warnings.push(`token cost not written: ${(e as Error)?.message ?? "error"}`);
+        }
+      }
+      if (warnings.length) out.warnings = warnings;
+      return out;
+    },
   );
 
   reg(
