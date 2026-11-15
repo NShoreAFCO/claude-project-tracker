@@ -69,6 +69,13 @@ const dropProjectId = <T extends { project_id?: unknown; children?: unknown }>(w
   return (kids ? { ...rest, children: kids } : rest) as T;
 };
 
+/** view=full keeps this many of the newest branches and context index rows. */
+const FULL_KEEP = 20;
+const newest = <T>(rows: T[], at: (r: T) => string | null | undefined) => ({
+  total: rows.length,
+  rows: [...rows].sort((a, b) => (at(b) ?? "").localeCompare(at(a) ?? "")).slice(0, FULL_KEEP),
+});
+
 const header = (d: Detail) => ({
   id: d.project.id,
   title: d.project.title,
@@ -97,7 +104,19 @@ export function shapeProjectDetail(detail: Detail, opts: ProjectViewOptions = {}
     const { children: _c, ...own } = dropProjectId(node);
     return { project: header(detail), workpackage: own, children: rows };
   }
-  if (view === "full") return { ...detail, workpackages: detail.workpackages.map(dropProjectId), milestones: detail.milestones.map(dropProjectId) };
+  if (view === "full") {
+    const branches = newest(detail.branches, (b) => b.last_activity);
+    const ctx = newest(detail.context_index, (c) => c.updated_at);
+    return {
+      ...detail,
+      workpackages: detail.workpackages.map(dropProjectId),
+      milestones: detail.milestones.map(dropProjectId),
+      branches: branches.rows,
+      context_index: ctx.rows,
+      ...(branches.total > FULL_KEEP ? { branches_total: branches.total } : {}),
+      ...(ctx.total > FULL_KEEP ? { context_total: ctx.total } : {}),
+    };
+  }
   if (view === "outline") {
     const rows = status ? items.filter((w) => status.includes(w.status)) : items;
     return { project: header(detail), progress: detail.progress, workpackages: rows.map((w) => outlineRow(w, today)) };
