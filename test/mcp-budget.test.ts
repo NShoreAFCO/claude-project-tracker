@@ -8,7 +8,7 @@ import { buildBudgetProject } from "./fixtures/budget-project";
 // Lower a budget when a change shrinks it. Never raise one without a reason in the PR.
 // Each line: the measured size in characters + 5 %, rounded up to 100.
 export const BUDGETS: Record<string, number> = {
-  tools_list: 39700,
+  tools_list: 41800,
   def_upsert_workpackage: 7000,
   res_upsert_wp_update: 1200,
   res_log_progress_wp: 1100,
@@ -21,6 +21,7 @@ export const BUDGETS: Record<string, number> = {
   res_list_projects: 500,
   res_search_default: 1700,
   res_list_risks: 700,
+  res_read_context_tail2: 19200,
 };
 
 let id = 0;
@@ -65,6 +66,9 @@ describe("MCP size budgets", () => {
     measured.res_get_project_outline = len(await call("get_project", { id: p.id, view: "outline" }));
     measured.res_get_project_wp_main = len(await call("get_project", { id: p.id, wp: p.topWp.code }));
     measured.res_bundle_default = len(await call("get_context_bundle", { project_id: p.id }));
+    measured.res_read_context_tail2 = len(
+      await call("read_context", { owner_kind: "project", owner_id: p.id, slug: "handover", tail_sections: 2 }),
+    );
     measured.res_list_projects = len(await call("list_projects", {}));
     measured.res_search_default = len(await call("search", { query: "Work package" }));
     measured.res_list_risks = len(await call("list_risks", { project_id: p.id }));

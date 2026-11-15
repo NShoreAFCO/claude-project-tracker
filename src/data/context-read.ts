@@ -147,6 +147,54 @@ export function tailSections(md: string, n: number): { text: string; truncated: 
   return { text: md.slice(starts[starts.length - keep]), truncated: true };
 }
 
+function sectionStarts(md: string): number[] {
+  const starts: number[] = [];
+  const re = /^## /gm;
+  for (let m = re.exec(md); m; m = re.exec(md)) starts.push(m.index);
+  return starts;
+}
+
+/** The "## " headings of a document with the byte size of each section (heading line included). */
+export function sectionHeadings(md: string): Array<{ heading: string; bytes: number }> {
+  const starts = sectionStarts(md);
+  return starts.map((s, i) => {
+    const end = i + 1 < starts.length ? starts[i + 1] : md.length;
+    const nl = md.indexOf("\n", s);
+    const heading = md.slice(s, nl < 0 || nl > end ? end : nl).trim();
+    return { heading, bytes: utf8Bytes(md.slice(s, end)) };
+  });
+}
+
+/** The section whose heading text starts with `prefix` (case-insensitive); the last match wins, as the newest section is last. */
+export function findSection(md: string, prefix: string): string | null {
+  const want = prefix.trim().toLowerCase();
+  const starts = sectionStarts(md);
+  for (let i = starts.length - 1; i >= 0; i--) {
+    const end = i + 1 < starts.length ? starts[i + 1] : md.length;
+    const text = md.slice(starts[i], end);
+    if (text.slice(3).trimStart().toLowerCase().startsWith(want)) return text;
+  }
+  return null;
+}
+
+/**
+ * Cuts `md` at a section boundary so that it fits `budget` bytes: whole leading blocks (a preamble counts as one) are kept.
+ * `more` is the number of blocks left out. When not even the first block fits, it is cut by characters instead.
+ */
+export function cutToBytes(md: string, budget: number): { text: string; more: number } {
+  if (utf8Bytes(md) <= budget) return { text: md, more: 0 };
+  const starts = sectionStarts(md);
+  const cuts = starts[0] === 0 ? starts : [0, ...starts];
+  const blocks = cuts.map((s, i) => md.slice(s, i + 1 < cuts.length ? cuts[i + 1] : md.length));
+  let used = 0;
+  let kept = 0;
+  while (kept < blocks.length && used + utf8Bytes(blocks[kept]) <= budget) used += utf8Bytes(blocks[kept++]);
+  if (kept > 0) return { text: blocks.slice(0, kept).join(""), more: blocks.length - kept };
+  let text = md.slice(0, Math.max(0, budget));
+  while (text && utf8Bytes(text) > budget) text = text.slice(0, -1);
+  return { text, more: blocks.length };
+}
+
 const TAIL_NOTE = "(earlier sections omitted, read_context for the rest)";
 const RISK_CUT = "## Open risks and gates\n\n… truncated\n";
 
