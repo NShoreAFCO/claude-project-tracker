@@ -85,6 +85,13 @@ export async function buildBudgetProject(rawCall: ToolCall): Promise<BudgetProje
   ];
   for (const [slug, size] of docs) {
     await call("write_context", { owner_kind: "project", owner_id: p.id, slug, title: slug, content_md: filler(slug, size) });
+    if (slug === "handover") {
+      // Session sections as append_context writes them, so read_context tail_sections has something to cut.
+      // Written right after the document, so it stays the oldest and the bundle order does not change.
+      for (let i = 1; i <= 6; i++) {
+        await call("append_context", { owner_kind: "project", owner_id: p.id, slug, heading: `Session ${i}`, text: filler(`s${i}`, 9000) });
+      }
+    }
   }
   await call("write_context", { owner_kind: "workpackage", owner_id: tops[0].id, slug: "wp-notes", title: "WP notes", content_md: filler("wpdoc", 2000) });
   for (let i = 0; i < 32; i++) {
