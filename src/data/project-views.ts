@@ -11,7 +11,7 @@ export interface ProjectViewOptions {
   wp?: string;
 }
 
-/** How get_project wp= and the MCP wp_code locator match a work package: by code, or by id. */
+/** How get_project wp= matches a work package: by code, or by id. (The wp_code locator below matches the code only.) */
 export const matchesWp = (key: string) => (w: { id: string; code?: string | null }) => w.code === key || w.id === key;
 
 /**
