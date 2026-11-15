@@ -50,6 +50,11 @@ describe("MCP list limits", () => {
     expect(wide.more).toBeUndefined();
   });
 
+  it("search refuses limits outside 1..50, fractions and unknown kinds", async () => {
+    for (const bad of [{ limit: 0 }, { limit: 51 }, { limit: 2.5 }, { kind: "branch" }])
+      expect((await call("search", { query: "Quokka", ...bad })).isError).toBe(true);
+  });
+
   it("list_risks: slim rows, id returns one in full", async () => {
     const p = await data("create_project", { title: "Lists Risks" });
     const r = await data("upsert_risk", {
@@ -99,6 +104,9 @@ describe("MCP list limits", () => {
     expect(full.branches_total).toBe(21);
     expect(full.context_index.length).toBe(20);
     expect(full.context_total).toBe(21);
+    const names = full.branches.map((b: { name: string }) => b.name);
+    expect(names).toContain("feat/b20");
+    expect(names).not.toContain("feat/b00");
     const small = await data("create_project", { title: "Lists Full Small" });
     await data("link_branch", { project_id: small.id, repo: "r/x", name: "feat/only" });
     const f2 = await data("get_project", { id: small.id, view: "full" });

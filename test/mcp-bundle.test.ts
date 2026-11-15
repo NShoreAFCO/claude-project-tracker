@@ -99,6 +99,17 @@ describe("context bundle budget", () => {
     expect(b.bytes).toBeLessThanOrEqual(1700);
   });
 
+  it("tries one section when a two-section handover does not fit", async () => {
+    const p = await proj();
+    const h = await doc(p.id, "handover", "");
+    await appendContext(db, { owner_kind: "project", owner_id: p.id, slug: "handover", heading: "one", text: `ONE-BODY ${"z".repeat(1500)}` }, A);
+    await appendContext(db, { owner_kind: "project", owner_id: p.id, slug: "handover", heading: "two", text: "TWO-BODY short" }, A);
+    const b = await getContextBundle(db, { project_id: p.id, max_bytes: 1000 });
+    expect(b.included).toEqual([h.id]);
+    expect(b.markdown).toContain("TWO-BODY");
+    expect(b.markdown).not.toContain("ONE-BODY");
+  });
+
   it("falls back to 1 section, then omits the handover", async () => {
     const p = await proj();
     const h = await doc(p.id, "handover", "");
