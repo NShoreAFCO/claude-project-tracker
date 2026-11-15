@@ -179,4 +179,14 @@ describe("MCP server", () => {
     const read = text(await call("read_context", { owner_kind: "project", owner_id: "mcp-roundtrip", slug: "handover" }));
     expect(read).toMatch(/^--- context: project:mcp-roundtrip\/handover v2, by mcp:Claude Test ---/);
   });
+  it("a call that still sends on_behalf_of succeeds and is attributed to the login's person", async () => {
+    const p = JSON.parse(text(await call("create_project", { title: "MCP Obo" })));
+    const r = await call("log_progress", { project_id: p.id, summary: "obo check", on_behalf_of: "someone.else@example.com" });
+    expect(r.isError).toBeFalsy();
+    const full = JSON.parse(text(await call("get_project", { id: p.id })));
+    const dump = JSON.stringify(full.events);
+    expect(dump).toContain("obo check");
+    expect(dump).not.toContain("someone.else@example.com");
+    expect(dump).toContain('"person_name":"user"');
+  });
 });
