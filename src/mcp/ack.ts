@@ -27,12 +27,20 @@ export function ack(result: unknown, args: unknown): unknown {
   let row: Obj = result;
   const out: Obj = {};
   if (isObj(result.workpackage)) row = result.workpackage;
-  else if (!("id" in result) && "event_id" in result) return { event_id: result.event_id };
+  else if (!("id" in result) && "event_id" in result) return withExtras({ event_id: result.event_id }, result);
   const sent = sentKeys(args);
   for (const k of ["id", "code", "version", "status", "progress"]) if (row[k] !== undefined && row[k] !== null) out[k] = row[k];
   if (Array.isArray(row.warnings) && row.warnings.length) out.warnings = row.warnings;
   for (const k of SERVER_SET) if (!sent.has(k) && row[k] !== undefined && row[k] !== null && row[k] !== "") out[k] = row[k];
   if (row !== result && result.event_id !== undefined) out.event_id = result.event_id;
+  return row !== result ? withExtras(out, result) : out;
+}
+
+/** A progress log's extra writes (handover, token_cost) and its own warnings, next to the work package's. */
+function withExtras(out: Obj, result: Obj): Obj {
+  for (const k of ["handover", "token_cost"]) if (isObj(result[k])) out[k] = result[k];
+  if (Array.isArray(result.warnings) && result.warnings.length)
+    out.warnings = [...(Array.isArray(out.warnings) ? out.warnings : []), ...result.warnings];
   return out;
 }
 
