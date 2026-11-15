@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { Reg } from "./server";
 import { listProjects, getProjectDetail, createProject, updateProject } from "../data/projects";
-import { shapeProjectDetail } from "../data/project-views";
+import { resolveWpCode, shapeProjectDetail } from "../data/project-views";
 import { upsertWorkpackage } from "../data/workpackages";
 import { linkBranch } from "../data/branches";
 import { setScores, logTokenCost, logProgress } from "../data/logs";
@@ -104,6 +104,21 @@ function requireContextAddress(args: {
     throw new ValidationError("Provide doc_id, or provide owner_kind, owner_id, and slug together.");
   }
 }
+
+/** WP locator: the id field, or project_id + wp_code. The code is resolved to the id first, so the tool's checks run on that id unchanged. */
+async function locateWp<T extends { project_id: string; wp_code?: string }>(
+  db: D1Database,
+  args: T,
+  idKey: "id" | "workpackage_id",
+): Promise<Omit<T, "wp_code">> {
+  const { wp_code, ...rest } = args;
+  if (wp_code === undefined) return rest;
+  if ((rest as Record<string, unknown>)[idKey] != null) throw new ValidationError(`Give ${idKey} or wp_code, not both.`);
+  if (!rest.project_id) throw new ValidationError("wp_code needs project_id.");
+  return { ...rest, [idKey]: await resolveWpCode(db, rest.project_id, wp_code) };
+}
+
+const WP_LOCATOR = "Identify the WP by workpackage_id, or by project_id + wp_code.";
 
 export function registerTools(reg: Reg): void {
   reg(
@@ -287,10 +302,11 @@ export function registerTools(reg: Reg): void {
     "upsert_workpackage",
     {
       title: "Upsert work package",
-      description: `Create or update a work package. Always set code (WP3.2, T07) and parent_id at the matching level (tasks under sub-WPs); dates must respect depends_on and unlocking gates unless the user expressly overrides. category: ${WP_CATEGORIES.join("|")} (null = inherit from the parent). WPs with human=true${HUMAN_DEFAULT.length ? ` (default for ${HUMAN_DEFAULT.join(", ")})` : ""} are done off the computer: log progress the user reports, and set them to done only when the user says so. When you create a WP, fill deliverable and acceptance_criteria_md (how to tell it is done) and choose verification (${VERIFICATIONS.join("|")}). Verification: setting a WP with verification other than none to done records your OAuth login's person as verified_by (verified_at now), so do it only when the user confirms they verified it; never mark human=true WPs verified yourself, and never set verified_by to an agent, free text or anyone but your login (refused). Set owner when someone other than the project owner is responsible (effective_owner falls back to the project owner); priority_stakeholders lists persons to keep informed. Status: use blocked only for a real blocker (blocked_by wp:<id>, ms:<id> or ext:<text>; blocked_since defaults to today) and waiting for a deliberate deferral (optional waiting_reason). dropped requires drop_reason. A todo WP whose progress rises above 0 becomes doing unless you set status in the same call. The result lists schedule issues in warnings (start before a predecessor ends or before an unlocking milestone is due, child outside its parent); fix them or tell the user. In a schedule_strict project a write that adds issues fails with a conflict listing them. A WP behind a closed gate milestone (not reached yet, or no go decision) is gate-locked: setting it to doing or done, or setting its progress, fails with 409 GATE_LOCKED naming the gate; tell the user (the decision maker decides, or a person overrides in the dashboard).`,
+      description: `Create or update a work package. Always set code (WP3.2, T07) and parent_id at the matching level (tasks under sub-WPs); dates must respect depends_on and unlocking gates unless the user expressly overrides. category: ${WP_CATEGORIES.join("|")} (null = inherit from the parent). WPs with human=true${HUMAN_DEFAULT.length ? ` (default for ${HUMAN_DEFAULT.join(", ")})` : ""} are done off the computer: log progress the user reports, and set them to done only when the user says so. When you create a WP, fill deliverable and acceptance_criteria_md (how to tell it is done) and choose verification (${VERIFICATIONS.join("|")}). Verification: setting a WP with verification other than none to done records your OAuth login's person as verified_by (verified_at now), so do it only when the user confirms they verified it; never mark human=true WPs verified yourself, and never set verified_by to an agent, free text or anyone but your login (refused). Set owner when someone other than the project owner is responsible (effective_owner falls back to the project owner); priority_stakeholders lists persons to keep informed. Status: use blocked only for a real blocker (blocked_by wp:<id>, ms:<id> or ext:<text>; blocked_since defaults to today) and waiting for a deliberate deferral (optional waiting_reason). dropped requires drop_reason. A todo WP whose progress rises above 0 becomes doing unless you set status in the same call. The result lists schedule issues in warnings (start before a predecessor ends or before an unlocking milestone is due, child outside its parent); fix them or tell the user. In a schedule_strict project a write that adds issues fails with a conflict listing them. A WP behind a closed gate milestone (not reached yet, or no go decision) is gate-locked: setting it to doing or done, or setting its progress, fails with 409 GATE_LOCKED naming the gate; tell the user (the decision maker decides, or a person overrides in the dashboard). Identify an existing WP by id, or by project_id + wp_code.`,
       inputSchema: z.object({
         project_id: z.string(),
         id: z.string().optional().describe("Identify an existing work package (omit to create)."),
+        wp_code: z.string().optional(),
         parent_id: optionalText(),
         code: optionalText("Set the short code shown before the title (max 12 characters: letters, digits, dot, hyphen; null clears)."),
         title: optionalText(),
@@ -352,7 +368,7 @@ export function registerTools(reg: Reg): void {
       }),
     },
     async (args, tc) => {
-      const { project_id, expected_version, ...input } = args;
+      const { project_id, expected_version, ...input } = await locateWp(tc.db, args, "id");
 
       return upsertWorkpackage(tc.db, project_id, omitUndefined(input), tc.by, expected_version);
     },
@@ -532,11 +548,12 @@ export function registerTools(reg: Reg): void {
     {
       title: "Log progress",
       description:
-        "Log what was done in this session. Main logging tool. With workpackage_id, a todo work package moves to doing; progress 100 marks it done (for a WP with verification other than none this records your OAuth login's person as verified_by, so log 100 only when the user confirms the verification; never for human=true WPs on your own). A progress log on a gate-locked work package (behind a gate not yet reached or without a go decision) is refused (409 GATE_LOCKED), and so is one on a done work package (409 WP_DONE; only a person in the dashboard can authorise it). With note=true the entry is only recorded as a note: it never changes status, dates or progress and is accepted on any work package, locked and done ones included; use it for remarks and for work behind a gate. For new work on a done work package, open a new sub-work package or task.",
+        `Log what was done in this session. Main logging tool. With workpackage_id, a todo work package moves to doing; progress 100 marks it done (for a WP with verification other than none this records your OAuth login's person as verified_by, so log 100 only when the user confirms the verification; never for human=true WPs on your own). A progress log on a gate-locked work package (behind a gate not yet reached or without a go decision) is refused (409 GATE_LOCKED), and so is one on a done work package (409 WP_DONE; only a person in the dashboard can authorise it). With note=true the entry is only recorded as a note: it never changes status, dates or progress and is accepted on any work package, locked and done ones included; use it for remarks and for work behind a gate. For new work on a done work package, open a new sub-work package or task. ${WP_LOCATOR}`,
       inputSchema: z.object({
         project_id: z.string(),
         summary: z.string().min(1),
         workpackage_id: optionalText(),
+        wp_code: z.string().optional(),
         progress: z.number().min(0).max(100).optional(),
         effort_pd: z
           .number()
@@ -551,14 +568,14 @@ export function registerTools(reg: Reg): void {
           .describe("Record a note only: no status, date or progress change; allowed on locked and done work packages (no progress or effort_pd)."),
       }),
     },
-    async (args, tc) => logProgress(tc.db, args, tc.by),
+    async (args, tc) => logProgress(tc.db, await locateWp(tc.db, args, "workpackage_id"), tc.by),
   );
 
   reg(
     "link_branch",
     {
       title: "Link branch",
-      description: "Link a branch to a project.",
+      description: `Link a branch to a project. ${WP_LOCATOR}`,
       inputSchema: z.object({
         project_id: z.string(),
         repo: z.string().min(1),
@@ -570,10 +587,11 @@ export function registerTools(reg: Reg): void {
         status: branchStatusSchema.optional(),
         note: optionalText(),
         workpackage_id: optionalText(),
+        wp_code: z.string().optional(),
       }),
     },
     async (args, tc) => {
-      const { project_id, ...input } = args;
+      const { project_id, ...input } = await locateWp(tc.db, args, "workpackage_id");
 
       return linkBranch(tc.db, project_id, omitUndefined(input), tc.by);
     },
@@ -611,17 +629,18 @@ export function registerTools(reg: Reg): void {
     "log_token_cost",
     {
       title: "Log token cost",
-      description: "Log token and prompt usage.",
+      description: `Log token and prompt usage. ${WP_LOCATOR}`,
       inputSchema: z.object({
         project_id: z.string(),
         claude_tokens: z.number().int().optional(),
         copilot_prompts: z.number().int().optional(),
         note: optionalText(),
         workpackage_id: optionalText(),
+        wp_code: z.string().optional(),
       }),
     },
     async (args, tc) => {
-      const { project_id, ...input } = args;
+      const { project_id, ...input } = await locateWp(tc.db, args, "workpackage_id");
 
       return logTokenCost(tc.db, project_id, omitUndefined(input), tc.by);
     },
