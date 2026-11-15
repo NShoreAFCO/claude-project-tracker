@@ -114,7 +114,7 @@ describe("MCP server", () => {
     expect([w.category, w.human]).toEqual([wcat, 1]);
     const m = JSON.parse(text(await call("upsert_milestone", { project_id: p.id, title: "Lab done", requires: [w.id] })));
     expect([m.done, m.requires]).toEqual([false, [w.id]]);
-    const listed = JSON.parse(text(await call("list_projects", { category: pcat })));
+    const listed = JSON.parse(text(await call("list_projects", { category: pcat, counts: true })));
     const card = listed.find((x: { id: string }) => x.id === p.id);
     expect([card.category, card.wp_counts, card.next_milestone.title]).toEqual([
       pcat,
