@@ -12,10 +12,11 @@ export const BUDGETS: Record<string, number> = {
   def_upsert_workpackage: 7000,
   res_upsert_wp_update: 1200,
   res_log_progress_wp: 1100,
-  res_get_project_default: 78600,
+  res_get_project_default: 1600,
+  res_get_project_full: 78600,
   res_get_project_summary: 1600,
   res_get_project_outline: 12500,
-  res_get_project_wp_main: 11400,
+  res_get_project_wp_main: 1900,
   res_bundle_default: 35300,
   res_list_projects: 500,
 };
@@ -57,6 +58,7 @@ describe("MCP size budgets", () => {
     measured.tools_list = JSON.stringify(tools).length;
     measured.def_upsert_workpackage = JSON.stringify(tools.find((t) => t.name === "upsert_workpackage")).length;
     measured.res_get_project_default = len(await call("get_project", { id: p.id }));
+    measured.res_get_project_full = len(await call("get_project", { id: p.id, view: "full" }));
     measured.res_get_project_summary = len(await call("get_project", { id: p.id, view: "summary" }));
     measured.res_get_project_outline = len(await call("get_project", { id: p.id, view: "outline" }));
     measured.res_get_project_wp_main = len(await call("get_project", { id: p.id, wp: p.topWp.code }));

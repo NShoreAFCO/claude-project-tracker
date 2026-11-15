@@ -142,7 +142,7 @@ describe("MCP server", () => {
     await call("upsert_workpackage", { project_id: p.id, title: "Child", code: "WP3.1", parent_id: parent.id, status: "doing" });
     const get = async (args: Record<string, unknown>) => JSON.parse(text(await call("get_project", { id: p.id, ...args })));
 
-    const full = await get({});
+    const full = await get({ view: "full" });
     expect(full.workpackages.some((w: { code: string }) => w.code === "WP3")).toBe(true);
     expect(full.events).toBeDefined();
     expect(await get({ view: "full" })).toMatchObject({ project: { id: p.id } });
@@ -159,7 +159,8 @@ describe("MCP server", () => {
     );
 
     const one = await get({ wp: "WP3" });
-    expect(one.workpackage.children[0].code).toBe("WP3.1");
+    expect(one.workpackage.children).toBeUndefined();
+    expect(one.children[0].code).toBe("WP3.1");
     const missing = await call("get_project", { id: p.id, wp: "WP99" });
     expect(JSON.parse(text(missing)).error).toBe("not_found");
     const bad = await call("get_project", { id: p.id, view: "summary", status: ["todo"] });
@@ -183,7 +184,7 @@ describe("MCP server", () => {
     const p = JSON.parse(text(await call("create_project", { title: "MCP Obo" })));
     const r = await call("log_progress", { project_id: p.id, summary: "obo check", on_behalf_of: "someone.else@example.com" });
     expect(r.isError).toBeFalsy();
-    const full = JSON.parse(text(await call("get_project", { id: p.id })));
+    const full = JSON.parse(text(await call("get_project", { id: p.id, view: "full" })));
     const dump = JSON.stringify(full.events);
     expect(dump).toContain("obo check");
     expect(dump).not.toContain("someone.else@example.com");

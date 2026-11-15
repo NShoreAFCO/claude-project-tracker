@@ -264,7 +264,7 @@ describe("milestone WP status lists", () => {
     const restM1 = (r.json as unknown as Array<{ id: string; requires_status: unknown; reached: boolean }>).find((m) => m.id === g.m1)!;
     expect(restM1.requires_status).toEqual(expected);
     expect(restM1.reached).toBe(false);
-    const proj = body(await mcp("get_project", { id: g.p.id }));
+    const proj = body(await mcp("get_project", { id: g.p.id, view: "full" }));
     const mcpM1 = (proj.milestones as Array<{ id: string; unlocks_status: unknown }>).find((m) => m.id === g.m1)!;
     expect(mcpM1.unlocks_status).toEqual(compactResult(m1.unlocks_status));
   });
