@@ -18,6 +18,7 @@ export const BUDGETS: Record<string, number> = {
   res_get_project_wp_main: 11400,
   res_bundle_default: 8800,
   res_list_projects: 500,
+  res_read_context_tail2: 19200,
 };
 
 let id = 0;
@@ -61,6 +62,9 @@ describe("MCP size budgets", () => {
     measured.res_get_project_outline = len(await call("get_project", { id: p.id, view: "outline" }));
     measured.res_get_project_wp_main = len(await call("get_project", { id: p.id, wp: p.topWp.code }));
     measured.res_bundle_default = len(await call("get_context_bundle", { project_id: p.id }));
+    measured.res_read_context_tail2 = len(
+      await call("read_context", { owner_kind: "project", owner_id: p.id, slug: "handover", tail_sections: 2 }),
+    );
     measured.res_list_projects = len(await call("list_projects", {}));
     // Writes last: they change the project.
     const wp = JSON.parse((await call("get_project", { id: p.id, wp: p.leafWp.code })).content[0].text).workpackage;
