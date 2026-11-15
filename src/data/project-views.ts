@@ -23,7 +23,7 @@ export async function resolveWpCode(db: D1Database, projectId: string, code: str
     .prepare(`SELECT id, code FROM workpackage WHERE project_id = ? AND ${LIVE()}`)
     .bind(projectId)
     .all<{ id: string; code: string | null }>();
-  const hits = rows.results.filter(matchesWp(code));
+  const hits = rows.results.filter((w) => w.code === code);
   if (!hits.length) throw new NotFoundError(`work package ${code} not found in project ${projectId}`);
   if (hits.length > 1) throw new ValidationError(`work package code ${code} is ambiguous in project ${projectId}: ${hits.map((w) => w.id).join(", ")}; give the id`);
   return hits[0].id;

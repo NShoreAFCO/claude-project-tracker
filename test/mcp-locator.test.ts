@@ -182,6 +182,15 @@ describe("wp_code locator refusals", () => {
     }
   });
 
+  it("wp_code matches the code field only, never a row id", async () => {
+    const t = await twins();
+    const r = await mcp("log_progress", { project_id: t.p.id, wp_code: t.a, summary: "x" });
+    expect(r.body.error).toBe("not_found");
+    await upsertWorkpackage(db, t.p.id, { id: t.b, code: t.a }, SYS);
+    const r2 = await mcp("log_progress", { project_id: t.p.id, wp_code: t.a, summary: "x" });
+    expect(r2.isError).toBe(false);
+  });
+
   it("a code shared by two live WPs of the project is invalid and names both ids", async () => {
     const t = await twins();
     await upsertWorkpackage(db, t.p.id, { id: t.b, code: "T01" }, SYS);
@@ -199,6 +208,7 @@ describe("wp_code locator runs the same checks as the id", () => {
     expect(up.body.current.code).toBe("GATE_LOCKED");
     const log = await mcp("log_progress", { project_id: g.p.id, wp_code: "WP2", summary: "x", progress: 10 });
     expect(log.body.current.code).toBe("GATE_LOCKED");
+    expect([up.body.error, log.body.error]).toEqual(["conflict", "conflict"]);
     expect((await wpRow(g.wp2)).status).toBe("todo");
   });
 

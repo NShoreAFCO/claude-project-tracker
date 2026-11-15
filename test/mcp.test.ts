@@ -188,5 +188,9 @@ describe("MCP server", () => {
     expect(dump).toContain("obo check");
     expect(dump).not.toContain("someone.else@example.com");
     expect(dump).toContain('"person_name":"user"');
+    const ev = (full.events as Array<Record<string, unknown>>).find((e) => JSON.stringify(e).includes("obo check"));
+    expect(ev).toBeDefined();
+    expect(JSON.stringify(ev)).toContain('"person_name":"user"');
+    expect(JSON.stringify(ev)).not.toContain("someone.else@example.com");
   });
 });
