@@ -115,8 +115,8 @@ describe("wp_code locator gives the same result as the id", () => {
 
   it("link_branch", async () => {
     const t = await twins();
-    const byId = await mcp("link_branch", { project_id: t.p.id, repo: "o/r", name: "feat/a", workpackage_id: t.a });
-    const byCode = await mcp("link_branch", { project_id: t.p.id, repo: "o/r", name: "feat/b", wp_code: "T02" });
+    const byId = await mcp("link_branch", { project_id: t.p.id, repo: "o/r", name: "feat/a", workpackage_id: t.a, return: "full" });
+    const byCode = await mcp("link_branch", { project_id: t.p.id, repo: "o/r", name: "feat/b", wp_code: "T02", return: "full" });
     expect(byId.isError).toBe(false);
     expect(byCode.body.workpackage_id).toBe(t.b);
     expect(norm(byCode.body, [t.b])).toEqual(norm(byId.body, [t.a]));

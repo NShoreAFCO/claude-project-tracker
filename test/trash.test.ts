@@ -320,7 +320,7 @@ describe("document status", () => {
     const p = await owned("Release");
     const d = await writeContext(db, { owner_kind: "project", owner_id: p.id, title: "plan", content_md: "x" }, A);
     await setContextMeta(db, d.id, { status: "draft" }, A);
-    const r = await mcp("set_context_meta", { doc_id: d.id, status: "released" });
+    const r = await mcp("set_context_meta", { doc_id: d.id, status: "released", return: "full" });
     expect(r.isError).toBe(false);
     const out = JSON.parse(r.text);
     expect([out.status, out.released_by]).toEqual(["released", "mcp:Claude"]);
