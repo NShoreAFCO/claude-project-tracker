@@ -8,6 +8,8 @@ import { registerTools } from "./tools";
 import { mcpActor, mcpCaller } from "../auth/caller";
 import { isAllowedEmail } from "../auth/access";
 import { requireAction, toolAction, type Action } from "../auth/permissions";
+import pkg from "../../package.json";
+import { compactResult, dropDuplicateDependsIds } from "./compact";
 
 export { mcpActor };
 
@@ -19,6 +21,7 @@ export const SERVER_INSTRUCTIONS = [
   "Structure: WP1 Project management and WP2 Research always exist and are never gated; add only as many content WPs as needed (WP3-WP5), each with sub-WPs x.1 Planning, x.2 Review, then objective sub-WPs; tasks T01..Tnn sit under sub-WPs. Always fill `code` (WP3.2, T07).",
   "Create the content WPs, milestones and gates when you create the project. A gate (milestone with gate=true) unlocks the WPs in 'unlocks' only after its required WPs are done or dropped and a person records a go or go_with_conditions decision.",
   "Dates you assign must respect depends_on and gates (start after predecessors end and after the unlocking gate is due) unless the user expressly overrides; fix or report schedule warnings.",
+  "Results omit empty fields (null, empty text, empty lists): an absent field means empty.",
   "Keep HANDOFF.md in the project folder current (done, open points, next step); the session hook syncs it.",
   "Details and a worked example: docs/ai/PROJECT-STRUCTURE.md in the tracker repository.",
 ].join("\n");
@@ -59,7 +62,7 @@ export function errorText(e: unknown): string {
 }
 
 function buildServer(env: Env, props: GrantProps, by: Caller): McpServer {
-  const server = new McpServer({ name: "project-tracker", version: "0.3.2" }, { instructions: SERVER_INSTRUCTIONS });
+  const server = new McpServer({ name: "project-tracker", version: pkg.version }, { instructions: SERVER_INSTRUCTIONS });
   const tc: ToolCtx = { env, db: env.DB, actor: by.actor, email: props.email ?? "", by };
 
   const reg: Reg = (name, config, handler) => {
@@ -81,7 +84,7 @@ function buildServer(env: Env, props: GrantProps, by: Caller): McpServer {
           // on_behalf_of is accepted for parity with REST but never honoured: MCP writes belong to the OAuth login's person.
           const { on_behalf_of: _ignored, ...rest } = (args ?? {}) as Record<string, unknown>;
           const out = await handler(rest as never, tc);
-          return { content: [{ type: "text" as const, text: typeof out === "string" ? out : JSON.stringify(out) }] };
+          return { content: [{ type: "text" as const, text: typeof out === "string" ? out : JSON.stringify(compactResult(dropDuplicateDependsIds(out))) }] };
         } catch (e) {
           if (!(e as { status?: number })?.status) console.error(`tool ${name} failed`, e);
           return { isError: true, content: [{ type: "text" as const, text: errorText(e) }] };

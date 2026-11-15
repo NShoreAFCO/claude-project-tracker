@@ -145,7 +145,7 @@ describe("MCP server", () => {
     const full = await get({});
     expect(full.workpackages.some((w: { code: string }) => w.code === "WP3")).toBe(true);
     expect(full.events).toBeDefined();
-    expect(await get({ view: "full" })).toMatchObject({ project: { id: p.id }, branches: [] });
+    expect(await get({ view: "full" })).toMatchObject({ project: { id: p.id } });
 
     const summary = await get({ view: "summary" });
     expect(summary.workpackages).toBeUndefined();
@@ -155,7 +155,7 @@ describe("MCP server", () => {
     const outline = await get({ view: "outline", status: ["doing"] });
     expect(outline.workpackages.map((w: { code: string }) => w.code)).toEqual(["WP3.1"]);
     expect(Object.keys(outline.workpackages[0]).sort()).toEqual(
-      ["blocked_by", "code", "end_date", "gate_locked", "id", "overdue", "owner", "parent_id", "progress", "start_date", "status", "title", "version", "waiting_reason"].sort(),
+      ["code", "id", "overdue", "owner", "parent_id", "progress", "status", "title", "version"].sort(),
     );
 
     const one = await get({ wp: "WP3" });
@@ -178,5 +178,19 @@ describe("MCP server", () => {
     expect(r.slug).toBe("handover");
     const read = text(await call("read_context", { owner_kind: "project", owner_id: "mcp-roundtrip", slug: "handover" }));
     expect(read).toMatch(/^--- context: project:mcp-roundtrip\/handover v2, by mcp:Claude Test ---/);
+  });
+  it("a call that still sends on_behalf_of succeeds and is attributed to the login's person", async () => {
+    const p = JSON.parse(text(await call("create_project", { title: "MCP Obo" })));
+    const r = await call("log_progress", { project_id: p.id, summary: "obo check", on_behalf_of: "someone.else@example.com" });
+    expect(r.isError).toBeFalsy();
+    const full = JSON.parse(text(await call("get_project", { id: p.id })));
+    const dump = JSON.stringify(full.events);
+    expect(dump).toContain("obo check");
+    expect(dump).not.toContain("someone.else@example.com");
+    expect(dump).toContain('"person_name":"user"');
+    const ev = (full.events as Array<Record<string, unknown>>).find((e) => JSON.stringify(e).includes("obo check"));
+    expect(ev).toBeDefined();
+    expect(JSON.stringify(ev)).toContain('"person_name":"user"');
+    expect(JSON.stringify(ev)).not.toContain("someone.else@example.com");
   });
 });

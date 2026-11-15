@@ -1,5 +1,5 @@
 import type { getProjectDetail } from "./projects";
-import { NotFoundError, ValidationError, now } from "./util";
+import { LIVE, NotFoundError, ValidationError, now } from "./util";
 
 type Detail = Awaited<ReturnType<typeof getProjectDetail>>;
 type WpNode = Detail["workpackages"][number];
@@ -9,6 +9,24 @@ export interface ProjectViewOptions {
   view?: ProjectView;
   status?: WpNode["status"][];
   wp?: string;
+}
+
+/** How get_project wp= matches a work package: by code, or by id. (The wp_code locator below matches the code only.) */
+export const matchesWp = (key: string) => (w: { id: string; code?: string | null }) => w.code === key || w.id === key;
+
+/**
+ * Resolves a work package code to the id of the one live work package of that project it names.
+ * Not found (unknown, trashed or in another project) is a NotFoundError; codes are not unique, so two matches are refused.
+ */
+export async function resolveWpCode(db: D1Database, projectId: string, code: string): Promise<string> {
+  const rows = await db
+    .prepare(`SELECT id, code FROM workpackage WHERE project_id = ? AND ${LIVE()}`)
+    .bind(projectId)
+    .all<{ id: string; code: string | null }>();
+  const hits = rows.results.filter((w) => w.code === code);
+  if (!hits.length) throw new NotFoundError(`work package ${code} not found in project ${projectId}`);
+  if (hits.length > 1) throw new ValidationError(`work package code ${code} is ambiguous in project ${projectId}: ${hits.map((w) => w.id).join(", ")}; give the id`);
+  return hits[0].id;
 }
 
 const flatten = (nodes: WpNode[]): WpNode[] => nodes.flatMap((n) => [n, ...flatten(n.children as WpNode[])]);
@@ -43,6 +61,13 @@ const milestoneRow = (m: Detail["milestones"][number]) => ({
   critical: m.critical,
 });
 
+/** MCP views: rows nested in a project result do not repeat the project id. */
+const dropProjectId = <T extends { project_id?: unknown; children?: unknown }>(w: T): T => {
+  const { project_id: _p, ...rest } = w;
+  const kids = (w.children as T[] | undefined)?.map(dropProjectId);
+  return (kids ? { ...rest, children: kids } : rest) as T;
+};
+
 const header = (d: Detail) => ({
   id: d.project.id,
   title: d.project.title,
@@ -57,11 +82,11 @@ export function shapeProjectDetail(detail: Detail, opts: ProjectViewOptions = {}
   if (status && view !== "outline") throw new ValidationError("status needs view=outline");
   const items = flatten(detail.workpackages);
   if (wp !== undefined) {
-    const workpackage = items.find((w) => w.code === wp || w.id === wp);
+    const workpackage = items.find(matchesWp(wp));
     if (!workpackage) throw new NotFoundError(`work package ${wp} not found in project ${detail.project.id}`);
-    return { project: header(detail), workpackage };
+    return { project: header(detail), workpackage: dropProjectId(workpackage) };
   }
-  if (view === "full") return detail;
+  if (view === "full") return { ...detail, workpackages: detail.workpackages.map(dropProjectId), milestones: detail.milestones.map(dropProjectId) };
   const today = now().slice(0, 10);
   if (view === "outline") {
     const rows = status ? items.filter((w) => status.includes(w.status)) : items;
