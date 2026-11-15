@@ -18,7 +18,7 @@ export const BUDGETS: Record<string, number> = {
   res_get_project_outline: 12500,
   res_get_project_wp_main: 1900,
   res_bundle_default: 8800,
-  res_briefing: 4000,
+  res_briefing: 2200,
   res_list_projects: 500,
   res_search_default: 1700,
   res_list_risks: 700,
