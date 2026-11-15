@@ -4,7 +4,7 @@ import { mcpApiHandler } from "../src/mcp/server";
 import type { Env } from "../src/types";
 
 let id = 0;
-async function call(name: string, args: Record<string, unknown>): Promise<any> {
+async function rawCall(name: string, args: Record<string, unknown>): Promise<any> {
   const ctx = createExecutionContext() as ExecutionContext & { props?: unknown };
   ctx.props = { email: "user@example.com", clientName: "Claude Test" };
   const res = await mcpApiHandler.fetch(
@@ -24,7 +24,10 @@ async function call(name: string, args: Record<string, unknown>): Promise<any> {
   await waitOnExecutionContext(ctx);
   const t = await res.text();
   const line = t.startsWith("{") ? t : t.split("\n").find((l) => l.startsWith("data: "))!.slice(6);
-  return JSON.parse(JSON.parse(line).result.content[0].text);
+  return JSON.parse(line).result;
+}
+async function call(name: string, args: Record<string, unknown>): Promise<any> {
+  return JSON.parse((await rawCall(name, args)).content[0].text);
 }
 
 async function build() {
@@ -67,6 +70,16 @@ describe("get_project default and wp views", () => {
     expect(f.children.map((c: any) => c.code)).toEqual(["WP3.1"]);
     const leaf = await call("get_project", { id: p.id, wp: "T01" });
     expect(leaf.children).toBeUndefined();
+  });
+
+  it("refuses depth outside 1..5 or not an integer; 5 is accepted", async () => {
+    const { p } = await build();
+    const bad = async (depth: unknown) => {
+      const t = await rawCall("get_project", { id: p.id, wp: "WP3", depth });
+      expect(t.isError).toBe(true);
+    };
+    for (const d of [0, 6, 1.5, "x"]) await bad(d);
+    expect((await call("get_project", { id: p.id, wp: "WP3", depth: 5 })).children).toHaveLength(3);
   });
 
   it("an unknown wp is not_found", async () => {

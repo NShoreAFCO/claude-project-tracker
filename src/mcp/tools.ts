@@ -843,7 +843,7 @@ export function registerTools(reg: Reg): void {
         body = tailSections(body, args.tail_sections).text;
       }
       let note = "";
-      if (args.max_bytes != null) {
+      if (args.max_bytes != null && utf8Bytes(`${document.header}\n\n${body}`) > args.max_bytes) {
         const cut = cutToBytes(body, args.max_bytes - utf8Bytes(document.header) - 2 - 80);
         body = cut.text;
         if (cut.more) note = `\n\n… ${cut.more} more sections, use tail_sections or section`;

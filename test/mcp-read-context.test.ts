@@ -41,6 +41,7 @@ describe("pure helpers", () => {
   it("finds the last matching section, case-insensitive", () => {
     expect(findSection(md, "a ONE")).toBe("## A one again\n\nc\n");
     expect(findSection(md, "zzz")).toBeNull();
+    expect(findSection("## Alpha\n\nbody text\n", "Alpha\n\nbody")).toBeNull();
   });
   it("cuts at a section boundary and counts what is left out", () => {
     const cut = cutToBytes(md, 40);
@@ -51,6 +52,20 @@ describe("pure helpers", () => {
 });
 
 describe("read_context parts", () => {
+  it("max_bytes that already fits the whole document keeps all of it, even within 80 bytes of the limit", async () => {
+    const mk = async (title: string, body: string) => {
+      const p = JSON.parse(text(await call("create_project", { title })));
+      const addr = { owner_kind: "project", owner_id: p.id, slug: "handover" };
+      await call("append_context", { ...addr, heading: "Only", text: body });
+      return addr;
+    };
+    const base = text(await call("read_context", await mk("ReadCtxFit0", "t"))).length;
+    const addr = await mk("ReadCtxFit1", "t".repeat(1 + 985 - base));
+    const whole = text(await call("read_context", addr));
+    expect(new TextEncoder().encode(whole).length).toBeGreaterThan(920);
+    expect(new TextEncoder().encode(whole).length).toBeLessThanOrEqual(1000);
+    expect(text(await call("read_context", { ...addr, max_bytes: 1000 }))).toBe(whole);
+  });
   it("returns the whole document by default", async () => {
     const addr = await fixture();
     const t = text(await call("read_context", addr));

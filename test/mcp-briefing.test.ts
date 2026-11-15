@@ -117,6 +117,18 @@ describe("get_briefing", () => {
     expect(t).toContain("… ");
   }, 60_000);
 
+  it("a viewer can read the briefing", async () => {
+    const { p } = await build("Brief viewer");
+    const d = (env as Env).DB;
+    const role = (await d.prepare("SELECT access_role FROM person WHERE email = ?").bind("user@example.com").first<{ access_role: string }>())!.access_role;
+    await d.prepare("UPDATE person SET access_role = 'viewer' WHERE email = ?").bind("user@example.com").run();
+    try {
+      expect(await text({ project_id: p.id })).toContain("# Brief viewer");
+    } finally {
+      await d.prepare("UPDATE person SET access_role = ? WHERE email = ?").bind(role, "user@example.com").run();
+    }
+  });
+
   it("is in the permission table as read", () => {
     expect(TOOL_ACTIONS.get_briefing).toBe("read");
   });

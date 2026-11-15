@@ -172,7 +172,8 @@ export function findSection(md: string, prefix: string): string | null {
   for (let i = starts.length - 1; i >= 0; i--) {
     const end = i + 1 < starts.length ? starts[i + 1] : md.length;
     const text = md.slice(starts[i], end);
-    if (text.slice(3).trimStart().toLowerCase().startsWith(want)) return text;
+    const heading = text.slice(3).split("\n", 1)[0];
+    if (heading.trimStart().toLowerCase().startsWith(want)) return text;
   }
   return null;
 }
@@ -260,7 +261,8 @@ export async function getContextBundle(
         const row = await db.prepare("SELECT content_md FROM context_doc WHERE id = ?").bind(d.id).first<{ content_md: string }>();
         for (const n of [2, 1]) {
           const t = row ? tailSections(row.content_md, n) : null;
-          if (!t || !t.truncated) break;
+          if (!t) break;
+          if (!t.truncated) continue; // the whole document did not fit; try fewer sections
           const text = `${TAIL_NOTE}\n\n${t.text}`;
           const c = head + utf8Bytes(text) + utf8Bytes(docHeader(d)) + 4;
           if (bytes + c <= maxBytes) {
