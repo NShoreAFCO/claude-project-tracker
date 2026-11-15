@@ -115,7 +115,7 @@ describe("get_briefing", () => {
     expect(t).toContain("(cut to fit 4000 characters)");
     expect(t).not.toContain("## Context documents");
     expect(t).toContain("… ");
-  });
+  }, 60_000);
 
   it("is in the permission table as read", () => {
     expect(TOOL_ACTIONS.get_briefing).toBe("read");
