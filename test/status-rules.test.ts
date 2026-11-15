@@ -164,10 +164,10 @@ describe("project closure", () => {
     const bad = await mcp("create_project", { title: uniq("Born done"), status: "done" });
     expect(bad.isError).toBe(true);
     expect(JSON.parse(bad.content[0].text).current.missing).toEqual(["closure_note_md", "lessons_learned_md"]);
-    const ok = await mcp("create_project", { title: uniq("Born done"), status: "done", ...CLOSURE });
+    const ok = await mcp("create_project", { title: uniq("Born done"), status: "done", ...CLOSURE, return: "full" });
     expect(ok.isError).toBeFalsy();
     expect(JSON.parse(ok.content[0].text).lessons_learned_md).toBe("none");
-    const upd = await mcp("update_project", { id: p.id, patch: { lessons_learned_md: "Ask earlier." } });
+    const upd = await mcp("update_project", { id: p.id, patch: { lessons_learned_md: "Ask earlier." }, return: "full" });
     expect(JSON.parse(upd.content[0].text).lessons_learned_md).toBe("Ask earlier.");
   });
 });
@@ -292,7 +292,7 @@ describe("work package rules", () => {
     const v = await upsertWorkpackage(db, p.id, { title: "v" }, A);
     const r = await api(`/api/workpackages/${v.id}`, { method: "PATCH", body: { project_id: p.id, status: "dropped" } });
     expect(r.status).toBe(409);
-    const m = await mcp("upsert_workpackage", { project_id: p.id, id: v.id, status: "dropped", drop_reason: "out of scope" });
+    const m = await mcp("upsert_workpackage", { project_id: p.id, id: v.id, status: "dropped", drop_reason: "out of scope", return: "full" });
     expect(JSON.parse(m.content[0].text).drop_reason).toBe("out of scope");
   });
 
@@ -368,7 +368,7 @@ describe("work package rules", () => {
     expect([kept.status, kept.progress]).toEqual(["todo", 30]);
     // MCP log_progress auto-starts as well
     const e = await upsertWorkpackage(db, p.id, { title: "e" }, A);
-    const m = await mcp("log_progress", { project_id: p.id, workpackage_id: e.id, summary: "kicked off" });
+    const m = await mcp("log_progress", { project_id: p.id, workpackage_id: e.id, summary: "kicked off", return: "full" });
     expect(JSON.parse(m.content[0].text).workpackage.status).toBe("doing");
   });
 

@@ -195,6 +195,7 @@ export function registerTools(reg: Reg): void {
     "create_project",
     {
       title: "Create project",
+      ack: true,
       description:
         "Create a project. Fill owner (defaults to you, the logged-in person), and sponsor / decision_maker when known. Fill objectives_md, scope_in_md, scope_out_md and success_criteria_md when the user has stated them (ask if unclear; do not invent them). Status active requires an owner: with status omitted and no owner the project starts as idea and the result carries a warning; an explicit status active without owner fails. Structure the project at creation: WP1 Project management and WP2 Research (never gated), the content WPs (WP3 and on) with their milestones and gates (see docs/ai/PROJECT-STRUCTURE.md).",
       inputSchema: z.object({
@@ -262,6 +263,7 @@ export function registerTools(reg: Reg): void {
     "update_project",
     {
       title: "Update project",
+      ack: true,
       description:
         'Update project fields. Setting status active requires an owner (set owner in the same patch if missing), and a target_date for the project categories the instance policy names. Closing: status abandoned requires closure_note_md; status done requires closure_note_md and lessons_learned_md (may be "none") and no open work packages (todo|doing|blocked|waiting) — otherwise the call fails with a conflict listing them; finish or drop them, or move them to a follow-up project with move_workpackages.',
       inputSchema: z.object({
@@ -309,6 +311,7 @@ export function registerTools(reg: Reg): void {
     "upsert_workpackage",
     {
       title: "Upsert work package",
+      ack: true,
       description: `Create or update a work package. Always set code (WP3.2, T07) and parent_id at the matching level (tasks under sub-WPs); dates must respect depends_on and unlocking gates unless the user expressly overrides. category: ${WP_CATEGORIES.join("|")} (null = inherit from the parent). WPs with human=true${HUMAN_DEFAULT.length ? ` (default for ${HUMAN_DEFAULT.join(", ")})` : ""} are done off the computer: log progress the user reports, and set them to done only when the user says so. When you create a WP, fill deliverable and acceptance_criteria_md (how to tell it is done) and choose verification (${VERIFICATIONS.join("|")}). Verification: setting a WP with verification other than none to done records your OAuth login's person as verified_by (verified_at now), so do it only when the user confirms they verified it; never mark human=true WPs verified yourself, and never set verified_by to an agent, free text or anyone but your login (refused). Set owner when someone other than the project owner is responsible (effective_owner falls back to the project owner); priority_stakeholders lists persons to keep informed. Status: use blocked only for a real blocker (blocked_by wp:<id>, ms:<id> or ext:<text>; blocked_since defaults to today) and waiting for a deliberate deferral (optional waiting_reason). dropped requires drop_reason. A todo WP whose progress rises above 0 becomes doing unless you set status in the same call. The result lists schedule issues in warnings (start before a predecessor ends or before an unlocking milestone is due, child outside its parent); fix them or tell the user. In a schedule_strict project a write that adds issues fails with a conflict listing them. A WP behind a closed gate milestone (not reached yet, or no go decision) is gate-locked: setting it to doing or done, or setting its progress, fails with 409 GATE_LOCKED naming the gate; tell the user (the decision maker decides, or a person overrides in the dashboard). Identify an existing WP by id, or by project_id + wp_code.`,
       inputSchema: z.object({
         project_id: z.string(),
@@ -400,6 +403,7 @@ export function registerTools(reg: Reg): void {
     "upsert_milestone",
     {
       title: "Upsert milestone",
+      ack: true,
       description:
         "Create or update a milestone (zero duration). A gate unlocks WPs and stays closed until its required WPs are done and a person records a go decision. It is reached automatically when all 'requires' WPs are done and reopens if one is reopened; 'unlocks' WPs stay locked until it is first reached. A gate (gate=true) unlocks only when it is reached and its latest decision is go / go_with_conditions (a go recorded earlier waits for the 'requires' WPs): until then its unstarted 'unlocks' WPs are gate-locked and you cannot start them, and you cannot clear the gate flag, drop its unlocks or delete it. Reads list requires_status / unlocks_status (id, code, title, status, progress) and reached. requires/unlocks replace the stored lists. The result lists schedule issues in warnings (due before a required WP ends, unlocked WPs starting before the due date); a schedule_strict project refuses writes that add issues.",
       inputSchema: z.object({
@@ -468,6 +472,7 @@ export function registerTools(reg: Reg): void {
     "upsert_risk",
     {
       title: "Upsert risk",
+      ack: true,
       description:
         "Create or update an entry of the risk and nonconformity log. type: risk|issue|opportunity|nc. Rate probability and impact 1 to 5; the score (probability x impact) is derived. Always name an owner, a response (avoid|reduce|transfer|accept|exploit) and an action: a risk scored 15 or higher without an action is a portfolio warning. status: open|monitoring|closed. For type nc you may set nc_detected_in_wp, nc_cause, nc_correction, nc_corrective_action and nc_effectiveness_check_date (refused for other types). The scorecard criterion risk is derived from the highest open score while open risks exist.",
       inputSchema: z.object({
@@ -574,6 +579,7 @@ export function registerTools(reg: Reg): void {
     "log_progress",
     {
       title: "Log progress",
+      ack: true,
       description:
         `Log what was done in this session. Main logging tool. With workpackage_id, a todo work package moves to doing; progress 100 marks it done (for a WP with verification other than none this records your OAuth login's person as verified_by, so log 100 only when the user confirms the verification; never for human=true WPs on your own). A progress log on a gate-locked work package (behind a gate not yet reached or without a go decision) is refused (409 GATE_LOCKED), and so is one on a done work package (409 WP_DONE; only a person in the dashboard can authorise it). With note=true the entry is only recorded as a note: it never changes status, dates or progress and is accepted on any work package, locked and done ones included; use it for remarks and for work behind a gate. For new work on a done work package, open a new sub-work package or task. ${WP_LOCATOR}`,
       inputSchema: z.object({
@@ -602,6 +608,7 @@ export function registerTools(reg: Reg): void {
     "link_branch",
     {
       title: "Link branch",
+      ack: true,
       description: `Link a branch to a project. ${WP_LOCATOR}`,
       inputSchema: z.object({
         project_id: z.string(),
@@ -628,6 +635,7 @@ export function registerTools(reg: Reg): void {
     "set_scores",
     {
       title: "Set scores",
+      ack: true,
       description: "Set project scores. Default criteria are value, quality, risk, effort, and token_efficiency on a 0 to 10 scale.",
       inputSchema: z.object({
         project_id: z.string(),
@@ -657,6 +665,7 @@ export function registerTools(reg: Reg): void {
     "log_token_cost",
     {
       title: "Log token cost",
+      ack: true,
       description: `Log token and prompt usage. ${WP_LOCATOR}`,
       inputSchema: z.object({
         project_id: z.string(),
@@ -806,6 +815,7 @@ export function registerTools(reg: Reg): void {
     "write_context",
     {
       title: "Write context",
+      ack: true,
       description: "Create or replace a context document.",
       inputSchema: z.object({
         owner_kind: ownerKindSchema,
@@ -901,6 +911,7 @@ export function registerTools(reg: Reg): void {
     "set_context_meta",
     {
       title: "Set context metadata",
+      ack: true,
       description:
         "Change a context document's title, pin, sort order or status without touching its content. Status: draft (work in progress), released (agreed; records who released it and when), obsolete (kept, but left out of bundles). Pinned plan documents should be released.",
       inputSchema: z.object({

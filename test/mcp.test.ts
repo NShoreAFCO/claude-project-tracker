@@ -87,10 +87,10 @@ describe("MCP server", () => {
   });
 
   it("create_project + write_context + get_context_bundle round trip, attributed to the MCP client", async () => {
-    const p = JSON.parse(text(await call("create_project", { title: "MCP Roundtrip" })));
+    const p = JSON.parse(text(await call("create_project", { title: "MCP Roundtrip", return: "full" })));
     expect(p.id).toBe("mcp-roundtrip");
     const doc = JSON.parse(
-      text(await call("write_context", { owner_kind: "project", owner_id: p.id, title: "Hintergrund", content_md: "Über das Projekt" })),
+      text(await call("write_context", { owner_kind: "project", owner_id: p.id, title: "Hintergrund", content_md: "Über das Projekt", return: "full" })),
     );
     expect(doc.content_md).toBeUndefined();
     expect(doc.updated_by).toBe("mcp:Claude Test");
@@ -108,11 +108,11 @@ describe("MCP server", () => {
     expect(wkeys.length).toBeGreaterThanOrEqual(2);
     const pcat = pkeys[pkeys.length - 1];
     const [wcat] = wkeys;
-    const p = JSON.parse(text(await call("create_project", { title: "MCP Cats", category: pcat })));
+    const p = JSON.parse(text(await call("create_project", { title: "MCP Cats", category: pcat, return: "full" })));
     expect(p.category).toBe(pcat);
-    const w = JSON.parse(text(await call("upsert_workpackage", { project_id: p.id, title: "Lab", category: wcat, human: true })));
+    const w = JSON.parse(text(await call("upsert_workpackage", { project_id: p.id, title: "Lab", category: wcat, human: true, return: "full" })));
     expect([w.category, w.human]).toEqual([wcat, 1]);
-    const m = JSON.parse(text(await call("upsert_milestone", { project_id: p.id, title: "Lab done", requires: [w.id] })));
+    const m = JSON.parse(text(await call("upsert_milestone", { project_id: p.id, title: "Lab done", requires: [w.id], return: "full" })));
     expect([m.done, m.requires]).toEqual([false, [w.id]]);
     const listed = JSON.parse(text(await call("list_projects", { category: pcat, counts: true })));
     const card = listed.find((x: { id: string }) => x.id === p.id);
