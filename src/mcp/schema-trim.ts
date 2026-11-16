@@ -4,7 +4,7 @@ import type { z } from "zod";
  * Shrinks the JSON Schema that tools/list emits for a tool's input. Only the emitted schema changes: the zod schema
  * still validates every call, so what is accepted or refused is unchanged. Every cut keeps the described input set:
  *  - `$schema` at the root (the dialect is the protocol's default);
- *  - the safe-integer `minimum`/`maximum` zod adds to every `.int()` (JSON numbers beyond them cannot be represented);
+ *  - the safe-integer `minimum`/`maximum` zod adds to every `.int()` (zod's .int() also limits to safe integers; values that large are not realistic inputs, and zod still refuses them);
  *  - `anyOf: [{type: X, ...keywords}, {type: "null"}]` becomes `type: [X, "null"]` with the same keywords. That is
  *    equivalent because the keywords of a typed member apply to that type only; an `enum` gets `null` added.
  */
@@ -42,6 +42,7 @@ function collapseNullable(node: Json): Json {
   if (!isObj(other) || typeof other.type !== "string" || other.type === "null") return node;
   if (CROSS_TYPE.some((k) => k in other)) return node;
   const { anyOf: _drop, ...siblings } = node;
+  if ("type" in siblings) return node;
   // A key on both sides with different values would change meaning: leave the node alone.
   for (const k of Object.keys(siblings)) if (k in other && JSON.stringify(other[k]) !== JSON.stringify(siblings[k])) return node;
   if (Array.isArray(other.enum) && other.enum.includes(null)) return node;

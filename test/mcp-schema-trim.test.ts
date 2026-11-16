@@ -152,6 +152,7 @@ describe("trimInputJsonSchema", () => {
       { anyOf: [{ $ref: "#/$defs/x" }, { type: "null" }] },
       { anyOf: [{ type: "string", description: "one" }, { type: "null" }], description: "two" },
       { anyOf: [{ type: "string" }, { type: "null", description: "n" }] },
+      { type: "string", anyOf: [{ type: "string" }, { type: "null" }] },
     ];
     for (const node of keep) expect(trimInputJsonSchema({ type: "object", properties: { p: node } }).properties.p).toEqual(node);
   });
