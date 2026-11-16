@@ -60,6 +60,7 @@ describe("MCP server", () => {
         "delete_entity",
         "get_briefing",
         "get_context_bundle",
+        "get_guide",
         "get_portfolio_summary",
         "get_project",
         "link_branch",
@@ -127,7 +128,7 @@ describe("MCP server", () => {
     expect(del.isError).toBeFalsy();
     const tools = (await rpc("tools/list")).result.tools;
     expect(tools.find((t: { name: string }) => t.name === "upsert_workpackage").description).toContain("human");
-    expect(tools.find((t: { name: string }) => t.name === "upsert_workpackage").description).toContain(wkeys.join("|"));
+    expect(tools.find((t: { name: string }) => t.name === "upsert_workpackage").inputSchema.properties.category.anyOf[0].enum).toEqual(wkeys);
   });
 
   it("errors come back as tool errors with a typed code", async () => {
