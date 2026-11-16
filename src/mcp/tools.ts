@@ -278,7 +278,7 @@ export function registerTools(reg: Reg): void {
     {
       title: "Get project",
       description:
-        "Get project details. Default view=summary (counts, milestones, risks, context index); view=outline gives one slim row per work package (filter by status); wp gives one work package plus its outline children. view=full is very large.",
+        "Get project details: view=summary (default: counts, milestones, risks, context index), view=outline (one slim row per work package, filter by status), wp (one work package plus its outline children) or view=full (very large).",
       inputSchema: z.object({
         id: z.string(),
         view: z.enum(["full", "summary", "outline"]).optional().describe("Choose the level of detail. Default summary."),
