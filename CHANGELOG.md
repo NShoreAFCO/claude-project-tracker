@@ -8,14 +8,14 @@
 
 - `get_project` without `view` now returns the summary (it was the full view). Pass `view: "full"` for the old shape. The full view keeps the newest 20 branches and context index rows, with `branches_total` / `context_total` when cut.
 - `get_project` with `wp=<code or id>` returns `{project, workpackage, children}`: the work package without its subtree plus outline rows for its children (`depth` 1–5, default 1; `status` filters them).
-- `get_context_bundle` defaults to `max_bytes` 12,000 (was 60,000) and lists unpinned documents newest first. The bundle stays within `max_bytes`; what does not fit is listed, ending in "… and N more (use list_context)". The REST default is unchanged.
+- `get_context_bundle` defaults to `max_bytes` 12,000 (was 60,000) and lists unpinned documents newest first. The bundle stays within `max_bytes`; what does not fit is listed, ending in "… and N more (use list_context)". The REST default is unchanged (60,000), but the REST bundle uses the same selection: unpinned documents newest first, a document that does not fit is skipped, a large handover gives its last sections, and risks and gates count inside `max_bytes`. Its keys are unchanged.
 - `list_projects` without `status` returns only active and on-hold projects; work package counts need `counts: true`.
 - `search` returns `{hits, more?}` instead of a bare list (new `limit` 1–50, default 10, and `kind`).
 - `list_risks` returns slim rows (id, project_id, type, title, score, status, owner, due); pass `id` for one risk in full.
 - Writes return compact acknowledgements (`id`, `code`, `version`, `status`, `progress`, `warnings` when present, and server-set dates). Pass `return: "full"` for the row. Applies to `upsert_workpackage`, `log_progress`, `upsert_milestone`, `upsert_risk`, `update_project`, `create_project`, `link_branch`, `log_token_cost`, `set_scores`, `write_context` and `set_context_meta`.
 - A 409 conflict reply on every tool carries only `version` and the patched fields in `current`.
 - The message texts of `GATE_LOCKED`, `WP_DONE` and `SCHEDULE_STRICT` changed to say what to do next. The codes are unchanged. REST returns the same text.
-- The server instructions are shorter (725 characters, about 1,900 before). They no longer ask for the `append_context` handover step.
+- The server instructions are shorter (725 characters, 1,554 before). They no longer ask for the `append_context` handover step.
 
 ### Added
 
@@ -37,7 +37,7 @@
 
 ### Sizes
 
-Characters, v0.3.5 → v0.4.0 (on the size-budget test project): `tools/list` 38,489 → 33,913; `upsert_workpackage` definition 6,774 → 4,598; `upsert_workpackage` result 1,096 → 125; default `get_project` 74,803 → 1,521 (the full view keeps its shape, with branches and context index rows cut to the newest 20); default context bundle about 33,600 → 8,372. The `tools/list` and `upsert_workpackage` definition did not reach the 20,000 and 3,000 targets set for this release; the tool list also gained `get_briefing`, `apply_changes` and `get_guide`.
+Characters, v0.3.5 → v0.4.0 (on the size-budget test project): `tools/list` 38,489 → 33,934; `upsert_workpackage` definition 6,774 → 4,598; `upsert_workpackage` result 1,096 → 125; default `get_project` 74,803 → 1,521 (the full view keeps its shape, with branches and context index rows cut to the newest 20); default context bundle about 33,600 → 8,372. The `tools/list` and `upsert_workpackage` definition did not reach the 20,000 and 3,000 targets set for this release; the tool list also gained `get_briefing`, `apply_changes` and `get_guide`.
 
 ## v0.3.5 — 2026-11-15 (smaller MCP results and tool list)
 

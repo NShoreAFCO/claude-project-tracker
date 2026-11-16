@@ -69,7 +69,7 @@ Commits that touch both core and `instance/` must be split first. Run `npm run c
 
 ## Efficiency upgrade (0.3.4 → 0.3.5 → 0.4.0)
 
-Both versions make MCP results smaller. REST and the dashboard keep their output shapes (only some error message texts changed, see below). Deploy as usual, then start a new Claude session so it sees the new tool definitions.
+Both versions make MCP results smaller. REST and the dashboard keep their output shapes (only some error message texts changed, see below, and the context bundle picks its documents as described in the CHANGELOG). Deploy as usual, then start a new Claude session so it sees the new tool definitions.
 
 **0.3.5.** MCP results omit empty fields, `on_behalf_of` is no longer in the tool schemas (still accepted), and work packages can be addressed by `project_id` + `wp_code`. Nothing to do.
 

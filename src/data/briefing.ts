@@ -26,7 +26,8 @@ const rowLine = (r: Row): string => {
   const parts = [`${r.code ?? "-"} ${r.title}`, `${r.status} ${r.progress ?? 0}%`];
   if (r.owner) parts.push(r.owner);
   if (r.end_date) parts.push(`${r.overdue ? "OVERDUE " : "ends "}${r.end_date}`);
-  if (Array.isArray(r.blocked_by) && r.blocked_by.length) parts.push(`blocked by ${r.blocked_by.join(",")}`);
+  const blocker = Array.isArray(r.blocked_by) ? r.blocked_by.join(",") : typeof r.blocked_by === "string" ? r.blocked_by.trim() : "";
+  if (blocker) parts.push(`blocked by ${blocker}`);
   if (r.waiting_reason) parts.push(`waiting: ${r.waiting_reason}`);
   if (r.gate_locked) parts.push("gate-locked");
   return `- ${parts.join(" | ")}`;
@@ -45,7 +46,9 @@ export async function getBriefing(db: D1Database, projectId: string, wpId: strin
     const own = v.workpackage;
     wpOwnerId = own.id;
     scope = `${own.code ?? "-"} ${own.title}`;
-    rows = [...((active as readonly string[]).includes(own.status) ? [own] : []), ...v.children];
+    // The focused WP as an outline row too (owner initials, effective progress, overdue), not its full node.
+    const ownRow = (shapeProjectDetail(detail, { view: "outline" }) as any).workpackages.find((r: { id: string }) => r.id === own.id);
+    rows = [...((active as readonly string[]).includes(own.status) && ownRow ? [ownRow] : []), ...v.children];
   } else {
     rows = (shapeProjectDetail(detail, { view: "outline", status: [...active] }) as any).workpackages;
   }
