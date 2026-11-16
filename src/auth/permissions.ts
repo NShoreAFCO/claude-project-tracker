@@ -172,6 +172,7 @@ export const TOOL_ACTIONS: Readonly<Record<string, Action>> = {
   upsert_workpackage: "write",
   move_workpackages: "write",
   upsert_milestone: "write",
+  apply_changes: "write",
   record_gate_decision: "decide",
   create_baseline: "write",
   upsert_risk: "write",

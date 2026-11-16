@@ -53,12 +53,21 @@ interface GrantProps {
 
 /** `args` are the call's arguments: a 409 then carries only the version and the fields the call patched. */
 export function errorText(e: unknown, args?: unknown): string {
-  const err = e as { status?: number; message?: string; current?: unknown };
-  if (err?.status === 409) return JSON.stringify({ error: "conflict", message: err.message, current: slimConflict(err.current, args) });
+  const err = e as { status?: number; message?: string; current?: unknown; failed?: unknown; opArgs?: unknown };
+  // apply_changes names the failing op in `failed`; its conflict `current` is slimmed to that op's fields.
+  const failed = err?.failed !== undefined ? { failed: err.failed } : {};
+  if (err?.status === 409)
+    return JSON.stringify({
+      error: "conflict",
+      message: err.message,
+      ...failed,
+      current: slimConflict(err.current, err.failed !== undefined ? err.opArgs : args),
+    });
   if (err?.status)
     return JSON.stringify({
       error: err.status === 404 ? "not_found" : err.status === 413 ? "too_large" : err.status === 403 ? "forbidden" : "invalid",
       message: err.message,
+      ...failed,
     });
   return JSON.stringify({ error: "internal", message: "Unexpected error" });
 }

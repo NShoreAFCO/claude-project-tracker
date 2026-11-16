@@ -10,8 +10,10 @@ import { buildBudgetProject } from "./fixtures/budget-project";
 export const BUDGETS: Record<string, number> = {
   tools_list: 41800,
   def_upsert_workpackage: 7000,
+  def_apply_changes: 3000,
   res_upsert_wp_update: 200,
   res_log_progress_wp: 200,
+  res_apply_changes_20: 1400,
   res_get_project_default: 1600,
   res_get_project_full: 78600,
   res_get_project_summary: 1600,
@@ -61,6 +63,7 @@ describe("MCP size budgets", () => {
     const tools = (await rpc("tools/list")).result.tools as Array<{ name: string }>;
     measured.tools_list = JSON.stringify(tools).length;
     measured.def_upsert_workpackage = JSON.stringify(tools.find((t) => t.name === "upsert_workpackage")).length;
+    measured.def_apply_changes = JSON.stringify(tools.find((t) => t.name === "apply_changes")).length;
     measured.res_get_project_default = len(await call("get_project", { id: p.id }));
     measured.res_get_project_full = len(await call("get_project", { id: p.id, view: "full" }));
     measured.res_get_project_summary = len(await call("get_project", { id: p.id, view: "summary" }));
@@ -80,6 +83,11 @@ describe("MCP size budgets", () => {
     measured.res_log_progress_wp = len(
       await call("log_progress", { project_id: p.id, workpackage_id: wp.id, progress: 40, summary: "Measured progress entry" }),
     );
+    // A 20-op structure call: a sub-WP and 19 tasks under it, chained by code refs.
+    const top = JSON.parse((await call("get_project", { id: p.id, wp: p.topWp.code })).content[0].text).workpackage;
+    const ops: Array<Record<string, unknown>> = [{ op: "wp", code: "B1", title: "Batch sub-WP", parent_id: top.id }];
+    for (let i = 2; i <= 20; i++) ops.push({ op: "wp", code: `B${i}`, title: `Batch task ${i}`, parent_id: "@B1", depends_on: i > 2 ? [`@B${i - 1}`] : [] });
+    measured.res_apply_changes_20 = len(await call("apply_changes", { project_id: p.id, ops }));
   }, 120_000);
 
   afterAll(() => {
