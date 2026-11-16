@@ -29,6 +29,7 @@
 ### Changed
 
 - Three tool descriptions were trimmed, `get_project` has a one-sentence description, and all descriptions are shorter. The rule text moved to `get_guide`; the safety sentences stay in the descriptions.
+- The emitted tool schemas and descriptions were trimmed (shorter parameter descriptions, no repeated enums), and the details that mattered to clients were restored afterwards.
 - Docs: README section "Using the tracker from Claude (v0.4)", upgrade note in `docs/UPDATING.md`, an `apply_changes` example in `docs/ai/PROJECT-STRUCTURE.md`, and updated claude.ai project instructions.
 
 ### Known limitation
@@ -37,7 +38,7 @@
 
 ### Sizes
 
-Characters, v0.3.5 → v0.4.0 (on the size-budget test project): `tools/list` 38,489 → 28,322; `upsert_workpackage` definition 6,774 → 3,724; `upsert_workpackage` result 1,096 → 125; default `get_project` 74,803 → 1,521 (the full view keeps its shape, with branches and context index rows cut to the newest 20); default context bundle about 33,600 → 8,372. The `tools/list` and `upsert_workpackage` definition did not reach the 20,000 and 3,000 targets set for this release; the tool list also gained `get_briefing`, `apply_changes` and `get_guide`.
+Characters, v0.3.5 → v0.4.0 (on the size-budget test project): `tools/list` 38,489 → 28,436; `upsert_workpackage` definition 6,774 → 3,838; `upsert_workpackage` result 1,096 → 125; default `get_project` 74,803 → 1,521 (the full view keeps its shape, with branches and context index rows cut to the newest 20); default context bundle about 33,600 → 8,372. The `tools/list` and `upsert_workpackage` definition did not reach the 20,000 and 3,000 targets set for this release; the tool list also gained `get_briefing`, `apply_changes` and `get_guide`.
 
 ## v0.3.5 — 2026-11-15 (smaller MCP results and tool list)
 
