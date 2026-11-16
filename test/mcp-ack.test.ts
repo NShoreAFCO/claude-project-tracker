@@ -245,3 +245,180 @@ describe("MCP write acknowledgements", () => {
     expect(r.released_at).toBeTruthy();
   });
 });
+
+/**
+ * `return: "full"` must keep the result the write tools returned before acknowledgements existed (v0.3.5). The
+ * data layer and the compaction are unchanged since then, so each expected object below is that result with the
+ * values that differ per run replaced: ids, versions, timestamps and the dates the server sets.
+ */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const TS_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
+function normalise(value: unknown, ids: Record<string, string>): unknown {
+  const pairs = Object.entries(ids).sort((a, b) => b[0].length - a[0].length);
+  const walk = (x: unknown, key = ""): unknown => {
+    if (Array.isArray(x)) return x.map((e) => walk(e, key));
+    if (x && typeof x === "object") return Object.fromEntries(Object.entries(x).map(([k, e]) => [k, walk(e, k)]));
+    if (typeof x === "number" && (key === "version" || key === "event_id")) return `<${key}>`;
+    if (typeof x !== "string") return x;
+    if (UUID_RE.test(x)) return "<uuid>";
+    if (TS_RE.test(x)) return "<ts>";
+    if (key === "actual_start" || key === "actual_end") return "<date>";
+    return pairs.reduce((s, [from, to]) => s.split(from).join(to), x);
+  };
+  return walk(value);
+}
+
+describe("return:full keeps the v0.3.5 result of every acknowledging tool", () => {
+  it("returns the complete row of each of the 11 tools", async () => {
+    const ids: Record<string, string> = {};
+    const full = async (name: string, args: Record<string, unknown>) => normalise(await ok(name, { ...args, return: "full" }), ids);
+    const person = { person_id: "<uuid>", name: "user", initials: "U" };
+    const projectRow = {
+      id: "P",
+      title: "Full project",
+      status: "active",
+      origin: "manual",
+      progress_mode: "derived",
+      version: "<version>",
+      created_at: "<ts>",
+      updated_at: "<ts>",
+      owner_person_id: "<uuid>",
+      schedule_rev: 0,
+      closure_decision_pending: 0,
+      last_progress_at: "<ts>",
+      last_changed_at: "<ts>",
+      stale: false,
+      owner: person,
+      progress_basis: { mode: "derived", done: 0, total: 0, weighted_percent: 0 },
+      stalled_blocked: false,
+      closure_due: false,
+    };
+
+    const created = await ok("create_project", { title: "Full project", return: "full" });
+    ids[created.id] = "P";
+    expect(normalise(created, ids)).toEqual(projectRow);
+
+    const w = await ok("upsert_workpackage", { project_id: created.id, code: "WP3", title: "W", return: "full" });
+    ids[w.id] = "W";
+    expect(normalise(w, ids)).toEqual({
+      id: "W",
+      project_id: "P",
+      title: "W",
+      status: "todo",
+      progress: 0,
+      weight: 1,
+      sort: 0,
+      version: "<version>",
+      created_at: "<ts>",
+      updated_at: "<ts>",
+      last_progress_at: "<ts>",
+      last_changed_at: "<ts>",
+      verification: "none",
+      code: "WP3",
+      effective_owner: person,
+    });
+
+    expect(await full("update_project", { id: created.id, patch: { summary: "s" } })).toEqual({
+      ...projectRow,
+      summary: "s",
+      schedule_rev: 1,
+      progress_basis: { mode: "derived", done: 0, total: 1, weighted_percent: 0 },
+    });
+
+    expect(await full("upsert_milestone", { project_id: created.id, title: "M", due_date: "2030-01-01", requires: [w.id] })).toEqual({
+      id: "<uuid>",
+      project_id: "P",
+      title: "M",
+      due_date: "2030-01-01",
+      sort: 0,
+      version: "<version>",
+      created_at: "<ts>",
+      updated_at: "<ts>",
+      gate: false,
+      done: false,
+      requires: ["W"],
+      requires_status: [{ id: "W", code: "WP3", title: "W", status: "todo", progress: 0 }],
+      reached: false,
+      decision_state: "none",
+    });
+
+    expect(await full("upsert_risk", { project_id: created.id, title: "R", type: "risk", probability: 2, impact: 3 })).toEqual({
+      id: "P-risk-r",
+      project_id: "P",
+      type: "risk",
+      title: "R",
+      probability: 2,
+      impact: 3,
+      score: 6,
+      status: "open",
+      version: "<version>",
+      created_at: "<ts>",
+      updated_at: "<ts>",
+    });
+
+    expect(await full("log_progress", { project_id: created.id, workpackage_id: w.id, progress: 40, summary: "s" })).toEqual({
+      event_id: "<event_id>",
+      workpackage: {
+        id: "W",
+        project_id: "P",
+        title: "W",
+        status: "doing",
+        progress: 40,
+        weight: 1,
+        sort: 0,
+        version: "<version>",
+        created_at: "<ts>",
+        updated_at: "<ts>",
+        last_progress_at: "<ts>",
+        last_changed_at: "<ts>",
+        verification: "none",
+        code: "WP3",
+        actual_start: "<date>",
+      },
+    });
+
+    expect(await full("link_branch", { project_id: created.id, repo: "r", name: "b" })).toEqual({
+      id: "<uuid>",
+      project_id: "P",
+      repo: "r",
+      name: "b",
+      kind: "branch",
+      status: "open",
+      last_activity: "<ts>",
+    });
+
+    expect(await full("set_scores", { project_id: created.id, scores: [{ criterion: "value", value: 5 }] })).toEqual([
+      { id: "<uuid>", project_id: "P", criterion: "value", value: 5, recorded_at: "<ts>", actor: "mcp:Claude Test" },
+    ]);
+
+    expect(await full("log_token_cost", { project_id: created.id, claude_tokens: 5 })).toEqual({
+      id: "<uuid>",
+      project_id: "P",
+      recorded_at: "<ts>",
+      claude_tokens: 5,
+      actor: "mcp:Claude Test",
+    });
+
+    const docRow = {
+      id: "<uuid>",
+      project_id: "P",
+      owner_kind: "project",
+      owner_id: "P",
+      title: "T",
+      slug: "x",
+      source: "claude",
+      pinned: 0,
+      sort: 0,
+      bytes: 2,
+      version: "<version>",
+      created_at: "<ts>",
+      updated_at: "<ts>",
+      created_by: "mcp:Claude Test",
+      updated_by: "mcp:Claude Test",
+      status: "released",
+    };
+    const doc = await ok("write_context", { owner_kind: "project", owner_id: created.id, title: "T", content_md: "hi", slug: "x", return: "full" });
+    expect(normalise(doc, ids)).toEqual(docRow);
+    expect(await full("set_context_meta", { doc_id: doc.id, pinned: true })).toEqual({ ...docRow, pinned: 1 });
+  });
+});
