@@ -338,7 +338,7 @@ export async function recomputeScheduleStmts(
     if (added.length)
       throw new TransitionError(
         `schedule_strict: the write adds ${added.length} schedule issue${added.length === 1 ? "" : "s"}, nothing was written. ` +
-          `${added.slice(0, 3).map((i) => `${i.message} ${STRICT_FIX[i.code]}`).join(" ")}${added.length > 3 ? ` (+${added.length - 3} more in issues)` : ""} Retry with the dates changed.`,
+          `${added.slice(0, 3).map((i) => `${i.message} ${STRICT_FIX[i.code]}`).join(" ")}${added.length > 3 ? ` (+${added.length - 3} more in issues)` : ""} Retry with the schedule corrected.`,
         { code: "SCHEDULE_STRICT", issues: added },
       );
   }
