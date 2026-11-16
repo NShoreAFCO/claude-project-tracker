@@ -80,6 +80,23 @@ describe("get_briefing", () => {
     expect(doing.id).toBeTruthy();
   });
 
+  it("shows blockers, and the focused WP as an outline row (owner initials, no object text)", async () => {
+    const { p, doing } = await build("Brief rows", false);
+    const blk = await json("upsert_workpackage", {
+      project_id: p.id,
+      title: "Stuck one",
+      code: "WP5",
+      status: "blocked",
+      blocked_by: "ext:vendor",
+      owner: "Some Supplier",
+    });
+    expect(await text({ project_id: p.id })).toContain("blocked by ext:vendor");
+    const t = await text({ project_id: p.id, workpackage_id: blk.id });
+    expect(t).toContain("WP5 Stuck one | blocked 0% | Some Supplier | blocked by ext:vendor");
+    expect(t).not.toContain("[object Object]");
+    expect(await text({ project_id: p.id, workpackage_id: doing.id })).not.toContain("[object Object]");
+  });
+
   it("prefers the handover of the work package when it has one", async () => {
     const { p, top } = await build("Brief wp handover");
     await json("append_context", { owner_kind: "workpackage", owner_id: top.id, slug: "handover", heading: "WP", text: "wp level note" });
