@@ -155,10 +155,12 @@ export function gateLockedError(wpId: string, gates: GateRef[], by?: Caller, ove
   const person = by?.channel === "dashboard";
   const endpoint = `POST /api/workpackages/${overrideId ?? wpId}/gate-override`;
   return new TransitionError(
-    `work package ${wpId} is locked by gate ${names} until the gate is reached (its required work packages done or dropped) with a go decision; ` +
+    `work package ${wpId} is locked by gate ${names}: it opens when the gate's required work packages are done or dropped and a person has recorded a go decision. ` +
+      `Do not decide it yourself: tell the user, and call record_gate_decision only when the user states the decision. ` +
+      `Meanwhile log_progress with note: true is allowed on it; ` +
       (person
         ? `to start it before the decision, record an override with a reason (${endpoint})`
-        : "ask the decision maker to decide, or a person can override the lock in the dashboard"),
+        : "a person can override the lock in the dashboard"),
     { code: "GATE_LOCKED", gates, ...(person ? { override_endpoint: endpoint } : {}) },
   );
 }

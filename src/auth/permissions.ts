@@ -167,6 +167,7 @@ export const TOOL_ACTIONS: Readonly<Record<string, Action>> = {
   list_projects: "read",
   get_project: "read",
   get_briefing: "read",
+  get_guide: "read",
   create_project: "write",
   update_project: "write",
   upsert_workpackage: "write",
