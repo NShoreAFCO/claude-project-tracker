@@ -8,6 +8,7 @@ import { buildBudgetProject } from "./fixtures/budget-project";
 // Lower a budget when a change shrinks it. Never raise one without a reason in the PR.
 // Each line: the measured size in characters + 5 %, rounded up to 100.
 export const BUDGETS: Record<string, number> = {
+  server_instructions: 800,
   tools_list: 35700,
   def_upsert_workpackage: 4900,
   def_apply_changes: 800,
@@ -61,6 +62,8 @@ describe("MCP size budgets", () => {
   beforeAll(async () => {
     const p = await buildBudgetProject(call);
     const tools = (await rpc("tools/list")).result.tools as Array<{ name: string }>;
+    const init = await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } });
+    measured.server_instructions = init.result.instructions.length;
     measured.tools_list = JSON.stringify(tools).length;
     measured.def_upsert_workpackage = JSON.stringify(tools.find((t) => t.name === "upsert_workpackage")).length;
     measured.def_apply_changes = JSON.stringify(tools.find((t) => t.name === "apply_changes")).length;

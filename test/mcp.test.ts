@@ -42,9 +42,9 @@ describe("MCP server", () => {
     const r = await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } });
     expect(r.status).toBe(200);
     expect(r.result.serverInfo.name).toBe("project-tracker");
-    expect(r.result.instructions).toContain("get_context_bundle");
-    expect(r.result.instructions).toContain("PROJECT-STRUCTURE.md");
-    expect(r.result.instructions.length).toBeLessThanOrEqual(1800);
+    expect(r.result.instructions).toContain("get_briefing");
+    expect(r.result.instructions).not.toContain("append_context");
+    expect(r.result.instructions.length).toBeLessThanOrEqual(1000);
   });
 
   it("lists all 30 tools", async () => {
