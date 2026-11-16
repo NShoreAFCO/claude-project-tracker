@@ -67,6 +67,23 @@ git cherry-pick <commit>        # commits that only touch core
 
 Commits that touch both core and `instance/` must be split first. Run `npm run check` before pushing; it fails if a deployment's name slipped into core.
 
+## Efficiency upgrade (0.3.4 → 0.3.5 → 0.4.0)
+
+Both versions make MCP results smaller. REST and the dashboard keep their output shapes (only some error message texts changed, see below, and the context bundle picks its documents as described in the CHANGELOG). Deploy as usual, then start a new Claude session so it sees the new tool definitions.
+
+**0.3.5.** MCP results omit empty fields, `on_behalf_of` is no longer in the tool schemas (still accepted), and work packages can be addressed by `project_id` + `wp_code`. Nothing to do.
+
+**0.4.0 (breaking for MCP clients).** No migration. Check these:
+
+- Clients that read the result of a write (for example a field other than `id`, `code`, `version`, `status`, `progress`, `warnings` and server-set dates) must pass `return: "full"`.
+- Clients that relied on `get_project` returning everything must pass `view: "full"`. `wp=<code>` now returns the work package plus a list of child rows (see `depth`).
+- Clients that relied on `list_projects` returning every project must pass `status`. Work package counts need `counts: true`.
+- `search` returns `{hits, more?}` instead of a bare list, and `list_risks` returns slim rows (pass `id` for one full risk).
+- A 409 conflict reply carries only `version` and the fields you patched in `current`.
+- `get_context_bundle` defaults to 12,000 bytes, newest documents first.
+- Error message texts of `GATE_LOCKED`, `WP_DONE` and `SCHEDULE_STRICT` changed. The codes did not. Match on the code, not the text.
+- Update saved prompts and agent instructions, for example a claude.ai project or a Copilot Studio agent, that start with `get_context_bundle` or end with `append_context` for the handover. Use `get_briefing` at the start and one `log_progress` with `handover_md` at the end. The text in [`docs/ai/claude-ai-project-instructions.md`](ai/claude-ai-project-instructions.md) is current.
+
 ## Reconstructing actual dates (one-off, after updating to 0.3.x)
 
 Work packages created before the actual dates existed may lack `actual_start` / `actual_end`. `scripts/reconstruct-timeline.mjs` proposes them from the tracker's own history. It is a dry run unless you pass `--apply`.

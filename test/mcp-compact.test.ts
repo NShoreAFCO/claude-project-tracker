@@ -64,7 +64,7 @@ describe("MCP results are compacted", () => {
     await call("upsert_milestone", { project_id: p.id, title: "M", due_date: "2030-01-01", gate: false });
     expect(JSON.stringify(b)).not.toContain('":null');
     expect(b.depends_ids).toBeUndefined();
-    const full = parse(await call("get_project", { id: p.id }));
+    const full = parse(await call("get_project", { id: p.id, view: "full" }));
     const flat = JSON.stringify(full);
     expect(flat).not.toContain('":null');
     expect(flat).not.toContain('":""');

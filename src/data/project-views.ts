@@ -9,6 +9,7 @@ export interface ProjectViewOptions {
   view?: ProjectView;
   status?: WpNode["status"][];
   wp?: string;
+  depth?: number;
 }
 
 /** How get_project wp= matches a work package: by code, or by id. (The wp_code locator below matches the code only.) */
@@ -20,10 +21,10 @@ export const matchesWp = (key: string) => (w: { id: string; code?: string | null
  */
 export async function resolveWpCode(db: D1Database, projectId: string, code: string): Promise<string> {
   const rows = await db
-    .prepare(`SELECT id, code FROM workpackage WHERE project_id = ? AND ${LIVE()}`)
-    .bind(projectId)
+    .prepare(`SELECT id, code FROM workpackage WHERE project_id = ? AND ${LIVE()} AND code = ?`)
+    .bind(projectId, code)
     .all<{ id: string; code: string | null }>();
-  const hits = rows.results.filter((w) => w.code === code);
+  const hits = rows.results;
   if (!hits.length) throw new NotFoundError(`work package ${code} not found in project ${projectId}`);
   if (hits.length > 1) throw new ValidationError(`work package code ${code} is ambiguous in project ${projectId}: ${hits.map((w) => w.id).join(", ")}; give the id`);
   return hits[0].id;
@@ -68,6 +69,13 @@ const dropProjectId = <T extends { project_id?: unknown; children?: unknown }>(w
   return (kids ? { ...rest, children: kids } : rest) as T;
 };
 
+/** view=full keeps this many of the newest branches and context index rows. */
+const FULL_KEEP = 20;
+const newest = <T>(rows: T[], at: (r: T) => string | null | undefined) => ({
+  total: rows.length,
+  rows: [...rows].sort((a, b) => (at(b) ?? "").localeCompare(at(a) ?? "")).slice(0, FULL_KEEP),
+});
+
 const header = (d: Detail) => ({
   id: d.project.id,
   title: d.project.title,
@@ -78,16 +86,37 @@ const header = (d: Detail) => ({
 
 /** Cuts a get_project result down for token-sensitive callers. Works on the redacted detail, so viewers lose nothing extra. */
 export function shapeProjectDetail(detail: Detail, opts: ProjectViewOptions = {}) {
-  const { view = "full", status, wp } = opts;
-  if (status && view !== "outline") throw new ValidationError("status needs view=outline");
+  const { view = "summary", status, wp, depth = 1 } = opts;
+  if (status && view !== "outline" && wp === undefined) throw new ValidationError("status needs view=outline or wp");
   const items = flatten(detail.workpackages);
-  if (wp !== undefined) {
-    const workpackage = items.find(matchesWp(wp));
-    if (!workpackage) throw new NotFoundError(`work package ${wp} not found in project ${detail.project.id}`);
-    return { project: header(detail), workpackage: dropProjectId(workpackage) };
-  }
-  if (view === "full") return { ...detail, workpackages: detail.workpackages.map(dropProjectId), milestones: detail.milestones.map(dropProjectId) };
   const today = now().slice(0, 10);
+  if (wp !== undefined) {
+    const node = items.find(matchesWp(wp));
+    if (!node) throw new NotFoundError(`work package ${wp} not found in project ${detail.project.id}`);
+    const rows: Array<ReturnType<typeof outlineRow> & { depth: number }> = [];
+    const walk = (n: WpNode, d: number) => {
+      for (const c of n.children as WpNode[]) {
+        if (!status || status.includes(c.status)) rows.push({ ...outlineRow(c, today), depth: d });
+        if (d < depth) walk(c, d + 1);
+      }
+    };
+    walk(node, 1);
+    const { children: _c, ...own } = dropProjectId(node);
+    return { project: header(detail), workpackage: own, children: rows };
+  }
+  if (view === "full") {
+    const branches = newest(detail.branches, (b) => b.last_activity);
+    const ctx = newest(detail.context_index, (c) => c.updated_at);
+    return {
+      ...detail,
+      workpackages: detail.workpackages.map(dropProjectId),
+      milestones: detail.milestones.map(dropProjectId),
+      branches: branches.rows,
+      context_index: ctx.rows,
+      ...(branches.total > FULL_KEEP ? { branches_total: branches.total } : {}),
+      ...(ctx.total > FULL_KEEP ? { context_total: ctx.total } : {}),
+    };
+  }
   if (view === "outline") {
     const rows = status ? items.filter((w) => status.includes(w.status)) : items;
     return { project: header(detail), progress: detail.progress, workpackages: rows.map((w) => outlineRow(w, today)) };

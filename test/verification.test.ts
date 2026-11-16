@@ -335,9 +335,9 @@ describe("project objectives and scope (F2)", () => {
   });
 
   it("MCP create_project and update_project accept the objective and scope fields", async () => {
-    const created = body(await mcp("create_project", { title: `Scope MCP ${++n}`, objectives_md: "Goal", scope_out_md: "Not this" }));
+    const created = body(await mcp("create_project", { title: `Scope MCP ${++n}`, objectives_md: "Goal", scope_out_md: "Not this", return: "full" }));
     expect([created.objectives_md, created.scope_out_md]).toEqual(["Goal", "Not this"]);
-    const updated = body(await mcp("update_project", { id: created.id, patch: { scope_in_md: "This", language: "en" } }));
+    const updated = body(await mcp("update_project", { id: created.id, patch: { scope_in_md: "This", language: "en" }, return: "full" }));
     expect([updated.scope_in_md, updated.language]).toEqual(["This", "en"]);
   });
 });

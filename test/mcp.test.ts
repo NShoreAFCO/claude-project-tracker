@@ -42,22 +42,25 @@ describe("MCP server", () => {
     const r = await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } });
     expect(r.status).toBe(200);
     expect(r.result.serverInfo.name).toBe("project-tracker");
-    expect(r.result.instructions).toContain("get_context_bundle");
-    expect(r.result.instructions).toContain("PROJECT-STRUCTURE.md");
-    expect(r.result.instructions.length).toBeLessThanOrEqual(1800);
+    expect(r.result.instructions).toContain("get_briefing");
+    expect(r.result.instructions).not.toContain("append_context");
+    expect(r.result.instructions.length).toBeLessThanOrEqual(1000);
   });
 
-  it("lists all 28 tools", async () => {
+  it("lists all 30 tools", async () => {
     const r = await rpc("tools/list");
     const names = r.result.tools.map((t: { name: string }) => t.name).sort();
     expect(names).toEqual(
       [
         "append_context",
+        "apply_changes",
         "create_baseline",
         "create_project",
         "delete_context",
         "delete_entity",
+        "get_briefing",
         "get_context_bundle",
+        "get_guide",
         "get_portfolio_summary",
         "get_project",
         "link_branch",
@@ -87,10 +90,10 @@ describe("MCP server", () => {
   });
 
   it("create_project + write_context + get_context_bundle round trip, attributed to the MCP client", async () => {
-    const p = JSON.parse(text(await call("create_project", { title: "MCP Roundtrip" })));
+    const p = JSON.parse(text(await call("create_project", { title: "MCP Roundtrip", return: "full" })));
     expect(p.id).toBe("mcp-roundtrip");
     const doc = JSON.parse(
-      text(await call("write_context", { owner_kind: "project", owner_id: p.id, title: "Hintergrund", content_md: "Über das Projekt" })),
+      text(await call("write_context", { owner_kind: "project", owner_id: p.id, title: "Hintergrund", content_md: "Über das Projekt", return: "full" })),
     );
     expect(doc.content_md).toBeUndefined();
     expect(doc.updated_by).toBe("mcp:Claude Test");
@@ -108,13 +111,13 @@ describe("MCP server", () => {
     expect(wkeys.length).toBeGreaterThanOrEqual(2);
     const pcat = pkeys[pkeys.length - 1];
     const [wcat] = wkeys;
-    const p = JSON.parse(text(await call("create_project", { title: "MCP Cats", category: pcat })));
+    const p = JSON.parse(text(await call("create_project", { title: "MCP Cats", category: pcat, return: "full" })));
     expect(p.category).toBe(pcat);
-    const w = JSON.parse(text(await call("upsert_workpackage", { project_id: p.id, title: "Lab", category: wcat, human: true })));
+    const w = JSON.parse(text(await call("upsert_workpackage", { project_id: p.id, title: "Lab", category: wcat, human: true, return: "full" })));
     expect([w.category, w.human]).toEqual([wcat, 1]);
-    const m = JSON.parse(text(await call("upsert_milestone", { project_id: p.id, title: "Lab done", requires: [w.id] })));
+    const m = JSON.parse(text(await call("upsert_milestone", { project_id: p.id, title: "Lab done", requires: [w.id], return: "full" })));
     expect([m.done, m.requires]).toEqual([false, [w.id]]);
-    const listed = JSON.parse(text(await call("list_projects", { category: pcat })));
+    const listed = JSON.parse(text(await call("list_projects", { category: pcat, counts: true })));
     const card = listed.find((x: { id: string }) => x.id === p.id);
     expect([card.category, card.wp_counts, card.next_milestone.title]).toEqual([
       pcat,
@@ -125,7 +128,7 @@ describe("MCP server", () => {
     expect(del.isError).toBeFalsy();
     const tools = (await rpc("tools/list")).result.tools;
     expect(tools.find((t: { name: string }) => t.name === "upsert_workpackage").description).toContain("human");
-    expect(tools.find((t: { name: string }) => t.name === "upsert_workpackage").description).toContain(wkeys.join("|"));
+    expect(tools.find((t: { name: string }) => t.name === "upsert_workpackage").inputSchema.properties.category.enum).toEqual([...wkeys, null]);
   });
 
   it("errors come back as tool errors with a typed code", async () => {
@@ -142,7 +145,7 @@ describe("MCP server", () => {
     await call("upsert_workpackage", { project_id: p.id, title: "Child", code: "WP3.1", parent_id: parent.id, status: "doing" });
     const get = async (args: Record<string, unknown>) => JSON.parse(text(await call("get_project", { id: p.id, ...args })));
 
-    const full = await get({});
+    const full = await get({ view: "full" });
     expect(full.workpackages.some((w: { code: string }) => w.code === "WP3")).toBe(true);
     expect(full.events).toBeDefined();
     expect(await get({ view: "full" })).toMatchObject({ project: { id: p.id } });
@@ -159,7 +162,8 @@ describe("MCP server", () => {
     );
 
     const one = await get({ wp: "WP3" });
-    expect(one.workpackage.children[0].code).toBe("WP3.1");
+    expect(one.workpackage.children).toBeUndefined();
+    expect(one.children[0].code).toBe("WP3.1");
     const missing = await call("get_project", { id: p.id, wp: "WP99" });
     expect(JSON.parse(text(missing)).error).toBe("not_found");
     const bad = await call("get_project", { id: p.id, view: "summary", status: ["todo"] });
@@ -183,7 +187,7 @@ describe("MCP server", () => {
     const p = JSON.parse(text(await call("create_project", { title: "MCP Obo" })));
     const r = await call("log_progress", { project_id: p.id, summary: "obo check", on_behalf_of: "someone.else@example.com" });
     expect(r.isError).toBeFalsy();
-    const full = JSON.parse(text(await call("get_project", { id: p.id })));
+    const full = JSON.parse(text(await call("get_project", { id: p.id, view: "full" })));
     const dump = JSON.stringify(full.events);
     expect(dump).toContain("obo check");
     expect(dump).not.toContain("someone.else@example.com");

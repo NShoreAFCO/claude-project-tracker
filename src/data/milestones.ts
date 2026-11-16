@@ -59,7 +59,7 @@ export type MilestoneInput = {
   gate?: unknown;
 };
 
-const MS_FIELDS = ["title", "description_md", "due_date", "workpackage_id", "sort", "gate"] as const;
+export const MS_FIELDS = ["title", "description_md", "due_date", "workpackage_id", "sort", "gate"] as const;
 type MsField = (typeof MS_FIELDS)[number];
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -220,7 +220,7 @@ function normalise(input: MilestoneInput): Partial<Record<MsField, unknown>> {
   return out;
 }
 
-function idList(v: unknown, name: string): string[] | undefined {
+export function idList(v: unknown, name: string): string[] | undefined {
   if (v === undefined) return undefined;
   if (v === null) return [];
   if (!Array.isArray(v) || v.some((x) => typeof x !== "string")) throw new ValidationError(`${name} must be an array of workpackage ids`);
@@ -396,3 +396,4 @@ export async function upsertMilestone(
   ]);
   return { ...(await getOne(db, projectId, row.id)), warnings: issuesOf(schedule.issues, row.id) };
 }
+export { normalise as normaliseMs };

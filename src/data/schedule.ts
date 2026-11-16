@@ -147,6 +147,15 @@ export interface ScheduleChange {
   strict?: boolean;
 }
 
+/** What a refused strict write should change, per issue code (the dates are in the issue message). */
+const STRICT_FIX: Record<ScheduleIssueCode, string> = {
+  DEP_START_BEFORE_PRED_END: "Move its start_date to the predecessor's end_date or later, or move the predecessor's end_date earlier.",
+  START_BEFORE_GATE: "Move its start_date to the gate's due_date or later, or move the gate's due_date earlier.",
+  CHILD_OUTSIDE_PARENT: "Move the child's dates inside the parent's, or widen the parent's dates.",
+  MILESTONE_BEFORE_REQUIRED_END: "Move the milestone's due_date to the required work package's end_date or later, or move that end_date earlier.",
+  DEP_UNKNOWN: "Remove that id from depends_on or use the id of a work package of this project.",
+};
+
 const issueKey = (i: ScheduleIssue): string => `${i.code}|${i.entity}|${i.entity_id}|${i.related_id}`;
 
 /** Effective strict flag: the project's own setting, else the policy default. */
@@ -327,10 +336,11 @@ export async function recomputeScheduleStmts(
     const old = new Set(scheduleIssues(before).map(issueKey));
     const added = issues.filter((i) => !old.has(issueKey(i)));
     if (added.length)
-      throw new TransitionError(`schedule_strict: the write adds ${added.length} schedule issue${added.length === 1 ? "" : "s"}`, {
-        code: "SCHEDULE_STRICT",
-        issues: added,
-      });
+      throw new TransitionError(
+        `schedule_strict: the write adds ${added.length} schedule issue${added.length === 1 ? "" : "s"}, nothing was written. ` +
+          `${added.slice(0, 3).map((i) => `${i.message} ${STRICT_FIX[i.code]}`).join(" ")}${added.length > 3 ? ` (+${added.length - 3} more in issues)` : ""} Retry with the schedule corrected.`,
+        { code: "SCHEDULE_STRICT", issues: added },
+      );
   }
 
   const per = new Map<string, ScheduleIssue[]>();

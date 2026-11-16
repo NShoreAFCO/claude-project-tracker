@@ -160,7 +160,7 @@ describe("acceptance (SPEC §13)", () => {
       capabilities: {},
       clientInfo: { name: "acceptance", version: "1" },
     });
-    expect(init.result.instructions).toContain("get_context_bundle");
+    expect(init.result.instructions).toContain("get_briefing");
 
     const list = await mcp(access_token, "tools/call", { name: "list_projects", arguments: {} });
     const ids = JSON.parse(list.result.content[0].text).map((p: { id: string }) => p.id);

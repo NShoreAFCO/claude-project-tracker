@@ -398,6 +398,7 @@ describe("actual dates", () => {
       title: "m",
       actual_start: "2026-03-01",
       actual_end: "2026-03-07",
+      return: "full",
     });
     expect(m.isError).toBeFalsy();
     expect(m.body).toMatchObject({ actual_end: "2026-03-07" });
@@ -461,7 +462,7 @@ describe("code", () => {
 
   it("MCP round trip", async () => {
     const p = await proj();
-    const r = await mcpTool(EDITOR, "upsert_workpackage", { project_id: p.id, title: "mcp", code: "M1", actual_start: "2026-03-01" });
+    const r = await mcpTool(EDITOR, "upsert_workpackage", { project_id: p.id, title: "mcp", code: "M1", actual_start: "2026-03-01", return: "full" });
     expect(r.isError).toBeFalsy();
     expect(r.body).toMatchObject({ code: "M1", actual_start: "2026-03-01" });
     const bad = await mcpTool(EDITOR, "upsert_workpackage", { project_id: p.id, title: "mcp2", code: "bad code" });
@@ -492,9 +493,9 @@ describe("local_host", () => {
     expect(await (await rest(VIEWER, "GET", `/api/events?project_id=${p.id}`)).text()).not.toContain("zz-host-name");
     expect(await (await rest(EDITOR, "GET", `/api/events?project_id=${p.id}`)).text()).toContain("zz-host-name");
 
-    const vMcp = await mcpTool(VIEWER, "get_project", { id: p.id });
+    const vMcp = await mcpTool(VIEWER, "get_project", { id: p.id, view: "full" });
     expect(JSON.stringify(vMcp.body)).not.toContain("zz-host-name");
-    expect((await mcpTool(EDITOR, "get_project", { id: p.id })).body.project.local_host).toBe("zz-host-name");
+    expect((await mcpTool(EDITOR, "get_project", { id: p.id, view: "full" })).body.project.local_host).toBe("zz-host-name");
 
     const viewer = testCaller({ role: "viewer", channel: "dashboard" });
     expect((await getProjectDetail(db, p.id, viewer)).project).not.toHaveProperty("local_host");
@@ -506,12 +507,12 @@ describe("local_host", () => {
     const r = await rest(EDITOR, "PATCH", `/api/projects/${p.id}`, { local_host: "laptop-1" });
     expect(r.status).toBe(200);
     expect(((await r.json()) as any).local_host).toBe("laptop-1");
-    const m = await mcpTool(EDITOR, "update_project", { id: p.id, patch: { local_host: "laptop-2" } });
+    const m = await mcpTool(EDITOR, "update_project", { id: p.id, patch: { local_host: "laptop-2" }, return: "full" });
     expect(m.body.local_host).toBe("laptop-2");
     expect((await updateProject(db, p.id, { local_host: null }, SYS)).local_host).toBeNull();
     expect((await rest(EDITOR, "PATCH", `/api/projects/${p.id}`, { local_host: "x".repeat(101) })).status).toBe(400);
     expect((await rest(EDITOR, "PATCH", `/api/projects/${p.id}`, { local_host: "x".repeat(100) })).status).toBe(200);
-    const c = await mcpTool(EDITOR, "create_project", { title: "QoL1 mcp host", owner: "Owner", local_host: "box" });
+    const c = await mcpTool(EDITOR, "create_project", { title: "QoL1 mcp host", owner: "Owner", local_host: "box", return: "full" });
     expect(c.body.local_host).toBe("box");
   });
 });

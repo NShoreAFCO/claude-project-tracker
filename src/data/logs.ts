@@ -145,7 +145,7 @@ const mayAuthoriseDone = (by: Caller): boolean => by.channel === "dashboard" && 
 /** 409 WP_DONE: a progress log on a done WP without a person's authorisation. */
 function wpDoneError(wpId: string, by: Caller): TransitionError {
   return new TransitionError(
-    `work package ${wpId} is done: log a note instead (note: true), or open a new sub-work package or task for new work; ` +
+    `work package ${wpId} is done: for new work open a new sub-work package or task, or log a remark with note: true; ` +
       (mayAuthoriseDone(by)
         ? "to record late work on it (moves actual_end to today), send authorize_done: true"
         : "only a person in the dashboard can authorise a progress log on a done work package"),
@@ -155,7 +155,7 @@ function wpDoneError(wpId: string, by: Caller): TransitionError {
 
 /** 409 GATE_LOCKED for a progress log: the gate error plus the way to log without starting the WP. */
 function lockedLogError(e: TransitionError): TransitionError {
-  return new TransitionError(`${e.message}; to record work without starting it, log a note (note: true)`, e.current);
+  return e.message.includes("note: true") ? e : new TransitionError(`${e.message}; to record work without starting it, log a note (note: true)`, e.current);
 }
 
 const optFlag = (v: unknown, name: string): boolean => {

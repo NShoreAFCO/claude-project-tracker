@@ -518,7 +518,7 @@ describe("gate decisions", () => {
       ["go", user.id],
     ]);
     // upsert_milestone takes gate
-    const ms = await mcp("upsert_milestone", { project_id: g.p.id, id: g.m2, gate: true });
+    const ms = await mcp("upsert_milestone", { project_id: g.p.id, id: g.m2, gate: true, return: "full" });
     expect(body(ms).gate).toBe(true);
   });
 });

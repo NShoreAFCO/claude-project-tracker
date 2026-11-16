@@ -6,6 +6,7 @@ import { gatedPlan } from "./fixtures/gated-plan";
 import { createProject } from "../src/data/projects";
 import { upsertWorkpackage } from "../src/data/workpackages";
 import { upsertMilestone } from "../src/data/milestones";
+import { resolveWpCode } from "../src/data/project-views";
 import { deleteEntity } from "../src/data/entities";
 import { ensureUserPerson } from "../src/data/persons";
 import { mcpApiHandler } from "../src/mcp/server";
@@ -114,8 +115,8 @@ describe("wp_code locator gives the same result as the id", () => {
 
   it("link_branch", async () => {
     const t = await twins();
-    const byId = await mcp("link_branch", { project_id: t.p.id, repo: "o/r", name: "feat/a", workpackage_id: t.a });
-    const byCode = await mcp("link_branch", { project_id: t.p.id, repo: "o/r", name: "feat/b", wp_code: "T02" });
+    const byId = await mcp("link_branch", { project_id: t.p.id, repo: "o/r", name: "feat/a", workpackage_id: t.a, return: "full" });
+    const byCode = await mcp("link_branch", { project_id: t.p.id, repo: "o/r", name: "feat/b", wp_code: "T02", return: "full" });
     expect(byId.isError).toBe(false);
     expect(byCode.body.workpackage_id).toBe(t.b);
     expect(norm(byCode.body, [t.b])).toEqual(norm(byId.body, [t.a]));
@@ -129,6 +130,25 @@ describe("wp_code locator gives the same result as the id", () => {
     expect(norm(byCode.body, [t.b])).toEqual(norm(byId.body, [t.a]));
     const row = await db.prepare("SELECT workpackage_id FROM token_cost WHERE project_id = ? AND workpackage_id = ?").bind(t.p.id, t.b).first();
     expect(row).not.toBeNull();
+  });
+});
+
+describe("wp_code locator input", () => {
+  it("surrounding whitespace in wp_code is trimmed", async () => {
+    const t = await twins();
+    const r = await mcp("log_progress", { project_id: t.p.id, wp_code: " T01 ", summary: "trimmed" });
+    expect(r.isError).toBe(false);
+    expect((await mcp("log_progress", { project_id: t.p.id, wp_code: "  T99	", summary: "x" })).body.error).toBe("not_found");
+  });
+
+  it("the code is matched in SQL: an exact code only, other WPs and other projects are not hit", async () => {
+    const t = await twins();
+    const other = await createProject(db, { title: `Locator sql ${++n}`, owner: "Owner" }, SYS);
+    await upsertWorkpackage(db, other.id, { code: "T01", title: "Same code elsewhere" }, SYS);
+    expect(await resolveWpCode(db, t.p.id, "T01")).toBe(t.a);
+    expect(await resolveWpCode(db, t.p.id, "t01".toUpperCase())).toBe(t.a);
+    await expect(resolveWpCode(db, t.p.id, "T0")).rejects.toThrow(/not found/);
+    await expect(resolveWpCode(db, t.p.id, "T01 ")).rejects.toThrow(/not found/);
   });
 });
 

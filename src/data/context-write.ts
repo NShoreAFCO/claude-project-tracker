@@ -217,6 +217,34 @@ export async function writeContext(
  * Append a stamped section. Atomic in one batch, never read-modify-write, so concurrent sessions
  * appending to the same doc (e.g. slug 'handover') all survive. Creates the doc if missing.
  */
+const sectionHeading = (h?: string | null): string => (h?.trim() || "Update").replace(/\s+/g, " ");
+const sectionText = (heading: string, ts: string, actor: string, text: string): string =>
+  `\n\n## ${heading} (${ts}, ${actor})\n\n${text}\n`;
+
+/**
+ * Pre-check of an appendContext on (owner, slug) before the other writes of the same call: the owner lives in
+ * `projectId` and the section fits the doc and owner caps now. appendContext re-checks the caps inside its batch.
+ */
+export async function checkAppendFits(
+  db: D1Database,
+  ref: OwnerRef & { slug: string },
+  projectId: string,
+  args: { text: string; heading?: string | null },
+  by: Caller,
+): Promise<void> {
+  const info = await resolveOwner(db, ref);
+  if (info.project_id !== projectId) throw new NotFoundError(`${ref.owner_kind} ${ref.owner_id} not found in project ${projectId}`);
+  const text = args.text?.trim();
+  if (!text) throw new ValidationError("text is required");
+  const add = utf8Bytes(sectionText(sectionHeading(args.heading), now(), by.actor, text));
+  const doc = await db
+    .prepare("SELECT bytes FROM context_doc WHERE owner_kind = ? AND owner_id = ? AND slug = ? AND deleted_at IS NULL")
+    .bind(ref.owner_kind, ref.owner_id, slugify(ref.slug))
+    .first<{ bytes: number }>();
+  checkDocSize((doc?.bytes ?? 0) + add);
+  checkOwnerSize(await ownerBytes(db, ref), add);
+}
+
 export async function appendContext(
   db: D1Database,
   args: ({ doc_id: string } | (OwnerRef & { slug: string })) & { text: string; heading?: string | null; title?: string | null },
@@ -225,8 +253,8 @@ export async function appendContext(
   const text = args.text?.trim();
   if (!text) throw new ValidationError("text is required");
   const ts = now();
-  const heading = (args.heading?.trim() || "Update").replace(/\s+/g, " ");
-  const section = `\n\n## ${heading} (${ts}, ${by.actor})\n\n${text}\n`;
+  const heading = sectionHeading(args.heading);
+  const section = sectionText(heading, ts, by.actor, text);
   const add = utf8Bytes(section);
   checkDocSize(add);
 

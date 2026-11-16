@@ -1,0 +1,165 @@
+import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
+import { describe, expect, it } from "vitest";
+import { cutToBytes, findSection, sectionHeadings } from "../src/data/context-read";
+import { mcpApiHandler } from "../src/mcp/server";
+import type { Env } from "../src/types";
+
+let id = 0;
+async function call(name: string, args: Record<string, unknown>): Promise<any> {
+  const ctx = createExecutionContext() as ExecutionContext & { props?: unknown };
+  ctx.props = { email: "user@example.com", clientName: "Claude Test" };
+  const res = await mcpApiHandler.fetch(
+    new Request("https://tracker.test/mcp", {
+      method: "POST",
+      headers: { Host: "tracker.test", "Content-Type": "application/json", Accept: "application/json, text/event-stream", "MCP-Protocol-Version": "2025-06-18" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method: "tools/call", params: { name, arguments: args } }),
+    }),
+    env as Env,
+    ctx,
+  );
+  await waitOnExecutionContext(ctx);
+  const t = await res.text();
+  return (t.startsWith("{") ? JSON.parse(t) : JSON.parse(t.split("\n").find((l) => l.startsWith("data: "))!.slice(6))).result;
+}
+const text = (r: any): string => r.content[0].text;
+
+async function fixture(): Promise<Record<string, unknown>> {
+  const p = JSON.parse(text(await call("create_project", { title: "ReadCtx" })));
+  const addr = { owner_kind: "project", owner_id: p.id, slug: "handover" };
+  for (const h of ["Alpha", "Beta", "Gamma", "Delta"]) {
+    await call("append_context", { ...addr, heading: h, text: `body of ${h} ${"x".repeat(400)}` });
+  }
+  return addr;
+}
+
+describe("pure helpers", () => {
+  const md = "pre\n\n## A one\n\na\n\n## B two\n\nb\n\n## A one again\n\nc\n";
+  it("lists headings with sizes", () => {
+    expect(sectionHeadings(md).map((h) => h.heading)).toEqual(["## A one", "## B two", "## A one again"]);
+    expect(sectionHeadings(md)[0].bytes).toBe("## A one\n\na\n\n".length);
+  });
+  it("finds the last matching section, case-insensitive", () => {
+    expect(findSection(md, "a ONE")).toBe("## A one again\n\nc\n");
+    expect(findSection(md, "zzz")).toBeNull();
+    expect(findSection("## Alpha\n\nbody text\n", "Alpha\n\nbody")).toBeNull();
+  });
+  it("cuts at a section boundary and counts what is left out", () => {
+    const cut = cutToBytes(md, 40);
+    expect(cut.text).toBe("pre\n\n## A one\n\na\n\n## B two\n\nb\n\n");
+    expect(cut.more).toBe(1);
+    expect(cutToBytes(md, 10000)).toEqual({ text: md, more: 0 });
+  });
+  const bytes = (t: string) => new TextEncoder().encode(t).length;
+  it("cuts an oversized first section at a whole line and adds a marker", () => {
+    const big = "## Big\n" + Array.from({ length: 50 }, (_, i) => `line ${i}`).join("\n") + "\n\n## Next\n\nz\n";
+    const cut = cutToBytes(big, 100);
+    expect(bytes(cut.text)).toBeLessThanOrEqual(100);
+    expect(cut.text).toMatch(/\[cut at \d+ bytes\]\n$/);
+    expect(cut.text.startsWith("## Big\nline 0\n")).toBe(true);
+    expect(cut.more).toBe(1);
+    const body = cut.text.replace(/\[cut at \d+ bytes\]\n$/, "");
+    expect(/line \d+\n$/.test(body)).toBe(true);
+  });
+  it("cuts a document without headings at a character boundary", () => {
+    const cut = cutToBytes("a".repeat(500), 100);
+    expect(bytes(cut.text)).toBeLessThanOrEqual(100);
+    expect(cut.text).toMatch(/^a+\n\[cut at \d+ bytes\]\n$/);
+  });
+  it("never splits a multi-byte character at the cut", () => {
+    for (const unit of ["\u00e4", "\u20ac", "\u{1F600}"]) {
+      for (let budget = 60; budget < 70; budget++) {
+        const cut = cutToBytes(unit.repeat(100), budget);
+        expect(bytes(cut.text)).toBeLessThanOrEqual(budget);
+        expect(cut.text).not.toContain("\uFFFD");
+        const body = cut.text.replace(/\n\[cut at \d+ bytes\]\n$/, "");
+        expect(body).toBe(unit.repeat(Array.from(body).length));
+        expect(Array.from(body).length).toBeGreaterThan(0);
+      }
+    }
+  });
+});
+
+describe("read_context parts", () => {
+  it("max_bytes that already fits the whole document keeps all of it, even within 80 bytes of the limit", async () => {
+    const mk = async (title: string, body: string) => {
+      const p = JSON.parse(text(await call("create_project", { title })));
+      const addr = { owner_kind: "project", owner_id: p.id, slug: "handover" };
+      await call("append_context", { ...addr, heading: "Only", text: body });
+      return addr;
+    };
+    const base = text(await call("read_context", await mk("ReadCtxFit0", "t"))).length;
+    const addr = await mk("ReadCtxFit1", "t".repeat(1 + 985 - base));
+    const whole = text(await call("read_context", addr));
+    expect(new TextEncoder().encode(whole).length).toBeGreaterThan(920);
+    expect(new TextEncoder().encode(whole).length).toBeLessThanOrEqual(1000);
+    expect(text(await call("read_context", { ...addr, max_bytes: 1000 }))).toBe(whole);
+  });
+  it("returns the whole document by default", async () => {
+    const addr = await fixture();
+    const t = text(await call("read_context", addr));
+    for (const h of ["Alpha", "Beta", "Gamma", "Delta"]) expect(t).toContain(`## ${h}`);
+  });
+  it("tail_sections keeps the header and the last n sections", async () => {
+    const addr = await fixture();
+    const t = text(await call("read_context", { ...addr, tail_sections: 2 }));
+    expect(t.startsWith("--- context: project:")).toBe(true);
+    expect(t).toContain("## Delta");
+    expect(t).toContain("## Gamma");
+    expect(t).not.toContain("## Beta");
+  });
+  it("section returns one section, case-insensitive", async () => {
+    const addr = await fixture();
+    const t = text(await call("read_context", { ...addr, section: "beta" }));
+    expect(t).toContain("body of Beta");
+    expect(t).not.toContain("body of Gamma");
+  });
+  it("section not found is not_found and names the heading", async () => {
+    const addr = await fixture();
+    const r = await call("read_context", { ...addr, section: "Omega" });
+    expect(r.isError).toBe(true);
+    const e = JSON.parse(text(r));
+    expect(e.error).toBe("not_found");
+    expect(e.message).toContain("Omega");
+  });
+  it("headings lists headings with sizes only", async () => {
+    const addr = await fixture();
+    const t = text(await call("read_context", { ...addr, headings: true }));
+    expect(t).toMatch(/## Alpha .*\(\d+ bytes\)/);
+    expect(t.split("\n").filter((l) => l.includes(" bytes)")).length).toBe(4);
+    expect(t).not.toContain("body of");
+  });
+  it("refuses more than one of tail_sections, section, headings", async () => {
+    const addr = await fixture();
+    for (const extra of [{ tail_sections: 1, section: "A" }, { tail_sections: 1, headings: true }, { section: "A", headings: true }]) {
+      const r = await call("read_context", { ...addr, ...extra });
+      expect(r.isError).toBe(true);
+      expect(JSON.parse(text(r)).error).toBe("invalid");
+    }
+  });
+  it("max_bytes cuts at a section boundary and says how many sections are left", async () => {
+    const addr = await fixture();
+    const t = text(await call("read_context", { ...addr, max_bytes: 1000 }));
+    expect(Buffer.byteLength(t)).toBeLessThanOrEqual(1000);
+    expect(t).toMatch(/… \d+ more sections, use tail_sections or section$/);
+    expect(t).toContain("## Alpha");
+    expect(t).not.toContain("## Delta");
+    // every section kept is whole
+    for (const m of t.matchAll(/body of (\w+) (x+)/g)) expect(m[2].length).toBe(400);
+  });
+  it("max_bytes combines with tail_sections", async () => {
+    const addr = await fixture();
+    const t = text(await call("read_context", { ...addr, tail_sections: 3, max_bytes: 1000 }));
+    expect(Buffer.byteLength(t)).toBeLessThanOrEqual(1000);
+    expect(t).toContain("## Beta");
+    expect(t).not.toContain("## Alpha");
+  });
+  it("a document without headings is returned whole, and headings is empty", async () => {
+    const p = JSON.parse(text(await call("create_project", { title: "NoHeadings" })));
+    const addr = { owner_kind: "project", owner_id: p.id, slug: "plain" };
+    await call("write_context", { ...addr, title: "plain", content_md: "just text, no headings" });
+    expect(text(await call("read_context", { ...addr, tail_sections: 2 }))).toContain("just text, no headings");
+    expect(text(await call("read_context", { ...addr, headings: true }))).not.toContain("just text");
+    const r = await call("read_context", { ...addr, section: "x" });
+    expect(JSON.parse(text(r)).error).toBe("not_found");
+  });
+});

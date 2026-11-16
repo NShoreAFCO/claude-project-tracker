@@ -4,7 +4,7 @@
 
 Copy into the instructions of every claude.ai Project whose work you track:
 
-> Before working on a tracked project, call tracker `get_context_bundle` for it. At the end of substantive work, call `log_progress` and `append_context` (slug `handover`) with what was done, decisions and open points.
+> Before working on a tracked project, call tracker `get_briefing` for it. At the end of substantive work, call `log_progress` once, with `handover_md` (what was done, decisions, open points) and, if known, `claude_tokens`.
 
 When you create or restructure a project, follow [PROJECT-STRUCTURE.md](PROJECT-STRUCTURE.md):
 
@@ -33,9 +33,9 @@ Upload or paste this as project knowledge if you want Claude to know the tracker
 
 ### How to work with it
 
-- **Start** of work on a tracked project: `get_context_bundle(project_id, workpackage_id?)`. Use `list_projects` or `search` to find the id.
-- **During:** `upsert_workpackage` (omit `id` to create; pass `expected_version` when updating; a 409 means someone else changed it, so read it again), `update_project`, `upsert_milestone`, `link_branch`, `set_scores`, `write_context` / `read_context` / `list_context`.
-- **End** of substantive work: `log_progress`, then `append_context` with slug `handover`: what was done, decisions, open points, session id.
+- **Start** of work on a tracked project: `get_briefing(project_id, workpackage_id?)` (header, what is in progress or blocked, next milestone, last handover, context index). Use `list_projects` (active and on-hold projects; pass `status` for others) or `search` to find the id. Read more only as needed: `get_project` returns a summary by default (`view: "outline"` for one row per work package, `wp: <code>` for one work package, `view: "full"` for the full view, which lists only the newest 20 branches and context index rows; `branches_total` and `context_total` show when rows are cut); `get_context_bundle` is capped at 12,000 bytes, newest documents first.
+- **During:** `upsert_workpackage` (omit `id` to create; pass `expected_version` when updating; a 409 means someone else changed it, so read it again; the reply carries only the current `version` and the fields you patched). Writes return a short acknowledgement; pass `return: "full"` to get the whole row. To create or change many work packages or milestones at once, use one `apply_changes` call (all or nothing), `update_project`, `upsert_milestone`, `link_branch`, `set_scores`, `write_context` / `read_context` / `list_context`.
+- **End** of substantive work: one `log_progress` call with `handover_md` (what was done, decisions, open points; the session id is added), and `claude_tokens` / `copilot_prompts` when known. Use `append_context` on the `handover` slug only for extra sections written outside a progress log. `get_guide(topic)` explains structure, gates, verification, closing, risks, context and batch writes.
 - **Closing a project**: `done` needs `closure_note_md`, `lessons_learned_md` (may be "none") and no open work packages (`todo|doing|blocked|waiting`); `abandoned` needs the closure note. Move leftover work to a follow-up project with `move_workpackages`. A closed project takes no new open work until it is reopened. `dropped` work packages need `drop_reason`.
 - **Waiting vs blocked**: `blocked` is a real blocker inside the work; set `blocked_by` (`wp:<id>`, `ms:<id>`, `ext:<text>` or text). `waiting` is a deferral, waiting on an external party; set `waiting_reason`. A `todo` work package starts (`doing`) when you log progress on it.
 - **Schedule**: write results carry `warnings` (a WP starts before a predecessor ends or before an unlocking milestone is due, a child lies outside its parent, a milestone is due before a required WP ends, an unknown `depends_on` entry). Fix them or tell the user. `depends_on` takes WP ids of the same project. In a `schedule_strict` project a write that adds warnings fails with 409 `SCHEDULE_STRICT`; `SCHEDULE_CONFLICT` means another write got there first, so read the project again and retry.
