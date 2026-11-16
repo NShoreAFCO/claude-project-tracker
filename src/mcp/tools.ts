@@ -12,6 +12,7 @@ import { writeContext, appendContext, checkAppendFits, deleteContext, setContext
 import { requireAction, toolAction } from "../auth/permissions";
 import { search } from "../data/search";
 import { upsertMilestone } from "../data/milestones";
+import { applyChanges } from "../data/apply-changes";
 import { listRisks, upsertRisk } from "../data/risks";
 import { createBaseline } from "../data/baselines";
 import { recordGateDecision, type DecisionInput } from "../data/gates";
@@ -124,6 +125,103 @@ async function locateWp<T extends { project_id: string; wp_code?: string }>(
 }
 
 const WP_LOCATOR = "Identify the WP by workpackage_id, or by project_id + wp_code.";
+
+/** upsert_workpackage fields without project_id: shared by the tool and the apply_changes "wp" op. */
+const wpFields = {
+  id: z.string().optional().describe("Identify an existing work package (omit to create)."),
+  wp_code: z.string().optional(),
+  parent_id: optionalText(),
+  code: optionalText("Set the short code shown before the title (max 12 characters: letters, digits, dot, hyphen; null clears)."),
+  title: optionalText(),
+  description_md: optionalText(),
+  status: workpackageStatusSchema.optional(),
+  blocked_by: optionalText("Set the blocker: wp:<work package id>, ms:<milestone id>, ext:<external reason>, or free text."),
+  blocked_since: optionalDate("Set when the WP became blocked as YYYY-MM-DD (defaults to today on status blocked)."),
+  waiting_reason: optionalText("Set why the WP is deferred (status waiting)."),
+  drop_reason: optionalText("Set why the WP is dropped (required for status dropped)."),
+  progress: z.number().min(0).max(100).optional().describe("0-100"),
+  weight: z.number().positive().optional().describe("Set the effort in person-days (PD); it also weights progress."),
+  effort_planned_pd: z.number().min(0).nullable().optional().describe("Set the planned effort in person-days."),
+  effort_actual_pd: z
+    .number()
+    .min(0)
+    .nullable()
+    .optional()
+    .describe("Set the actual effort in person-days (log_progress effort_pd adds to it)."),
+  start_date: optionalDate(),
+  end_date: optionalDate(),
+  actual_start: optionalDate("Set the actual start as YYYY-MM-DD (set automatically on the first start; not in the future; null clears)."),
+  actual_end: optionalDate("Set the actual end as YYYY-MM-DD (set automatically on done; not in the future, not before actual_start; null clears)."),
+  depends_on: z
+    .array(z.string())
+    .optional()
+    .describe("Set the ids of work packages of this project that must end before this one starts (unknown ids are refused)."),
+  sort: z.number().int().optional(),
+  category: wpCategorySchema.nullable().optional().describe("Set the work category (null = inherit)."),
+  human: z.boolean().nullable().optional().describe("Mark as human (off-computer) work; null = default from category."),
+  deliverable: z.string().max(500).nullable().optional().describe("Set the deliverable (short text: what the WP produces)."),
+  acceptance_criteria_md: optionalText("Set the acceptance criteria (Markdown): how to tell the WP is done. Fill on creation."),
+  verification: z
+    .enum(VERIFICATIONS)
+    .optional()
+    .describe("Set how completion is verified (default none). Other than none, status done needs a person as verified_by."),
+  verified_by: z
+    .string()
+    .max(200)
+    .nullable()
+    .optional()
+    .describe(
+      "Omit: done records your OAuth login's person. Only your own login's person id or email is accepted; never an agent or free text.",
+    ),
+  verified_at: z
+    .string()
+    .nullable()
+    .optional()
+    .describe("Set when it was verified (YYYY-MM-DD or ISO timestamp, not in the future; default now)."),
+  owner: personRef("Set the work package owner (empty = project owner)."),
+  priority_stakeholders: z
+    .array(z.string())
+    .max(50)
+    .nullable()
+    .optional()
+    .describe(
+      "Replace the priority stakeholders: person ids, emails or exact names of existing persons (add new ones with upsert_person). [] clears.",
+    ),
+  expected_version: z.number().int().optional(),
+};
+
+/** upsert_milestone fields without project_id: shared by the tool and the apply_changes "ms" op. */
+const msFields = {
+  id: z.string().optional().describe("Identify an existing milestone (omit to create)."),
+  title: optionalText(),
+  description_md: optionalText(),
+  due_date: optionalDate(),
+  workpackage_id: optionalText("Attach to a main work package."),
+  sort: z.number().int().optional(),
+  requires: z.array(z.string()).optional().describe("Set the work packages that close this milestone."),
+  unlocks: z.array(z.string()).optional().describe("Set the work packages this milestone unlocks."),
+  gate: z.boolean().optional().describe("Mark as a gate that needs a recorded decision to unlock its work packages."),
+  expected_version: z.number().int().optional(),
+};
+
+/** Strict per-op schemas of apply_changes: the single tools' fields, unknown keys refused. */
+const OP_SCHEMAS: Record<string, z.ZodObject> = {
+  wp: z.strictObject({ op: z.literal("wp"), ref: z.string().optional(), ...wpFields }),
+  ms: z.strictObject({ op: z.literal("ms"), ref: z.string().optional(), ...msFields }),
+};
+
+/** One apply_changes op → its fields (undefined dropped); a schema error names the path, e.g. ops[7].progress. */
+function parseOp(op: unknown, i: number): Record<string, unknown> {
+  const kind = (op as { op?: unknown } | null)?.op;
+  const schema = typeof kind === "string" && Object.hasOwn(OP_SCHEMAS, kind) ? OP_SCHEMAS[kind] : undefined;
+  if (!schema) throw new ValidationError(`ops[${i}].op must be wp or ms`);
+  const r = schema.safeParse(op);
+  if (r.success) return omitUndefined(r.data as Record<string, unknown>);
+  const issue = r.error.issues[0];
+  if (issue.code === "unrecognized_keys") throw new ValidationError(`ops[${i}]: unknown key ${issue.keys.join(", ")}`);
+  const path = issue.path.map((p) => (typeof p === "number" ? `[${p}]` : `.${String(p)}`)).join("");
+  throw new ValidationError(`ops[${i}]${path}: ${issue.message}`);
+}
 
 export function registerTools(reg: Reg): void {
   reg(
@@ -333,70 +431,8 @@ export function registerTools(reg: Reg): void {
     {
       title: "Upsert work package",
       ack: true,
-      description: `Create or update a work package. Always set code (WP3.2, T07) and parent_id at the matching level (tasks under sub-WPs); dates must respect depends_on and unlocking gates unless the user expressly overrides. category: ${WP_CATEGORIES.join("|")} (null = inherit from the parent). WPs with human=true${HUMAN_DEFAULT.length ? ` (default for ${HUMAN_DEFAULT.join(", ")})` : ""} are done off the computer: log progress the user reports, and set them to done only when the user says so. When you create a WP, fill deliverable and acceptance_criteria_md (how to tell it is done) and choose verification (${VERIFICATIONS.join("|")}). Verification: setting a WP with verification other than none to done records your OAuth login's person as verified_by (verified_at now), so do it only when the user confirms they verified it; never mark human=true WPs verified yourself, and never set verified_by to an agent, free text or anyone but your login (refused). Set owner when someone other than the project owner is responsible (effective_owner falls back to the project owner); priority_stakeholders lists persons to keep informed. Status: use blocked only for a real blocker (blocked_by wp:<id>, ms:<id> or ext:<text>; blocked_since defaults to today) and waiting for a deliberate deferral (optional waiting_reason). dropped requires drop_reason. A todo WP whose progress rises above 0 becomes doing unless you set status in the same call. The result lists schedule issues in warnings (start before a predecessor ends or before an unlocking milestone is due, child outside its parent); fix them or tell the user. In a schedule_strict project a write that adds issues fails with a conflict listing them. A WP behind a closed gate milestone (not reached yet, or no go decision) is gate-locked: setting it to doing or done, or setting its progress, fails with 409 GATE_LOCKED naming the gate; tell the user (the decision maker decides, or a person overrides in the dashboard). Identify an existing WP by id, or by project_id + wp_code.`,
-      inputSchema: z.object({
-        project_id: z.string(),
-        id: z.string().optional().describe("Identify an existing work package (omit to create)."),
-        wp_code: z.string().optional(),
-        parent_id: optionalText(),
-        code: optionalText("Set the short code shown before the title (max 12 characters: letters, digits, dot, hyphen; null clears)."),
-        title: optionalText(),
-        description_md: optionalText(),
-        status: workpackageStatusSchema.optional(),
-        blocked_by: optionalText("Set the blocker: wp:<work package id>, ms:<milestone id>, ext:<external reason>, or free text."),
-        blocked_since: optionalDate("Set when the WP became blocked as YYYY-MM-DD (defaults to today on status blocked)."),
-        waiting_reason: optionalText("Set why the WP is deferred (status waiting)."),
-        drop_reason: optionalText("Set why the WP is dropped (required for status dropped)."),
-        progress: z.number().min(0).max(100).optional().describe("0-100"),
-        weight: z.number().positive().optional().describe("Set the effort in person-days (PD); it also weights progress."),
-        effort_planned_pd: z.number().min(0).nullable().optional().describe("Set the planned effort in person-days."),
-        effort_actual_pd: z
-          .number()
-          .min(0)
-          .nullable()
-          .optional()
-          .describe("Set the actual effort in person-days (log_progress effort_pd adds to it)."),
-        start_date: optionalDate(),
-        end_date: optionalDate(),
-        actual_start: optionalDate("Set the actual start as YYYY-MM-DD (set automatically on the first start; not in the future; null clears)."),
-        actual_end: optionalDate("Set the actual end as YYYY-MM-DD (set automatically on done; not in the future, not before actual_start; null clears)."),
-        depends_on: z
-          .array(z.string())
-          .optional()
-          .describe("Set the ids of work packages of this project that must end before this one starts (unknown ids are refused)."),
-        sort: z.number().int().optional(),
-        category: wpCategorySchema.nullable().optional().describe("Set the work category (null = inherit)."),
-        human: z.boolean().nullable().optional().describe("Mark as human (off-computer) work; null = default from category."),
-        deliverable: z.string().max(500).nullable().optional().describe("Set the deliverable (short text: what the WP produces)."),
-        acceptance_criteria_md: optionalText("Set the acceptance criteria (Markdown): how to tell the WP is done. Fill on creation."),
-        verification: z
-          .enum(VERIFICATIONS)
-          .optional()
-          .describe("Set how completion is verified (default none). Other than none, status done needs a person as verified_by."),
-        verified_by: z
-          .string()
-          .max(200)
-          .nullable()
-          .optional()
-          .describe(
-            "Omit: done records your OAuth login's person. Only your own login's person id or email is accepted; never an agent or free text.",
-          ),
-        verified_at: z
-          .string()
-          .nullable()
-          .optional()
-          .describe("Set when it was verified (YYYY-MM-DD or ISO timestamp, not in the future; default now)."),
-        owner: personRef("Set the work package owner (empty = project owner)."),
-        priority_stakeholders: z
-          .array(z.string())
-          .max(50)
-          .nullable()
-          .optional()
-          .describe(
-            "Replace the priority stakeholders: person ids, emails or exact names of existing persons (add new ones with upsert_person). [] clears.",
-          ),
-        expected_version: z.number().int().optional(),
-      }),
+      description: `Create or update a work package. Always set code (WP3.2, T07) and parent_id at the matching level (tasks under sub-WPs); dates must respect depends_on and unlocking gates unless the user expressly overrides. category: ${WP_CATEGORIES.join("|")} (null = inherit from the parent). WPs with human=true${HUMAN_DEFAULT.length ? ` (default for ${HUMAN_DEFAULT.join(", ")})` : ""} are done off the computer: log progress the user reports, and set them to done only when the user says so. When you create a WP, fill deliverable and acceptance_criteria_md (how to tell it is done) and choose verification (${VERIFICATIONS.join("|")}). Verification: setting a WP with verification other than none to done records your OAuth login's person as verified_by (verified_at now), so do it only when the user confirms they verified it; never mark human=true WPs verified yourself, and never set verified_by to an agent, free text or anyone but your login (refused). Set owner when someone other than the project owner is responsible (effective_owner falls back to the project owner); priority_stakeholders lists persons to keep informed. Status: use blocked only for a real blocker (blocked_by wp:<id>, ms:<id> or ext:<text>; blocked_since defaults to today) and waiting for a deliberate deferral (optional waiting_reason). dropped requires drop_reason. A todo WP whose progress rises above 0 becomes doing unless you set status in the same call. The result lists schedule issues in warnings; fix them or tell the user. In a schedule_strict project a write that adds issues fails with a conflict listing them. A WP behind a closed gate milestone (not reached yet, or no go decision) is gate-locked: setting it to doing or done, or setting its progress, fails with 409 GATE_LOCKED naming the gate; tell the user (the decision maker decides, or a person overrides in the dashboard). Identify an existing WP by id, or by project_id + wp_code.`,
+      inputSchema: z.object({ project_id: z.string(), ...wpFields }),
     },
     async (args, tc) => {
       const { project_id, expected_version, ...input } = await locateWp(tc.db, args, "id");
@@ -426,25 +462,28 @@ export function registerTools(reg: Reg): void {
       title: "Upsert milestone",
       ack: true,
       description:
-        "Create or update a milestone (zero duration). A gate unlocks WPs and stays closed until its required WPs are done and a person records a go decision. It is reached automatically when all 'requires' WPs are done and reopens if one is reopened; 'unlocks' WPs stay locked until it is first reached. A gate (gate=true) unlocks only when it is reached and its latest decision is go / go_with_conditions (a go recorded earlier waits for the 'requires' WPs): until then its unstarted 'unlocks' WPs are gate-locked and you cannot start them, and you cannot clear the gate flag, drop its unlocks or delete it. Reads list requires_status / unlocks_status (id, code, title, status, progress) and reached. requires/unlocks replace the stored lists. The result lists schedule issues in warnings (due before a required WP ends, unlocked WPs starting before the due date); a schedule_strict project refuses writes that add issues.",
-      inputSchema: z.object({
-        project_id: z.string(),
-        id: z.string().optional().describe("Identify an existing milestone (omit to create)."),
-        title: optionalText(),
-        description_md: optionalText(),
-        due_date: optionalDate(),
-        workpackage_id: optionalText("Attach to a main work package."),
-        sort: z.number().int().optional(),
-        requires: z.array(z.string()).optional().describe("Set the work packages that close this milestone."),
-        unlocks: z.array(z.string()).optional().describe("Set the work packages this milestone unlocks."),
-        gate: z.boolean().optional().describe("Mark as a gate that needs a recorded decision to unlock its work packages."),
-        expected_version: z.number().int().optional(),
-      }),
+        "Create or update a milestone (zero duration). A gate unlocks WPs and stays closed until its required WPs are done and a person records a go decision. It is reached automatically when all 'requires' WPs are done and reopens if one is reopened; 'unlocks' WPs stay locked until it is first reached. A gate (gate=true) unlocks only when it is reached and its latest decision is go / go_with_conditions (a go recorded earlier waits for the 'requires' WPs): until then its unstarted 'unlocks' WPs are gate-locked and you cannot start them, and you cannot clear the gate flag, drop its unlocks or delete it. requires/unlocks replace the stored lists. The result lists schedule issues in warnings; a schedule_strict project refuses writes that add issues.",
+      inputSchema: z.object({ project_id: z.string(), ...msFields }),
     },
     async (args, tc) => {
       const { project_id, expected_version, ...input } = args;
       return upsertMilestone(tc.db, project_id, omitUndefined(input), tc.by, expected_version);
     },
+  );
+
+  reg(
+    "apply_changes",
+    {
+      title: "Apply changes",
+      description:
+        `Up to 100 upsert_workpackage ("wp") and upsert_milestone ("ms") ops on one project, all or nothing; same fields and rules, no project_id. "@x" in parent_id, depends_on, requires, unlocks or workpackage_id names a WP by an earlier op's ref or code, or by its stored code. Human or verified WPs go to done only when the user says so.`,
+      inputSchema: z.object({
+        project_id: z.string(),
+        // 1..100 ops and 128 KB are checked in the handler, so the reply names the limit (an SDK refusal would not).
+        ops: z.array(z.looseObject({ op: z.enum(["wp", "ms"]), ref: z.string().optional() })),
+      }),
+    },
+    async (args, tc) => applyChanges(tc.db, args.project_id, args.ops, tc.by, { parse: parseOp }),
   );
 
   reg(

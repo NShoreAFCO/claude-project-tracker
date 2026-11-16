@@ -36,6 +36,25 @@ export function ack(result: unknown, args: unknown): unknown {
   return row !== result ? withExtras(out, result) : out;
 }
 
+/**
+ * One result line of apply_changes: `{id, code?, version}`, plus `status` / `progress` when they differ from what the
+ * op sent (or, when it sent none, from the stored row on update, the default todo/0 on create), and the server-set
+ * fields the op did not send that the write changed.
+ */
+export function ackLine(row: Obj, opArgs: Obj, before?: Obj): Obj {
+  const out: Obj = { id: row.id };
+  if (row.code !== undefined && row.code !== null && row.code !== "") out.code = row.code;
+  out.version = row.version;
+  const base: Obj = before ?? { status: "todo", progress: 0 };
+  for (const k of ["status", "progress"]) {
+    const ref = k in opArgs ? opArgs[k] : base[k];
+    if (row[k] !== undefined && row[k] !== null && row[k] !== ref) out[k] = row[k];
+  }
+  for (const k of SERVER_SET)
+    if (!(k in opArgs) && row[k] !== undefined && row[k] !== null && row[k] !== "" && row[k] !== (before?.[k] ?? null)) out[k] = row[k];
+  return out;
+}
+
 /** A progress log's extra writes (handover, token_cost) and its own warnings, next to the work package's. */
 function withExtras(out: Obj, result: Obj): Obj {
   for (const k of ["handover", "token_cost"]) if (isObj(result[k])) out[k] = result[k];

@@ -51,7 +51,7 @@ export const WP_FIELDS = [
 ] as const;
 type WpField = (typeof WP_FIELDS)[number];
 /** Columns written by create/update and diffed into events (WP fields plus the owner and verifier columns). */
-const WRITE_COLS = [...WP_FIELDS, "owner_person_id", "owner_text", "verified_by"] as const;
+export const WRITE_COLS = [...WP_FIELDS, "owner_person_id", "owner_text", "verified_by"] as const;
 
 /**
  * Client shape of a work package: owner as chip or text, effective owner (WP owner, else project owner),
@@ -68,7 +68,7 @@ export type WpOut = WorkpackageRow & {
 export type WpWriteOut = WpOut & { warnings: ScheduleIssue[] };
 
 const STATUSES = ["todo", "doing", "blocked", "waiting", "done", "dropped"];
-const ID_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+export const ID_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/;
 const DELIVERABLE_MAX = 500;
@@ -122,7 +122,7 @@ function actualDayInput(f: string, v: unknown): string | null {
  * violation that rolls the whole batch back), so a close or trash that commits after the pre-read wins.
  * Binds the project id once.
  */
-const PROJECT_OPEN_SQL = `EXISTS (SELECT 1 FROM project WHERE id = ? AND deleted_at IS NULL AND status NOT IN (${CLOSED_PROJECT_STATUSES.map((s) => `'${s}'`).join(", ")}))`;
+export const PROJECT_OPEN_SQL = `EXISTS (SELECT 1 FROM project WHERE id = ? AND deleted_at IS NULL AND status NOT IN (${CLOSED_PROJECT_STATUSES.map((s) => `'${s}'`).join(", ")}))`;
 const PROJECT_GUARD_FAILED = /NOT NULL constraint failed: workpackage\.project_id/i;
 
 /** Runs a WP batch; a failed project guard becomes 409 PROJECT_CLOSED (404 when the project went to the trash). */
@@ -252,7 +252,7 @@ async function stakeholderInput(db: D1Database, v: unknown): Promise<string[] | 
  * Statements that replace a WP's stakeholders, applied only while the WP still has `version`
  * (so a lost version race in the same batch changes nothing).
  */
-function stakeholderStmts(db: D1Database, wpId: string, version: number, ids: string[]): D1PreparedStatement[] {
+export function stakeholderStmts(db: D1Database, wpId: string, version: number, ids: string[]): D1PreparedStatement[] {
   const guard = "EXISTS (SELECT 1 FROM workpackage WHERE id = ? AND version = ?)";
   return [
     db.prepare(`DELETE FROM wp_stakeholder WHERE workpackage_id = ? AND ${guard}`).bind(wpId, wpId, version),
@@ -562,3 +562,4 @@ export async function upsertWorkpackage(
   );
   return { ...(await getWpOut(db, project, id)), warnings: issuesOf(schedule.issues, id) };
 }
+export { normalise as normaliseWp };
