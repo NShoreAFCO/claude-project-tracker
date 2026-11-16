@@ -504,6 +504,23 @@ describe("apply_changes: rollback and races", () => {
     expect((await counts(pid)).wps).toBe(before);
   });
 
+  it("a target moved to another project meanwhile: 409 naming the op, no values of the foreign row", async () => {
+    const pid = await project();
+    const other = await project();
+    const t = await wp(pid, { code: "T", title: "T" });
+    setAfterScheduleReadForTesting(async () => {
+      await db
+        .prepare("UPDATE workpackage SET project_id = ?, title = 'Foreign title', version = version + 1 WHERE id = ?")
+        .bind(other, t)
+        .run();
+    });
+    const text = (await call("apply_changes", { project_id: pid, ops: [{ op: "wp", title: "A" }, { op: "wp", id: t, title: "T2" }] })).content[0].text;
+    const r = JSON.parse(text);
+    expect(r.failed).toEqual({ index: 1, code: "conflict" });
+    expect(r.current ?? null).toBeNull();
+    expect(text).not.toContain("Foreign title");
+  });
+
   it("a hold recorded meanwhile: 403 for an unlock removal, GATE_LOCKED for a start (the SQL guard fires)", async () => {
     const g = await gatedProject();
     const c2 = await wp(g.pid, { code: "C2", title: "Second unlock" });

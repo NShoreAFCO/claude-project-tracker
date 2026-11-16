@@ -377,24 +377,26 @@ export async function applyChanges(db: D1Database, projectId: string, rawOps: un
     const oldParent = wp?.parent_id ?? null;
     const parent = next.parent_id !== undefined ? ((next.parent_id as string | null) ?? null) : oldParent;
     const parentChanged = !!wp && next.parent_id !== undefined && parent !== oldParent;
-    const l = locks();
+    let cached: ReturnType<typeof locks> | undefined;
+    const lk = () => (cached ??= locks());
     if (wp) {
       const toStarted = started(next.status) && next.status !== wp.status;
       const progressChange = typeof next.progress === "number" && next.progress !== wp.progress;
       if (toStarted || progressChange) {
-        const gates = l.by.get(wp.id) ?? [];
+        const gates = lk().by.get(wp.id) ?? [];
         if (gates.length) throw gateLockedError(wp.id, gates, by);
         out.stmts.push(gateGuardStmt(db, wp.id));
         out.ids.push(wp.id);
       }
       if (parentChanged) {
+        const l = lk();
         if (l.by.has(wp.id) && !l.roots.has(wp.id)) throw gateLockedError(wp.id, l.by.get(wp.id)!, by);
         out.stmts.push(gateGuardStmt(db, wp.id, true));
         out.ids.push(wp.id);
       }
     }
     if (parent && startedAfter && (parentChanged || !wp)) {
-      const gates = l.by.get(parent) ?? [];
+      const gates = lk().by.get(parent) ?? [];
       if (gates.length) throw gateLockedError(parent, gates, by);
       out.stmts.push(gateGuardStmt(db, parent));
       out.ids.push(parent);
@@ -842,8 +844,12 @@ async function mapBatchError(db: D1Database, projectId: string, e: unknown, plan
   const at = (p: Plan | undefined, err: unknown) => toOpError(err, p ? p.index : null, p?.key, p?.args);
   if (RE.version.test(msg)) {
     for (const p of plans.filter((x) => !x.create)) {
-      const row = await db.prepare(`SELECT * FROM ${p.kind === "wp" ? "workpackage" : "milestone"} WHERE id = ?`).bind(p.id).first<Obj>();
-      if (!row || row.deleted_at || row.version !== p.storedVersion) return at(p, new ConflictError("version conflict", row));
+      const row = await db
+        .prepare(`SELECT * FROM ${p.kind === "wp" ? "workpackage" : "milestone"} WHERE id = ? AND project_id = ?`)
+        .bind(p.id, projectId)
+        .first<Obj>();
+      if (!row) return at(p, new ConflictError("version conflict", null));
+      if (row.deleted_at || row.version !== p.storedVersion) return at(p, new ConflictError("version conflict", row));
     }
     return at(undefined, new ConflictError("version conflict", null));
   }
