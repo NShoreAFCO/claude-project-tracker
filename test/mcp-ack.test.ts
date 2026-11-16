@@ -227,4 +227,21 @@ describe("MCP write acknowledgements", () => {
     expect(e.error).toBe("conflict");
     expect(e.current.code).toBe("GATE_LOCKED");
   });
+
+  it("refuses an invalid return value without writing", async () => {
+    const p = await ok("create_project", { title: "Ack bad return" });
+    const r = await call("upsert_workpackage", { project_id: p.id, code: "WP3", title: "W", return: "everything" });
+    expect(r.isError).toBe(true);
+    const list = await ok("get_project", { id: p.id, view: "summary" });
+    expect(JSON.stringify(list)).not.toContain('"WP3"');
+  });
+
+  it("set_context_meta acks the release stamp the server set", async () => {
+    const p = await ok("create_project", { title: "Ack release" });
+    const d = await ok("write_context", { owner_kind: "project", owner_id: p.id, title: "N", content_md: "x", slug: "notes" });
+    await ok("set_context_meta", { doc_id: d.id, status: "draft" });
+    const r = await ok("set_context_meta", { doc_id: d.id, status: "released" });
+    expect(r.released_by).toBeTruthy();
+    expect(r.released_at).toBeTruthy();
+  });
 });

@@ -4,7 +4,7 @@ type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** Fields the server may set on its own; echoed only when the caller did not send them. */
-const SERVER_SET = ["actual_start", "actual_end", "verified_by", "verified_at"] as const;
+const SERVER_SET = ["actual_start", "actual_end", "verified_by", "verified_at", "released_by", "released_at"] as const;
 
 /** Keys that locate a row or guard a write; they are not part of a patch. */
 const LOCATORS = new Set(["id", "project_id", "wp_code", "expected_version", "return"]);
@@ -17,7 +17,7 @@ function sentKeys(args: unknown): Set<string> {
 
 /**
  * Acknowledgement of a write: `{id, code?, version, status?, progress?}`, `warnings` only when non-empty, and the
- * server-set fields (actual_start, actual_end, verified_by, verified_at) that are in the result but not in the args.
+ * server-set fields (actual_start, actual_end, verified_by, verified_at, released_by, released_at) that are in the result but not in the args.
  * A progress log with a work package acknowledges that work package plus `event_id`; one without returns `{event_id}`.
  * A list result (set_scores) becomes `{count}`.
  */

@@ -108,6 +108,8 @@ describe("log_progress at session end", () => {
     const a = await setup("Session end A");
     const b = await setup("Session end B");
     const before = await counts(a.p.id);
+    const beforeB = await counts(b.p.id);
+    const wpB = await db.prepare("SELECT version, progress, status FROM workpackage WHERE id = ?").bind(b.w.id).first();
     const e = await fail("log_progress", {
       project_id: a.p.id,
       workpackage_id: b.w.id,
@@ -117,7 +119,8 @@ describe("log_progress at session end", () => {
     });
     expect(e.error).toBe("not_found");
     expect(await counts(a.p.id)).toEqual(before);
-    expect(await counts(b.p.id)).toMatchObject({ docs: 0, tokens: 0 });
+    expect(await counts(b.p.id)).toEqual(beforeB);
+    expect(await db.prepare("SELECT version, progress, status FROM workpackage WHERE id = ?").bind(b.w.id).first()).toEqual(wpB);
   });
 
   it("refuses a viewer before any write", async () => {
