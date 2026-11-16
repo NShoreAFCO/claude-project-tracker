@@ -49,6 +49,34 @@ describe("pure helpers", () => {
     expect(cut.more).toBe(1);
     expect(cutToBytes(md, 10000)).toEqual({ text: md, more: 0 });
   });
+  const bytes = (t: string) => new TextEncoder().encode(t).length;
+  it("cuts an oversized first section at a whole line and adds a marker", () => {
+    const big = "## Big\n" + Array.from({ length: 50 }, (_, i) => `line ${i}`).join("\n") + "\n\n## Next\n\nz\n";
+    const cut = cutToBytes(big, 100);
+    expect(bytes(cut.text)).toBeLessThanOrEqual(100);
+    expect(cut.text).toMatch(/\[cut at \d+ bytes\]\n$/);
+    expect(cut.text.startsWith("## Big\nline 0\n")).toBe(true);
+    expect(cut.more).toBe(1);
+    const body = cut.text.replace(/\[cut at \d+ bytes\]\n$/, "");
+    expect(/line \d+\n$/.test(body)).toBe(true);
+  });
+  it("cuts a document without headings at a character boundary", () => {
+    const cut = cutToBytes("a".repeat(500), 100);
+    expect(bytes(cut.text)).toBeLessThanOrEqual(100);
+    expect(cut.text).toMatch(/^a+\n\[cut at \d+ bytes\]\n$/);
+  });
+  it("never splits a multi-byte character at the cut", () => {
+    for (const unit of ["\u00e4", "\u20ac", "\u{1F600}"]) {
+      for (let budget = 60; budget < 70; budget++) {
+        const cut = cutToBytes(unit.repeat(100), budget);
+        expect(bytes(cut.text)).toBeLessThanOrEqual(budget);
+        expect(cut.text).not.toContain("\uFFFD");
+        const body = cut.text.replace(/\n\[cut at \d+ bytes\]\n$/, "");
+        expect(body).toBe(unit.repeat(Array.from(body).length));
+        expect(Array.from(body).length).toBeGreaterThan(0);
+      }
+    }
+  });
 });
 
 describe("read_context parts", () => {

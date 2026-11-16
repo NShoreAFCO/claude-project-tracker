@@ -180,7 +180,9 @@ export function findSection(md: string, prefix: string): string | null {
 
 /**
  * Cuts `md` at a section boundary so that it fits `budget` bytes: whole leading blocks (a preamble counts as one) are kept.
- * `more` is the number of blocks left out. When not even the first block fits, it is cut by characters instead.
+ * `more` is the number of blocks left out. When not even the first block fits, that block is cut instead: at the last
+ * whole line within the budget (else at a character boundary, never inside a code point) and followed by a short
+ * "[cut at N bytes]" line; the result, marker included, stays within `budget`.
  */
 export function cutToBytes(md: string, budget: number): { text: string; more: number } {
   if (utf8Bytes(md) <= budget) return { text: md, more: 0 };
@@ -191,9 +193,26 @@ export function cutToBytes(md: string, budget: number): { text: string; more: nu
   let kept = 0;
   while (kept < blocks.length && used + utf8Bytes(blocks[kept]) <= budget) used += utf8Bytes(blocks[kept++]);
   if (kept > 0) return { text: blocks.slice(0, kept).join(""), more: blocks.length - kept };
-  let text = md.slice(0, Math.max(0, budget));
-  while (text && utf8Bytes(text) > budget) text = text.slice(0, -1);
-  return { text, more: blocks.length };
+  const marker = (n: number) => `[cut at ${n} bytes]\n`;
+  const room = budget - utf8Bytes(marker(Math.max(0, budget))) - 1; // 1 for a line break before the marker
+  if (room <= 0) return { text: "", more: blocks.length };
+  let end = 0;
+  let n = 0;
+  for (const ch of blocks[0]) {
+    const w = utf8Bytes(ch);
+    if (n + w > room) break;
+    n += w;
+    end += ch.length;
+  }
+  // Prefer a whole-line cut, unless it would throw away more than half of what fits (a heading line followed by one long paragraph).
+  const nl = blocks[0].lastIndexOf("\n", end - 1);
+  if (nl >= 0 && utf8Bytes(blocks[0].slice(0, nl + 1)) * 2 >= n) {
+    end = nl + 1;
+    n = utf8Bytes(blocks[0].slice(0, end));
+  }
+  const body = blocks[0].slice(0, end);
+  const sep = body === "" || body.endsWith("\n") ? "" : "\n";
+  return { text: `${body}${sep}${marker(n)}`, more: blocks.length - 1 };
 }
 
 const TAIL_NOTE = "(earlier sections omitted, read_context for the rest)";
@@ -300,8 +319,25 @@ export async function getContextBundle(
       parts.push(`${docHeader(e.doc)}\n\n${e.text ?? content.get(e.doc.id) ?? ""}\n\n`);
     }
     if (omitted.length) {
-      parts.push("## Not included (size limit)\n\n");
-      for (const d of omitted) parts.push(omitLine(d));
+      // The list is capped to what is left of the budget: as many lines as fit, then one "and N more" line.
+      const head = "## Not included (size limit)\n\n";
+      const moreLine = (n: number) => `- … and ${n} more (use list_context)\n`;
+      let room = maxBytes - utf8Bytes(parts.join("")) - utf8Bytes(tail) - utf8Bytes(head);
+      const lines: string[] = [];
+      for (let i = 0; i < omitted.length; i++) {
+        const line = omitLine(omitted[i]);
+        const rest = omitted.length - i - 1;
+        const need = utf8Bytes(line) + (rest ? utf8Bytes(moreLine(rest)) : 0);
+        if (need > room) {
+          lines.push(moreLine(omitted.length - i));
+          break;
+        }
+        lines.push(line);
+        room -= utf8Bytes(line);
+      }
+      if (lines.join("").length && utf8Bytes(lines.join("")) <= maxBytes - utf8Bytes(parts.join("")) - utf8Bytes(tail) - utf8Bytes(head)) {
+        parts.push(head, ...lines);
+      }
     }
     parts.push(tail);
     return parts.join("");

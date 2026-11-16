@@ -117,6 +117,17 @@ describe("get_briefing", () => {
     expect(t).toContain("… ");
   }, 60_000);
 
+  it("keeps the truncation note when header, Next and handover alone exceed the cap", async () => {
+    const { p } = await build("Brief note " + "T".repeat(200));
+    await json("upsert_milestone", { project_id: p.id, title: "M".repeat(1500), due_date: "2026-12-01" });
+    await json("upsert_milestone", { project_id: p.id, title: "G".repeat(1500), due_date: "2026-12-02", gate: true });
+    await json("upsert_workpackage", { project_id: p.id, title: "W".repeat(300), code: "WLONG", status: "doing" });
+    await json("append_context", { owner_kind: "project", owner_id: p.id, slug: "handover", heading: "Big", text: "h\n".repeat(2000) });
+    const t = await text({ project_id: p.id });
+    expect(t.length).toBeLessThanOrEqual(4000);
+    expect(t.endsWith("(cut to fit 4000 characters)")).toBe(true);
+  }, 60_000);
+
   it("a viewer can read the briefing", async () => {
     const { p } = await build("Brief viewer");
     const d = (env as Env).DB;

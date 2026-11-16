@@ -200,6 +200,17 @@ describe("context repository", () => {
     expect(b.markdown).toContain("## Not included (size limit)");
   });
 
+  it("bundle caps the omitted list when the omission lines alone exceed max_bytes", async () => {
+    const { p } = await setup();
+    for (let i = 0; i < 25; i++)
+      await writeContext(db, { owner_kind: "project", owner_id: p.id, title: `Doc ${i}`, content_md: "x".repeat(2000) }, A);
+    const b = await getContextBundle(db, { project_id: p.id, max_bytes: 1000 });
+    expect(b.omitted).toHaveLength(25);
+    expect(new TextEncoder().encode(b.markdown).length).toBeLessThanOrEqual(1000);
+    expect(b.bytes).toBeLessThanOrEqual(1000);
+    expect(b.markdown).toMatch(/… and \d+ more \(use list_context\)/);
+  });
+
   it("rejects oversize docs instead of truncating", async () => {
     const { p } = await setup();
     const err = await writeContext(
