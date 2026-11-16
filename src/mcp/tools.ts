@@ -57,10 +57,9 @@ function optionalText(description?: string) {
   return description ? f.describe(description) : f;
 }
 
-const DATE_FORMAT = "YYYY-MM-DD";
-
-function optionalDate(description: string = DATE_FORMAT) {
-  return dateSchema.describe(description);
+/** The pattern already says YYYY-MM-DD: a description only for what the date means. */
+function optionalDate(description?: string) {
+  return description ? dateSchema.describe(description) : dateSchema;
 }
 
 /** Person-or-text field (owner, sponsor, decision maker). */
@@ -70,7 +69,7 @@ function personRef(description = "") {
     .max(200)
     .nullable()
     .optional()
-    .describe(`${description ? `${description} ` : ""}Person id or email (list_persons), an exact name, or free text; null clears.`);
+    .describe(`${description ? `${description} ` : ""}Person id, email, exact name or free text; null clears.`);
 }
 
 /** Objectives, scope and report language of a project (spec F2). */
@@ -127,43 +126,43 @@ const WP_LOCATOR = "Identify the WP by workpackage_id, or by project_id + wp_cod
 
 /** upsert_workpackage fields without project_id: shared by the tool and the apply_changes "wp" op. */
 const wpFields = {
-  id: z.string().optional().describe("Existing work package id; omit to create."),
+  id: z.string().optional().describe("Omit to create."),
   wp_code: z.string().optional(),
   parent_id: optionalText(),
-  code: optionalText("Short code, max 12 characters: letters, digits, dot, hyphen (WP3.2, T07)."),
+  code: optionalText("Max 12 characters: letters, digits, dot, hyphen."),
   title: optionalText(),
   description_md: optionalText(),
   status: workpackageStatusSchema.optional(),
   blocked_by: optionalText("wp:<id>, ms:<id>, ext:<reason> or free text."),
-  blocked_since: optionalDate("YYYY-MM-DD; defaults to today on status blocked."),
+  blocked_since: optionalDate("Default today on status blocked."),
   waiting_reason: optionalText(),
   drop_reason: optionalText("Required for status dropped."),
   progress: z.number().min(0).max(100).optional(),
-  weight: z.number().positive().optional().describe("Effort in person-days (PD); also weights progress."),
-  effort_planned_pd: z.number().min(0).nullable().optional().describe("Person-days."),
+  weight: z.number().positive().optional().describe("Person-days (PD); also weights progress."),
+  effort_planned_pd: z.number().min(0).nullable().optional(),
   effort_actual_pd: z
     .number()
     .min(0)
     .nullable()
     .optional()
-    .describe("Person-days (log_progress effort_pd adds to it)."),
+    .describe("log_progress effort_pd adds to it."),
   start_date: optionalDate(),
   end_date: optionalDate(),
-  actual_start: optionalDate("YYYY-MM-DD; set automatically on the first start; not in the future."),
-  actual_end: optionalDate("YYYY-MM-DD; set automatically on done; not in the future, not before actual_start."),
+  actual_start: optionalDate("Set on the first start; not in the future."),
+  actual_end: optionalDate("Set on done; not in the future or before actual_start."),
   depends_on: z
     .array(z.string())
     .optional()
-    .describe("Ids of WPs of this project that must end before this one starts."),
+    .describe("WP ids that must end first."),
   sort: z.number().int().optional(),
   category: wpCategorySchema.nullable().optional().describe("null = inherit."),
   human: z.boolean().nullable().optional().describe("Off-computer work; null = default from category."),
-  deliverable: z.string().max(500).nullable().optional().describe("What the WP produces."),
-  acceptance_criteria_md: optionalText("How to tell the WP is done; fill on creation."),
+  deliverable: z.string().max(500).nullable().optional(),
+  acceptance_criteria_md: optionalText("Fill on creation."),
   verification: z
     .enum(VERIFICATIONS)
     .optional()
-    .describe("Default none. See get_guide verification."),
+    .describe("Default none."),
   verified_by: z
     .string()
     .max(200)
@@ -174,14 +173,14 @@ const wpFields = {
     .string()
     .nullable()
     .optional()
-    .describe("YYYY-MM-DD or ISO timestamp, not in the future; default now."),
+    .describe("Date or ISO timestamp, not in the future; default now."),
   owner: personRef("Empty = project owner."),
   priority_stakeholders: z
     .array(z.string())
     .max(50)
     .nullable()
     .optional()
-    .describe("Replaces the list: ids, emails or exact names of existing persons (upsert_person adds). [] clears."),
+    .describe("Replaces the list: ids, emails or exact names of existing persons; [] clears."),
   expected_version: z.number().int().optional(),
 };
 
@@ -310,7 +309,7 @@ export function registerTools(reg: Reg): void {
     {
       title: "Get guide",
       description:
-        "Rules and procedures by topic, as markdown: structure, gates, verification, closing, risks, context, batch. Topic index lists them. Read the topic before you build a structure or when an error points to a rule.",
+        "Rules and procedures by topic, as markdown (topic index lists them). Read the topic before you build a structure or when an error points to a rule.",
       inputSchema: z.object({
         topic: z.string().optional().describe(`${GUIDE_TOPICS.join(", ")}. Default index.`),
       }),
@@ -444,7 +443,7 @@ export function registerTools(reg: Reg): void {
       title: "Upsert work package",
       ack: true,
       description:
-        `Create or update a work package. Always set code (WP3.2, T07) and parent_id at the matching level (tasks under sub-WPs); dates must respect depends_on and unlocking gates unless the user expressly overrides. WPs with human=true${HUMAN_DEFAULT.length ? ` (default for ${HUMAN_DEFAULT.join(", ")})` : ""} are done off the computer: set them to done only when the user says so. Set a WP with verification other than none to done only when the user confirms they verified it. The result lists schedule issues in warnings; fix them or tell the user. A WP behind a closed gate fails with 409 GATE_LOCKED; tell the user and do not work around it. See get_guide structure, verification, gates.`,
+        `Create or update a work package. Always set code (WP3.2, T07) and parent_id at the matching level (tasks under sub-WPs); dates must respect depends_on and unlocking gates unless the user expressly overrides. WPs with human=true${HUMAN_DEFAULT.length ? ` (default for ${HUMAN_DEFAULT.join(", ")})` : ""} are done off the computer: set them to done only when the user says so. Set a WP with verification other than none to done only when the user confirms they verified it. Fix or report the schedule issues in warnings. A WP behind a closed gate fails with 409 GATE_LOCKED; tell the user and do not work around it. See get_guide structure, verification, gates.`,
       inputSchema: z.object({ project_id: z.string(), ...wpFields }),
     },
     async (args, tc) => {
@@ -532,7 +531,7 @@ export function registerTools(reg: Reg): void {
     {
       title: "Create baseline",
       description:
-        "Snapshot the start/end dates of all work packages and the due dates of all milestones under a label; get_project then reports slip_days against the latest baseline.",
+        "Snapshot the start/end dates of all WPs and the due dates of all milestones under a label; get_project then reports slip_days against the latest baseline.",
       inputSchema: z.object({
         project_id: z.string(),
         label: z.string().min(1).max(200).describe("e.g. 'Plan approved'."),
@@ -582,7 +581,7 @@ export function registerTools(reg: Reg): void {
     {
       title: "List risks",
       description:
-        "List risk log entries as slim rows (id, project_id, type, title, score, status, owner, due), highest score first, optionally filtered by project, status and type. Pass id for one risk in full.",
+        "List risks as slim rows, highest score first, optionally filtered by project, status and type. Pass id for one risk in full.",
       inputSchema: z.object({
         id: z.string().optional().describe("One risk in full."),
         project_id: optionalText(),
@@ -654,7 +653,7 @@ export function registerTools(reg: Reg): void {
       title: "Log progress",
       ack: true,
       description:
-        `Log what was done in this session; main logging tool. Progress 100 marks a WP done: log it only when the user confirms the verification of a WP with verification other than none, and never for human=true WPs on your own. A progress log on a done work package is refused (409 WP_DONE): open a new sub-work package or task for new work. note=true only records a note and is accepted on locked and done WPs. See get_guide verification. ${WP_LOCATOR}`,
+        `Log what was done in this session. Progress 100 marks a WP done: log it only when the user confirms the verification of a WP with verification other than none, and never for human=true WPs on your own. A progress log on a done work package is refused (409 WP_DONE): open a new sub-work package or task for new work. note=true records only a note, also on locked and done WPs. See get_guide verification. ${WP_LOCATOR}`,
       inputSchema: z.object({
         project_id: z.string(),
         summary: z.string().min(1),
@@ -970,7 +969,7 @@ export function registerTools(reg: Reg): void {
         owner_kind: ownerKindSchema.nullable().optional(),
         owner_id: optionalText(),
         slug: optionalText("Document slug."),
-        text: z.string().min(1).describe("Set the text to append."),
+        text: z.string().min(1),
         heading: optionalText(),
         title: optionalText("Used when creating a document."),
       }),
@@ -1017,7 +1016,7 @@ export function registerTools(reg: Reg): void {
       title: "Delete context",
       description: "Delete a context document: it moves to the trash (restore with restore_entity, kind context_doc). Ask the user first.",
       inputSchema: z.object({
-        doc_id: z.string().describe("Identify the context document."),
+        doc_id: z.string(),
         confirm: z.literal(true),
       }),
       destructive: true,
@@ -1039,11 +1038,11 @@ export function registerTools(reg: Reg): void {
       description:
         "Change a context document's title, pin, sort order or status (draft, released, obsolete) without touching its content. See get_guide context.",
       inputSchema: z.object({
-        doc_id: z.string().describe("Identify the context document."),
+        doc_id: z.string(),
         title: optionalText(),
         pinned: z.boolean().optional().describe("Pin the document."),
         sort: z.number().int().optional(),
-        status: docStatusSchema.optional().describe("Set the document status."),
+        status: docStatusSchema.optional(),
       }),
     },
     async (args, tc) => {
@@ -1062,7 +1061,7 @@ export function registerTools(reg: Reg): void {
     {
       title: "Get portfolio summary",
       description:
-        "Read-only portfolio overview: project counts per status and, for open projects, the ids with overdue milestones, gates awaiting a decision, blocked work packages, stale activity, missing target date or owner, schedule issues and open risks scored 15 or more.",
+        "Portfolio overview: project counts per status and, for open projects, the ids with overdue milestones, gates awaiting a decision, blocked work packages, stale activity, missing target date or owner, schedule issues and open risks scored 15 or more.",
       inputSchema: z.object({}),
       readOnly: true,
     },

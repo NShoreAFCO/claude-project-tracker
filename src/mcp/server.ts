@@ -11,6 +11,7 @@ import { requireAction, toolAction, type Action } from "../auth/permissions";
 import pkg from "../../package.json";
 import { compactResult, dropDuplicateDependsIds } from "./compact";
 import { ack, slimConflict } from "./ack";
+import { withTrimmedJsonSchema } from "./schema-trim";
 
 export { mcpActor };
 
@@ -80,11 +81,17 @@ function buildServer(env: Env, props: GrantProps, by: Caller): McpServer {
     server.registerTool(
       name,
       {
-        title: config.title,
+        // A title that only restates the tool name adds nothing: clients show the name.
+        title: config.title.toLowerCase().replace(/ /g, "") === name.replace(/_/g, "") ? undefined : config.title,
         description: config.description,
         // Acknowledging tools take `return: "full"` for today's row; the wrapper adds it once.
-        inputSchema: config.ack ? config.inputSchema.extend({ return: z.enum(["ack", "full"]).optional() }) : config.inputSchema,
-        annotations: { readOnlyHint: !!config.readOnly, destructiveHint: !!config.destructive },
+        // The emitted JSON Schema is trimmed; validation is the zod schema's, unchanged.
+        inputSchema: withTrimmedJsonSchema(
+          config.ack ? config.inputSchema.extend({ return: z.enum(["ack", "full"]).optional() }) : config.inputSchema,
+        ),
+        // readOnlyHint false is the protocol default, so only true is sent; destructiveHint only means something on a writing tool,
+        // where it defaults to true, so false is sent there.
+        annotations: config.readOnly ? { readOnlyHint: true } : { destructiveHint: !!config.destructive },
       },
       // The SDK infers args from the schema; the helper keeps one generic signature for all tools.
       (async (args: unknown) => {
