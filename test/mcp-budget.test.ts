@@ -9,9 +9,9 @@ import { buildBudgetProject } from "./fixtures/budget-project";
 // Each line: the measured size in characters + 5 %, rounded up to 100.
 export const BUDGETS: Record<string, number> = {
   server_instructions: 800,
-  tools_list: 35700,
-  def_upsert_workpackage: 4900,
-  def_apply_changes: 800,
+  tools_list: 29800,
+  def_upsert_workpackage: 4000,
+  def_apply_changes: 700,
   res_upsert_wp_update: 200,
   res_log_progress_wp: 200,
   res_apply_changes_20: 1400,

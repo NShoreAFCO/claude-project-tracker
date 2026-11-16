@@ -128,7 +128,7 @@ describe("MCP server", () => {
     expect(del.isError).toBeFalsy();
     const tools = (await rpc("tools/list")).result.tools;
     expect(tools.find((t: { name: string }) => t.name === "upsert_workpackage").description).toContain("human");
-    expect(tools.find((t: { name: string }) => t.name === "upsert_workpackage").inputSchema.properties.category.anyOf[0].enum).toEqual(wkeys);
+    expect(tools.find((t: { name: string }) => t.name === "upsert_workpackage").inputSchema.properties.category.enum).toEqual([...wkeys, null]);
   });
 
   it("errors come back as tool errors with a typed code", async () => {
