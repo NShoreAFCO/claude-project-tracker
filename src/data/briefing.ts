@@ -108,6 +108,20 @@ export async function getBriefing(db: D1Database, projectId: string, wpId: strin
     else nRows = Math.max(0, Math.min(nRows, MAX_ROWS) - 1);
     out = build(nRows, nIdx);
   }
-  if (cut) out += NOTE;
-  return out.length > BRIEFING_CAP ? `${out.slice(0, BRIEFING_CAP - 4)}\n...` : out;
+  if (cut) {
+    // The note always survives: shrink the handover first, then the Next block, and only then cut the rest.
+    const limit = BRIEFING_CAP - NOTE.length;
+    if (out.length > limit && handover) {
+      const over = out.length - limit;
+      const keep = handover.length - over - 2;
+      handover = keep > 0 ? `${handover.slice(0, keep).trimEnd()}
+…` : "";
+      out = build(nRows, nIdx);
+    }
+    if (out.length > limit) out = `${out.slice(0, limit - 2).trimEnd()}
+…`;
+    out += NOTE;
+  }
+  return out.length > BRIEFING_CAP ? `${out.slice(0, BRIEFING_CAP - 4)}
+...` : out;
 }
