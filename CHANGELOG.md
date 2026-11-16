@@ -15,7 +15,7 @@
 - Writes return compact acknowledgements (`id`, `code`, `version`, `status`, `progress`, `warnings` when present, and server-set dates). Pass `return: "full"` for the row. Applies to `upsert_workpackage`, `log_progress`, `upsert_milestone`, `upsert_risk`, `update_project`, `create_project`, `link_branch`, `log_token_cost`, `set_scores`, `write_context` and `set_context_meta`.
 - A 409 conflict reply on every tool carries only `version` and the patched fields in `current`.
 - The message texts of `GATE_LOCKED`, `WP_DONE` and `SCHEDULE_STRICT` changed to say what to do next. The codes are unchanged. REST returns the same text.
-- The server instructions are shorter (725 characters, about 1,900 before). They no longer ask for the `append_context` handover step.
+- The server instructions are shorter (725 characters, 1,554 before). They no longer ask for the `append_context` handover step.
 
 ### Added
 
