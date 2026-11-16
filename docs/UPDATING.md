@@ -69,13 +69,13 @@ Commits that touch both core and `instance/` must be split first. Run `npm run c
 
 ## Efficiency upgrade (0.3.4 → 0.3.5 → 0.4.0)
 
-Both versions make MCP results smaller. REST and the dashboard are unchanged. Deploy as usual, then start a new Claude session so it sees the new tool definitions.
+Both versions make MCP results smaller. REST and the dashboard keep their output shapes (only some error message texts changed, see below). Deploy as usual, then start a new Claude session so it sees the new tool definitions.
 
 **0.3.5.** MCP results omit empty fields, `on_behalf_of` is no longer in the tool schemas (still accepted), and work packages can be addressed by `project_id` + `wp_code`. Nothing to do.
 
 **0.4.0 (breaking for MCP clients).** No migration. Check these:
 
-- Clients that read the result of a write (for example the `id` or any field other than `version`, `status`, `progress` and `warnings`) must pass `return: "full"`.
+- Clients that read the result of a write (for example a field other than `id`, `code`, `version`, `status`, `progress`, `warnings` and server-set dates) must pass `return: "full"`.
 - Clients that relied on `get_project` returning everything must pass `view: "full"`. `wp=<code>` now returns the work package plus a list of child rows (see `depth`).
 - Clients that relied on `list_projects` returning every project must pass `status`. Work package counts need `counts: true`.
 - `search` returns `{hits, more?}` instead of a bare list, and `list_risks` returns slim rows (pass `id` for one full risk).
