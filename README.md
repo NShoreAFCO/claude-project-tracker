@@ -96,6 +96,20 @@ Rules worth knowing:
 
 **Quick start:** create your own copy (`gh repo create <name> --private --template <this-repo> --clone`), `npm install`, prepare Cloudflare and create an API token (INSTALL §5–6), then run `npm run setup` in your terminal. With Claude Code, just say *"Help me set up this tracker. Follow docs/ai/SETUP-PLAYBOOK.md."*
 
+## Using the tracker from Claude (v0.4)
+
+Since v0.4 the MCP tools return less by default, so a session costs fewer tokens. What to do differently:
+
+- **Start with `get_briefing`.** One call gives the project header, what is in progress or blocked, the next milestone and open gate, the last handover and the context index (about 4,000 characters at most).
+- **Read cheap, then deeper.** `get_project` returns a summary by default. Ask for `view: "outline"` (one row per work package), `wp: "<code>"` (one work package and its children) or `view: "full"` only when you need them. `get_context_bundle` is capped at 12,000 bytes, newest documents first. `read_context` can take `tail_sections`, `section`, `headings` or `max_bytes`.
+- **Writes return short acknowledgements** (id, version, status and any warnings). Pass `return: "full"` to get the whole row.
+- **Create structure in one call.** `apply_changes` takes up to 100 work package and milestone operations, refers to earlier ones with `@code`, and applies all of them or none.
+- **End a session with one call.** `log_progress` takes `handover_md`, `claude_tokens` and `copilot_prompts`, so progress, handover and token cost are written together.
+- **Ask the tracker for rules.** `get_guide(topic)` explains structure, gates, verification, closing, risks, context and batch writes, and error messages say what to do next.
+- `list_projects` shows active and on-hold projects (pass `status` for others), and `search` returns `{hits, more?}`.
+
+Upgrading an existing setup: see [`docs/UPDATING.md`](docs/UPDATING.md).
+
 ## Commands
 
 | Command | What it does |

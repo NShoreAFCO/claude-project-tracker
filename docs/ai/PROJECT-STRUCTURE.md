@@ -160,9 +160,29 @@ Fix each warning when possible.
 If the requested plan intentionally keeps the conflict, report the warning to the user.
 Do not silently ignore schedule warnings.
 
-After structural or scheduling changes, use `get_context_bundle` when current project context is needed.
+After structural or scheduling changes, use `get_briefing` or `get_context_bundle` when current project context is needed.
 Use `log_progress` for substantive progress.
-Use `append_context` to preserve relevant session information.
+At the end of a session, one `log_progress` call with `handover_md` (and `claude_tokens`) preserves the session information.
+
+## Creating structure in one call
+
+Create work packages and milestones together with `apply_changes`: one call, all or nothing, up to 100 operations.
+Each op is `{"op": "wp" | "ms", ...fields}`. Within the call, `"@x"` names an earlier op by its `ref` or its `code`, so children and dependencies need no ids.
+Order the ops so a reference always points to an earlier op.
+
+```json
+{
+  "project_id": "<project id>",
+  "ops": [
+    {"op": "wp", "code": "WP3", "title": "Prototype"},
+    {"op": "wp", "code": "WP3.1", "title": "Planning", "parent_id": "@WP3"},
+    {"op": "wp", "code": "WP3.2", "title": "Review", "parent_id": "@WP3", "depends_on": ["@WP3.1"]},
+    {"op": "ms", "ref": "g3", "title": "Prototype accepted", "due_date": "2026-12-15", "gate": true, "requires": ["@WP3.2"]}
+  ]
+}
+```
+
+The result lists one line per op (`ref`, `id`, `code`, `version`) and any warnings. If one op fails, nothing is written and the error names the op (`failed.index`).
 
 ## Project handoff
 
