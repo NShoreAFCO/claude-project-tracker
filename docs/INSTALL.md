@@ -257,7 +257,7 @@ Each person connects their own Claude account the same way.
 
 **Tell Claude how to use it.** In a claude.ai **Project**, add this to the project instructions (copy from `docs/ai/claude-ai-project-instructions.md`):
 
-> Before working on a tracked project, call tracker `get_context_bundle` for it. At the end of substantive work, call `log_progress` and `append_context` (slug `handover`) with what was done, decisions and open points.
+> Before working on a tracked project, call tracker `get_briefing` for it. At the end of substantive work, call `log_progress` once, with `handover_md` (what was done, decisions, open points) and, if known, `claude_tokens`.
 
 ### Claude Code
 
