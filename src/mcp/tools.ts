@@ -139,21 +139,21 @@ const wpFields = {
   drop_reason: optionalText("Required for status dropped."),
   progress: z.number().min(0).max(100).optional(),
   weight: z.number().positive().optional().describe("Person-days (PD); also weights progress."),
-  effort_planned_pd: z.number().min(0).nullable().optional(),
+  effort_planned_pd: z.number().min(0).nullable().optional().describe("Person-days."),
   effort_actual_pd: z
     .number()
     .min(0)
     .nullable()
     .optional()
-    .describe("log_progress effort_pd adds to it."),
+    .describe("Person-days; log_progress effort_pd adds to it."),
   start_date: optionalDate(),
   end_date: optionalDate(),
-  actual_start: optionalDate("Set on the first start; not in the future."),
-  actual_end: optionalDate("Set on done; not in the future or before actual_start."),
+  actual_start: optionalDate("Set automatically on the first start; not in the future."),
+  actual_end: optionalDate("Set automatically on done; not in the future or before actual_start."),
   depends_on: z
     .array(z.string())
     .optional()
-    .describe("WP ids that must end first."),
+    .describe("Ids of other WPs of this project that must end first."),
   sort: z.number().int().optional(),
   category: wpCategorySchema.nullable().optional().describe("null = inherit."),
   human: z.boolean().nullable().optional().describe("Off-computer work; null = default from category."),
@@ -173,7 +173,7 @@ const wpFields = {
     .string()
     .nullable()
     .optional()
-    .describe("Date or ISO timestamp, not in the future; default now."),
+    .describe("YYYY-MM-DD or ISO timestamp with offset, not in the future; default now."),
   owner: personRef("Empty = project owner."),
   priority_stakeholders: z
     .array(z.string())
