@@ -602,6 +602,8 @@ describe("gate fix round 1", () => {
     const err = await upsertWorkpackage(db, g.p.id, { id: g.wp2, status: "doing" }, EDITOR).catch((e) => e);
     expect(err).toMatchObject(conflict("GATE_LOCKED"));
     expect(err.current.override_endpoint).toBe(`POST /api/workpackages/${g.wp2}/gate-override`);
+    // a person gets no agent instructions
+    expect(err.message).not.toMatch(/record_gate_decision|log_progress/);
     for (const patch of [{ status: "done" }, { progress: 10 }])
       await expect(upsertWorkpackage(db, g.p.id, { id: g.wp2, ...patch }, EDITOR)).rejects.toMatchObject(conflict("GATE_LOCKED"));
     await expect(logProgress(db, { project_id: g.p.id, summary: "x", workpackage_id: g.wp2, progress: 10 }, EDITOR)).rejects.toMatchObject(
