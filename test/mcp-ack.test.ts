@@ -186,6 +186,10 @@ describe("MCP write acknowledgements", () => {
     const m = await ok("upsert_milestone", { project_id: p.id, title: "M", due_date: "2030-01-01" });
     expect(Object.keys(m).sort()).toEqual(["id", "version"]);
     expect((await ok("upsert_milestone", { project_id: p.id, id: m.id, title: "M2", return: "full" })).title).toBe("M2");
+    // a milestone reached on its own (all requires done) says so in the ack
+    const wd = await ok("upsert_workpackage", { project_id: p.id, title: "Done WP", status: "done", progress: 100 });
+    const mr = await ok("upsert_milestone", { project_id: p.id, title: "MR", due_date: "2030-01-01", requires: [wd.id] });
+    expect(typeof mr.reached_at).toBe("string");
 
     const r = await ok("upsert_risk", { project_id: p.id, title: "R", type: "risk", probability: 2, impact: 3 });
     expect(Object.keys(r).sort()).toEqual(["id", "status", "version"]);

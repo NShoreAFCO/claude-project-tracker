@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- `GATE_LOCKED` for a dashboard person no longer includes the agent instructions (`record_gate_decision`, `log_progress` with `note: true`); agents still get them.
+- Write acknowledgements now include `reached_at` when an `upsert_milestone` reaches the milestone on its own (all `requires` done).
+
 ## v0.4.0 — 2026-11-16 (cheaper defaults, briefing, batch writes)
 
 **Breaking for MCP clients.** No migration. Deploy, then start a new Claude session so it sees the new tool definitions. REST and the dashboard keep their output shapes. See `docs/UPDATING.md` for what to change in clients and saved prompts.
