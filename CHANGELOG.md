@@ -5,6 +5,11 @@
 ### Fixed
 - `GATE_LOCKED` for a dashboard person no longer includes the agent instructions (`record_gate_decision`, `log_progress` with `note: true`); agents still get them.
 - Write acknowledgements now include `reached_at` when an `upsert_milestone` reaches the milestone on its own (all `requires` done).
+- `get_guide` topic `context` no longer asks for `append_context` on `handover` after `log_progress`. One `log_progress` is the handover, with `handover_md` only where no session hook syncs `HANDOFF.md`, as the server instructions already say.
+- `docs/ai/claude-ai-project-instructions.md`: pass `expected_version` only where another writer may change the same WP.
+
+### Changed
+- `get_guide` topic `batch` adds a short "Fewer turns" section: independent writes go in one message as parallel calls, tracker tools are loaded in one tool search, and `expected_version` is passed only where two writers are likely.
 
 ## v0.4.0 — 2026-11-16 (cheaper defaults, briefing, batch writes)
 
