@@ -2,6 +2,7 @@ import { t, fmtDate } from "./i18n.js";
 import { api } from "./api.js";
 import { h, clear, statusChip, progressBar, personBadge, toastError } from "./dom.js";
 import { openProject } from "./project.js";
+import { sortWpRows } from "./order.js";
 
 export const KPI_KEYS = [
   "overdue_milestones",
@@ -179,7 +180,7 @@ export function renderUpcoming(main) {
     main,
     "upcoming",
     () => h("div.toolbar", {}, h("h2", {}, t("upcomingTitle")), h("p.meta", {}, t("upcomingHint"))),
-    () => api.upcomingWps({ limit: 100 }),
+    async () => sortWpRows(await api.upcomingWps({ limit: 100 }), "upcoming"),
     "upcomingEmpty",
     false,
   );
@@ -217,7 +218,7 @@ export function renderMyWps(main) {
     main,
     "mine",
     makeToolbar,
-    () => api.myWps({ sort: mineSort, assigned_only: mineAssignedOnly ? 1 : "" }),
+    async () => sortWpRows(await api.myWps({ sort: mineSort, assigned_only: mineAssignedOnly ? 1 : "" }), mineSort),
     "mineEmpty",
     true,
   );
