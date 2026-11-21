@@ -295,6 +295,8 @@ export default {
     "„Erledigt“ ist nicht möglich, solange Arbeitspakete offen sind: {list}. Erledigen, verwerfen oder verschieben Sie sie, oder nutzen Sie „Projekt abschließen“.",
   blockedSince: "seit {n} T blockiert (seit {date})",
   ageDays: "{n} T",
+  lateChip: "Überfällig · {n} T",
+  lateChipTitle: "Fällig am {date}, {n} Tage überfällig",
   chipBlocked: "Blockiert",
   chipWaiting: "Wartet ({n})",
   stalledHint: "Ein Hauptarbeitspaket ist blockiert.",
