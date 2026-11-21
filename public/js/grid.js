@@ -6,6 +6,7 @@ import { openProject } from "./project.js";
 import { projectForm } from "./forms.js";
 import { basisLabel, riskChip, staleChip } from "./progress-view.js";
 import { summaryBar } from "./portfolio.js";
+import { lateness, lateChip } from "./lateness.js";
 import { GRID_FILTER_KEY } from "./sidebar.js";
 import { PROJECT_CATEGORIES, catVar, catDot, catLabel, knownCategory } from "./categories.js";
 
@@ -128,7 +129,16 @@ function card(p, persons) {
         STRINGS.originIcon[p.origin] || "",
       ),
     ),
-    h("div.card-target", noTarget || [t("target"), ": ", h("b", fmtDate(p.target_date))]),
+    h(
+      "div.card-target",
+      noTarget || [
+        t("target"),
+        ": ",
+        h("b", fmtDate(p.target_date)),
+        // only an active project can be late; other statuses never show the chip
+        lateChip(lateness(p.target_date, p.status === "active" ? "open" : "done")),
+      ],
+    ),
     h(
       "div.underlay-wp.card-box.wp-counts",
       h("div.box-label", t("wpCountsLabel")),
@@ -147,7 +157,7 @@ function card(p, persons) {
           "div.underlay-milestone.card-box.next-ms",
           h("div.box-label", t("nextMilestone")),
           h("div.box-title", ms.title),
-          h("div.box-sub", ms.due_date ? fmtDate(ms.due_date) : t("noDate")),
+          h("div.box-sub", ms.due_date ? fmtDate(ms.due_date) : t("noDate"), lateChip(lateness(ms.due_date, "open"))),
         )
       : null,
     gateBox(p.current_gate),

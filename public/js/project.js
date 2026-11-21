@@ -1,5 +1,6 @@
 // Project popup: Overview (description, WP tree, branches, scorecard, token cost, timeline, copy buttons) and Kontext.
 import { t, fmtDate, fmtDateTime, fmtNum, fmtPct, STRINGS } from "./i18n.js";
+import { lateness, lateChip } from "./lateness.js";
 import { renderRisks } from "./risks.js";
 import { basisLabel, riskChip, staleChip, lastActivity } from "./progress-view.js";
 import { utcDateString } from "./portfolio.js";
@@ -281,7 +282,10 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       slider = h("div.slider", input, h("output", fmtPct(w.progress)));
     } else slider = progressBar(w.effective_progress);
 
-    const dates = w.start_date || w.end_date ? h("span.meta", `${fmtDate(w.start_date)} – ${fmtDate(w.end_date)}`) : null;
+    const dates =
+      w.start_date || w.end_date
+        ? h("span.meta", `${fmtDate(w.start_date)} – ${fmtDate(w.end_date)}`, " ", lateChip(lateness(w.end_date, w.status)))
+        : null;
     const lockingMilestone = w.locked ? detail.milestones.find((ms) => ms.unlocks?.includes(w.id) && ms.reached_at === null) : null;
     const name = lockingMilestone?.title || "";
     const schedMeta = scheduleMeta(w).filter((n) => !n.classList.contains("critical"));

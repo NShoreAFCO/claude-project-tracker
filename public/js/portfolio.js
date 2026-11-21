@@ -3,6 +3,7 @@ import { api } from "./api.js";
 import { h, clear, statusChip, progressBar, personBadge, toastError } from "./dom.js";
 import { openProject } from "./project.js";
 import { sortWpRows } from "./order.js";
+import { lateness, lateChip } from "./lateness.js";
 
 export const KPI_KEYS = [
   "overdue_milestones",
@@ -118,7 +119,9 @@ function wpTable(rows, showStart) {
             cells.push(h("td", {}, fmtDate(row.start_date)));
           }
 
-          cells.push(h("td", {}, fmtDate(row.end_date)));
+          const late = lateness(row.end_date, row.status, now);
+
+          cells.push(h("td", {}, fmtDate(row.end_date), lateChip(late)));
 
           if (!showStart) {
             cells.push(h("td", {}, ownerContent(row.effective_owner)));
@@ -126,9 +129,7 @@ function wpTable(rows, showStart) {
 
           cells.push(h("td", {}, progressBar(row.progress)));
 
-          const overdue = isOverdue(row.end_date, now);
-
-          return h(overdue ? "tr.overdue" : "tr", {}, cells);
+          return h(late.late ? "tr.overdue" : "tr", {}, cells);
         }),
       ),
     ),
@@ -152,7 +153,7 @@ export function utcDateString(date = new Date()) {
 
 /** Whether a work package ending on `endDate` is overdue: its end date is before today (UTC). */
 export function isOverdue(endDate, now = new Date()) {
-  return !!endDate && endDate < utcDateString(now);
+  return lateness(endDate, "open", now).late;
 }
 
 let renderSeq = 0;

@@ -1050,6 +1050,20 @@ details.inherited > summary {
 .gantt .ms-overdue {
   stroke: var(--ms-overdue);
 }
+.gantt .ms.late {
+  stroke: var(--status-late);
+  stroke-width: 2px;
+}
+.gantt .gate-mark.late .gate-flag {
+  stroke: var(--status-late);
+  stroke-width: 2px;
+}
+.card-target .chip.late,
+.box-sub .chip.late,
+td .chip.late,
+.meta .chip.late {
+  margin-left: 0.4rem;
+}
 .gantt-legend {
   display: flex;
   flex-wrap: wrap;
