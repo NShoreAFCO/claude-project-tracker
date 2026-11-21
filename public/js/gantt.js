@@ -5,6 +5,7 @@ import { h, clear, statusChip, toastError } from "./dom.js";
 import { openProject } from "./project.js";
 import { WP_CATEGORIES, catVar, catDot, catLabel } from "./categories.js";
 import { collectIssues } from "./schedule-ui.js";
+import { sortByCode } from "./order.js";
 import { issueEdgeKeys, ghostBar, ghostDiamond, issueMark, slipMark, barTooltip, barParts, placeMarks, markDate, markEdges, markArrowPath, markHalf } from "./gantt-marks.js";
 
 const NS = "http://www.w3.org/2000/svg";
@@ -116,7 +117,7 @@ export async function renderGantt(main, state) {
 
   for (const [p, detail] of detailsBy) {
     const projectRows = [];
-    const roots = detail.workpackages || [];
+    const roots = sortByCode(detail.workpackages || []);
     const projectMilestones = detail.milestones || [];
 
     const collectDescendantSpan = (root) => {
@@ -171,7 +172,7 @@ export async function renderGantt(main, state) {
           visibleByWp.set(w.id, top);
         }
 
-        for (const child of w.children || []) walkAll(child, depth + 1, top);
+        for (const child of sortByCode(w.children)) walkAll(child, depth + 1, top);
         return;
       }
 
@@ -192,7 +193,7 @@ export async function renderGantt(main, state) {
         undated.push({ type: "wp", w, p });
       }
 
-      for (const child of w.children || []) walkAll(child, depth + 1, null);
+      for (const child of sortByCode(w.children)) walkAll(child, depth + 1, null);
     };
 
     const markTop = (w, rootId) => (topOf.set(w.id, rootId), (w.children || []).forEach((c) => markTop(c, rootId)));

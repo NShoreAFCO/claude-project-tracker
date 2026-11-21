@@ -74,3 +74,20 @@ describe("pruneTree + placeMilestones", () => {
     expect(ids(r.tail)).toEqual(["n"]);
   });
 });
+
+describe("code order in the work package tree", () => {
+  it("renders rows in code order from a shuffled fixture, with milestones in the running context", async () => {
+    // @ts-expect-error untyped JS module
+    const { sortTreeByCode } = (await import("../public/js/order.js")) as any;
+    const shuffled = [
+      { id: "w10", code: "WP10" },
+      { id: "w2", code: "WP2", children: [{ id: "w2b", code: "WP2.2" }, { id: "w2a", code: "WP2.1" }] },
+      { id: "w1", code: "WP1" },
+    ];
+    const sorted = sortTreeByCode(shuffled);
+    expect(sorted.map((w: any) => w.id)).toEqual(["w1", "w2", "w10"]);
+    expect(sorted[1].children.map((w: any) => w.id)).toEqual(["w2a", "w2b"]);
+    const r = placeMilestones(sorted, [{ id: "m", requires: ["w2b", "w1"] }]);
+    expect(ids(r.after.get("w2b"))).toEqual(["m"]);
+  });
+});
