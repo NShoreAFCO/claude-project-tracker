@@ -1,5 +1,6 @@
 // Hand-rolled SVG Gantt (SPEC §9). Only work packages with dates get a bar; dates are never invented.
 import { t, fmtDate, fmtPct, INTL_LOCALE } from "./i18n.js";
+import { lateness } from "./lateness.js";
 import { api } from "./api.js";
 import { h, clear, statusChip, toastError } from "./dom.js";
 import { openProject } from "./project.js";
@@ -482,12 +483,16 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
     const state = milestoneState(m, today);
     const crit = showCritical && m.critical ? " critical" : "";
     const gateText = m.gate ? ` · ${t("ganttGate")}: ${t(`decisionState.${m.decision_state}`)}` : "";
+    // the milestone state already says "overdue"; the day count comes from the shared helper
+    const late = state === "overdue" ? lateness(m.due_date, "open") : null;
+    const lateCls = late ? " late" : "";
+    const lateText = late?.late ? ` · ${t("lateChipTitle", { date: late.date, n: late.days })}` : "";
     const tip = () =>
       s(
         "title",
         {},
         barTooltip(
-          `${mk.label} ${m.title}${mk.date ? `: ${fmtDate(mk.date)}` : ""} · ${milestoneStateLabel(state)}${gateText}`,
+          `${mk.label} ${m.title}${mk.date ? `: ${fmtDate(mk.date)}` : ""} · ${milestoneStateLabel(state)}${gateText}${lateText}`,
           m,
           titleOf,
         ),
@@ -498,7 +503,7 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
       svg.append(
         s(
           "g",
-          { class: `gate-mark decision-${m.decision_state}${crit}` },
+          { class: `gate-mark decision-${m.decision_state}${crit}${lateCls}` },
           s("path", { class: "gate-pole", d: `M${cx},${bot} V${top}` }),
           s("path", { class: "gate-flag", d: `M${cx},${top} h8 l-3,4 l3,4 h-8 z` }),
           s("text", { class: "mark-label", x: cx - 3, y: cy + 4, "text-anchor": "end" }, mk.label),
@@ -515,7 +520,7 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
         "g",
         {},
         s("polygon", {
-          class: `ms ms-${state}${crit}`,
+          class: `ms ms-${state}${crit}${lateCls}`,
           points: `${cx},${cy - half} ${cx + half},${cy} ${cx},${cy + half} ${cx - half},${cy}`,
         }),
         s("text", { class: "mark-label", x: cx + half + 3, y: cy + 4 }, mk.label),
@@ -549,7 +554,10 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
     const range = r.actualOnly
       ? `${fmtDate(w.actual_start || w.actual_end)} – ${w.actual_end ? fmtDate(w.actual_end) : t("ganttOngoing")}`
       : `${fmtDate(r.start_date)} – ${fmtDate(r.end_date)}`;
-    const title = () => s("title", {}, barTooltip(`${w.code ? `${w.code} ${w.title}` : w.title}: ${range} · ${fmtPct(pct)}`, w, titleOf));
+    const late = lateness(w.end_date, w.status);
+    const lateText = late.late ? ` · ${t("lateChipTitle", { date: late.date, n: late.days })}` : "";
+    const title = () =>
+      s("title", {}, barTooltip(`${w.code ? `${w.code} ${w.title}` : w.title}: ${range} · ${fmtPct(pct)}${lateText}`, w, titleOf));
     const colour = catVar("w", w.bar_category);
     const barY = y + 7;
     const barH = ROW - 14;
@@ -580,6 +588,12 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
     if (parts.planned) {
       const bg = rect("bar-bg", parts.planned);
       if (showCritical && w.critical) bg.classList.add("critical");
+      if (late.late) {
+        bg.classList.add("late");
+        // inline, because rect() sets the category colour inline
+        bg.style.setProperty("stroke", "var(--status-late)");
+        bg.style.setProperty("stroke-width", "2");
+      }
       svg.append(bg);
     }
     if (parts.progress && parts.progress.to > parts.progress.from) svg.append(rect("bar-fill", parts.progress));

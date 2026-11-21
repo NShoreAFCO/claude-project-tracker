@@ -1,5 +1,6 @@
 import { h, clear } from "./dom.js";
 import { t, fmtDate } from "./i18n.js";
+import { lateness, lateChip } from "./lateness.js";
 import { api } from "./api.js";
 
 const KINDS = ["my_tasks", "my_human_tasks", "my_decisions", "all_decisions", "all_human_tasks", "active_projects"];
@@ -204,7 +205,7 @@ export async function renderMyDashboard(main, state) {
         h("td", h("a", { href: `#/p/${encodeURIComponent(row.id)}` }, row.title)),
         h("td", row.title),
         h("td", t(`status.${row.status}`)),
-        h("td", fmtDate(row.target_date)),
+        h("td", fmtDate(row.target_date), lateChip(lateness(row.target_date, row.status === "active" ? "open" : "done"))),
         h("td", row.owner_initials || t("none")),
       );
     }
@@ -222,7 +223,7 @@ export async function renderMyDashboard(main, state) {
         ),
         h("td", row.project_title),
         h("td", row.reached ? t("mydGateReached") : t("mydGateOpen")),
-        h("td", fmtDate(row.due_date)),
+        h("td", fmtDate(row.due_date), lateChip(lateness(row.due_date, row.reached ? "reached" : "open"))),
         h("td", personName(row.decision_maker)),
       );
     }
@@ -239,7 +240,7 @@ export async function renderMyDashboard(main, state) {
       ),
       h("td", row.project_title),
       h("td", t(`status.${row.status}`)),
-      h("td", fmtDate(row.end_date)),
+      h("td", fmtDate(row.end_date), lateChip(lateness(row.end_date, row.status))),
       h("td", personName(row.effective_owner)),
     );
   }

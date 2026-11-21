@@ -1,5 +1,6 @@
 import { t, fmtDate } from "./i18n.js";
 import { h } from "./dom.js";
+import { lateness, lateChip } from "./lateness.js";
 import { parseIssues, issueText, milestoneView, decisionLabel, slipText } from "./schedule-ui.js";
 
 /** Builds the schedule issue list for an entity. */
@@ -72,7 +73,7 @@ export function milestoneItem(ms, { today, titleOf, requiresText, unlocksText, a
   const stateLabel = state === "done" ? t("reached") : state === "overdue" ? t("overdue") : t("msOpen");
 
   const meta = [
-    h("span", `${t("due")}: ${fmtDate(ms.due_date)}`),
+    h("span", `${t("due")}: ${fmtDate(ms.due_date)}`, " ", lateChip(lateness(ms.due_date, state === "done" ? "reached" : "open"))),
     h("span", `${t("requires")}: ${requiresText}`),
     h("span", `${t("unlocks")}: ${unlocksText}`),
   ];
