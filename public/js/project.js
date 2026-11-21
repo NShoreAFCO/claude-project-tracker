@@ -214,7 +214,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         "aria-label": t("contextBadge", { n: ctxCount(kind, ownerId) }),
         on: { click: () => setTab("context", { owner_kind: kind, owner_id: ownerId }) },
       },
-      `≡ ${ctxCount(kind, ownerId)}`,
+      t(ctxCount(kind, ownerId) === 1 ? "ctxDocsCount_one" : "ctxDocsCount", { n: ctxCount(kind, ownerId) }),
     );
 
   /** blocked_by is wp:<id>, ms:<id>, ext:<text> or free text; show titles instead of ids. */
