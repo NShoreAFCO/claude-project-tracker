@@ -5,7 +5,7 @@ import { h, clear, statusChip, progressBar, personBadge, ageDays } from "./dom.j
 import { openProject } from "./project.js";
 import { projectForm } from "./forms.js";
 import { basisLabel, riskChip, staleChip } from "./progress-view.js";
-import { summaryBar } from "./portfolio.js";
+import { summaryBar, KPI_KEYS } from "./portfolio.js";
 import { lateness, lateChip } from "./lateness.js";
 import { GRID_FILTER_KEY } from "./sidebar.js";
 import { PROJECT_CATEGORIES, catVar, catDot, catLabel, knownCategory } from "./categories.js";
@@ -84,9 +84,10 @@ let disposePop = null;
 const FOCUS = "data-focus";
 
 /** Red "Blocked" (with age), amber "Waiting (n)" and "Closure due" chips of a card (spec F3). */
-function flagChips(p) {
+function flagChips(p, blockedIds = null) {
   const chips = [];
-  if (p.stalled_blocked) {
+  // the tile counts any blocked work package; the card shows the line for the same projects
+  if (p.stalled_blocked || blockedIds?.has(p.id)) {
     const n = ageDays(p.blocked_since);
     chips.push(h("span.chip.flag-blocked.outline", t("chipBlocked"), n === null ? null : h("span.age", t("ageDays", { n }))));
   }
@@ -107,7 +108,7 @@ function gateBox(g) {
   );
 }
 
-function card(p, persons) {
+function card(p, persons, blockedIds = null) {
   const owner = p.owner_initials ? { initials: p.owner_initials, name: persons.get(p.owner_id) || p.owner_initials } : null;
   const noTarget = noTargetChip(p);
   const ms = p.next_milestone;
@@ -164,7 +165,7 @@ function card(p, persons) {
     h(
       "div.card-minor",
       h("div.status-row", personBadge(owner, { label: t("fOwner") })),
-      flagChips(p),
+      flagChips(p, blockedIds),
       p.summary ? h("p.summary", p.summary) : null,
       progressBar(p.progress),
       h("div.meta", basisLabel(p.progress_basis)),
@@ -201,7 +202,7 @@ function noTargetChip(p) {
 }
 
 /** `all` = the unfiltered project list: a category is empty only when it has no projects at all. */
-function categoryBlocks(shown, persons, filter, all = shown) {
+function categoryBlocks(shown, persons, filter, all = shown, blockedIds = null) {
   return [...PROJECT_CATEGORIES, null]
     .map((key) => {
       const projects = shown.filter((p) => knownCategory("p", p.category) === key);
@@ -214,7 +215,7 @@ function categoryBlocks(shown, persons, filter, all = shown) {
           h("header.cat-head", catDot("p", key), h("h2", label), h("span.count", String(projects.length))),
           h(
             "div.cards",
-            projects.map((p) => card(p, persons)),
+            projects.map((p) => card(p, persons, blockedIds)),
           ),
         );
       }
@@ -375,8 +376,7 @@ export function renderGrid(main, state, restore = null) {
     "select",
     { "aria-label": t("filterAttention"), on: { change: (e) => ((filter.kpi = e.target.value), renderGrid(main, state)) } },
     h("option", { value: "" }, `${t("filterAttention")}: ${t("filterAll")}`),
-    ["gates_awaiting_decision", "stale"].map((k) => h("option", { value: k }, t(`filterKpi.${k}`))),
-    ["gates_awaiting_decision", "stale"].includes(kpi) ? null : kpi ? h("option", { value: kpi }, t(`kpi.${kpi}`)) : null,
+    KPI_KEYS.map((k) => h("option", { value: k }, t(`kpi.${k}`))),
   );
   attentionSel.value = kpi;
 
@@ -396,7 +396,7 @@ export function renderGrid(main, state, restore = null) {
       h("span.spacer"),
       can("write") ? h("button.btn", { type: "button", on: { click: () => projectForm(null) } }, `+ ${t("newProject")}`) : null,
     ),
-    shown.length ? categoryBlocks(shown, persons, filter, state.projects) : h("p.empty", t("noProjects")),
+    shown.length ? categoryBlocks(shown, persons, filter, state.projects, new Set(state.summary?.blocked?.project_ids ?? [])) : h("p.empty", t("noProjects")),
   );
 
   if (restore?.key) {

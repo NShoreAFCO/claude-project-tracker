@@ -84,4 +84,18 @@ describe("decisionDialog (real helpers)", () => {
     expect(opts.submitLabel).toBeTruthy();
     expect(opts.disabled).toBeFalsy();
   });
+
+  it("shows the one reached-and-pending phrase for a reached gate without a decision", async () => {
+    mocks.formDialog.mockResolvedValue(null);
+    await decisionDialog({ project: { id: "p1" }, milestone: ms({ reached: true, decision_state: "pending" }) });
+    const intro = mocks.formDialog.mock.calls[0][0].intro as FEl;
+    expect(intro.textContent).toContain("Reached · decision pending");
+  });
+
+  it("shows no such phrase before the gate is reached", async () => {
+    mocks.formDialog.mockResolvedValue(null);
+    await decisionDialog({ project: { id: "p1" }, milestone: ms({ decision_state: "none" }) });
+    const intro = mocks.formDialog.mock.calls[0][0].intro as FEl;
+    expect(intro.textContent).not.toContain("decision pending");
+  });
 });
