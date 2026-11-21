@@ -8,6 +8,7 @@
   --ms-done: var(--status-doing);
   --ms-open: var(--color-accent);
   --ms-overdue: var(--status-hold);
+  --status-late: var(--status-blocked, var(--color-danger));
 }
 *,
 *::before,
@@ -1114,6 +1115,14 @@ details.inherited > summary {
 }
 .chip.flag-closure {
   --c: var(--status-done);
+}
+.chip.late {
+  --c: var(--status-late);
+  background: var(--color-surface);
+  border: 2px solid var(--c);
+  border-left-width: 4px;
+  color: var(--status-late);
+  font-weight: 600;
 }
 .chip .age {
   font-weight: 400;

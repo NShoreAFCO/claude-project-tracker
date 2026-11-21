@@ -294,6 +294,8 @@ export default {
   doneBlockedByOpen: "Done is not available while work packages are open: {list}. Finish, drop or move them, or use Close project.",
   blockedSince: "blocked for {n} d (since {date})",
   ageDays: "{n} d",
+  lateChip: "Overdue · {n} d",
+  lateChipTitle: "Due {date}, {n} days overdue",
   chipBlocked: "Blocked",
   chipWaiting: "Waiting ({n})",
   stalledHint: "A top-level work package is blocked.",
