@@ -79,6 +79,59 @@ export function loadGridFilter(filter, storage) {
   return filter;
 }
 let hydrated = false;
+
+/** Filter as URL query params (`attention`, `cat`, `status`, `completed`, `tags`, `owner`); defaults are omitted. */
+export function filterToQuery(filter) {
+  const p = new URLSearchParams();
+  if (KPI_KEYS.includes(filter.kpi)) p.set("attention", filter.kpi);
+  if (filter.category) p.set("cat", filter.category);
+  if (filter.status) p.set("status", filter.status);
+  if (completedMode(filter) !== "hide") p.set("completed", completedMode(filter));
+  if (checkedTags(filter).length) p.set("tags", checkedTags(filter).join(","));
+  if (filter.owner) p.set("owner", filter.owner);
+  return p;
+}
+
+/** Hash for the grid view: `#/` or `#/?…`. */
+export function gridHash(filter) {
+  const q = filterToQuery(filter).toString();
+  return q ? `#/?${q}` : "#/";
+}
+
+/**
+ * Apply URL params to `filter`. Returns false (filter untouched) when the query has no valid grid param;
+ * otherwise the URL is the whole state: every field is reset first and unknown or bad values are ignored.
+ */
+export function applyGridQuery(filter, params) {
+  const attention = params.get("attention");
+  const cat = params.get("cat");
+  const status = params.get("status");
+  const completed = params.get("completed");
+  const tags = (params.get("tags") || "").split(",").filter(Boolean);
+  const owner = params.get("owner");
+  const next = {
+    kpi: KPI_KEYS.includes(attention) ? attention : "",
+    category: cat || "",
+    status: PROJECT_STATUSES.includes(status) ? status : "",
+    completed: COMPLETED_MODES.includes(completed) ? completed : "",
+    tags,
+    owner: owner || "",
+  };
+  if (!next.kpi && !next.category && !next.status && !next.completed && !tags.length && !next.owner) return false;
+  Object.assign(filter, next);
+  if (filter.status && !statusOptions(completedMode(filter)).includes(filter.status)) filter.status = "";
+  hydrated = true; // the URL wins over the stored filter
+  return true;
+}
+
+/** Mirror the filter into the hash of the grid view (no history entry); other routes are left alone. */
+export function syncGridUrl(filter, loc = globalThis.location, hist = globalThis.history) {
+  if (!loc || !hist) return;
+  const [path] = (loc.hash || "").replace(/^#/, "").split("?");
+  if (path !== "/" && path !== "") return;
+  const next = gridHash(filter);
+  if (loc.hash !== next) hist.replaceState(null, "", next);
+}
 /** Removes the open tag popover's document listener; a rerender discards that popover, so it must run first. */
 let disposePop = null;
 const FOCUS = "data-focus";
@@ -406,4 +459,5 @@ export function renderGrid(main, state, restore = null) {
       [...main.querySelectorAll(`[${FOCUS}]`)].find((el) => el.getAttribute(FOCUS) === restore.key) ?? (restore.popOpen ? tagBtn : null);
     target?.focus();
   }
+  syncGridUrl(filter);
 }

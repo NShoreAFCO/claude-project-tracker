@@ -80,7 +80,19 @@ const smallBtn = (label, onClick, cls = "ghost") => h(`button.btn.small.${cls}`,
 const writeBtn = (label, onClick, cls) => roleGate(smallBtn(label, onClick, cls), "write");
 const writeMenu = (label, items) => roleGate(menuButton(label, items), "write");
 
+/** The URL the project dialog was opened from; closing it puts this back instead of `#/`. */
+let baseHash = "#/";
+
+/** Hash to return to for a dialog opened at `hash`; `dialogOpen` = another project dialog is already showing. */
+export function returnHashFor(hash, dialogOpen, previous = "#/") {
+  if (!hash || hash === "#") return "#/";
+  if (hash.startsWith("#/p/")) return dialogOpen ? previous : "#/";
+  return hash;
+}
+
 export async function openProject(id, { tab = "overview", owner = null, openDoc = null } = {}) {
+  baseHash = returnHashFor(location.hash, !!document.querySelector("dialog[open]"), baseHash);
+  const back = baseHash;
   let detail;
   let current = { tab, owner };
   const fold = { open: new Set(), issuesOnly: false, blocks: { branches: false, tokenCost: false, timeline: true } };
@@ -92,7 +104,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       window.removeEventListener("tracker:changed", onChanged);
       // only reset the URL if it still points at this project (close events fire asynchronously)
       if (location.hash.startsWith(`#/p/${encodeURIComponent(id)}`) && !document.querySelector("dialog[open]"))
-        history.replaceState(null, "", "#/");
+        history.replaceState(null, "", back);
     },
   });
   history.replaceState(null, "", `#/p/${encodeURIComponent(id)}${tab === "context" ? "/kontext" : tab === "risks" ? "/risks" : ""}`);

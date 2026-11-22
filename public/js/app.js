@@ -5,7 +5,7 @@ import { loadMe, POLICY } from "./access.js";
 import { renderUserBar } from "./userbar.js";
 import { api } from "./api.js";
 import { h, clear, toastError } from "./dom.js";
-import { renderGrid } from "./grid.js";
+import { renderGrid, applyGridQuery } from "./grid.js";
 import { renderGantt } from "./gantt.js";
 import { renderMyDashboard } from "./mydash.js";
 import { renderUpcoming, renderMyWps, loadSummary } from "./portfolio.js";
@@ -169,7 +169,10 @@ async function renderView() {
   else if (view === "gantt") await renderGantt(main, state);
   else if (view === "inbox") await renderInbox(main, state);
   else if (view === "search") await renderSearchResults(params.get("q") || "");
-  else renderGrid(main, state);
+  else {
+    applyGridQuery(state.filter, params);
+    renderGrid(main, state);
+  }
 }
 
 async function route() {
