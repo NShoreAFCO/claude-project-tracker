@@ -483,7 +483,7 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
     const gateText = m.gate ? ` · ${t("ganttGate")}: ${t(`decisionState.${m.decision_state}`)}` : "";
     // the milestone state already says "overdue"; the day count comes from the shared helper
     const late = state === "overdue" ? lateness(m.due_date, "open") : null;
-    const lateCls = late ? " late" : "";
+    const lateCls = late?.late ? " late" : "";
     const lateText = late?.late ? ` · ${t("lateChipTitle", { date: late.date, n: late.days })}` : "";
     const tip = () =>
       s(
@@ -589,7 +589,7 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
       if (late.late) {
         bg.classList.add("late");
         // inline, because rect() sets the category colour inline
-        bg.style.setProperty("stroke", "var(--status-late)");
+        bg.style.setProperty("stroke", "var(--status-late, var(--status-blocked, var(--color-danger)))");
         bg.style.setProperty("stroke-width", "2");
       }
       svg.append(bg);
@@ -653,6 +653,7 @@ function legend(allMarks = []) {
     h("span", h("span.legend-actual"), t("ganttLegendActual")),
     h("span", h("span.legend-progress"), t("ganttLegendProgress")),
     h("span", h("span.legend-overdue"), t("ganttLegendOverdue")),
+    h("span", h("span.legend-late"), t("ganttLegendLate")),
     h("span", h("span.legend-ghost"), t("ganttBaseline")),
     h("span", h("span.legend-critical"), t("ganttCritical")),
     h("span", h("span.legend-issue", { "aria-hidden": "true" }, "⚠"), t("ganttIssues")),

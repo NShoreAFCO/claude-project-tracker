@@ -8,7 +8,6 @@
   --ms-done: var(--status-doing);
   --ms-open: var(--color-accent);
   --ms-overdue: var(--status-hold);
-  --status-late: var(--status-blocked, var(--color-danger));
 }
 *,
 *::before,
@@ -1051,11 +1050,11 @@ details.inherited > summary {
   stroke: var(--ms-overdue);
 }
 .gantt .ms.late {
-  stroke: var(--status-late);
+  stroke: var(--status-late, var(--status-blocked, var(--color-danger)));
   stroke-width: 2px;
 }
 .gantt .gate-mark.late .gate-flag {
-  stroke: var(--status-late);
+  stroke: var(--status-late, var(--status-blocked, var(--color-danger)));
   stroke-width: 2px;
 }
 .card-target .chip.late,
@@ -1131,11 +1130,11 @@ td .chip.late,
   --c: var(--status-done);
 }
 .chip.late {
-  --c: var(--status-late);
+  --c: var(--status-late, var(--status-blocked, var(--color-danger)));
   background: var(--color-surface);
   border: 2px solid var(--c);
   border-left-width: 4px;
-  color: var(--status-late);
+  color: var(--status-late, var(--status-blocked, var(--color-danger)));
   font-weight: 600;
 }
 .chip .age {
@@ -1898,6 +1897,18 @@ details.cat-empty[open] > summary.cat-head::before {
 }
 .legend-overdue {
   border: 2px dashed var(--color-primary);
+}
+.legend-late {
+  display: inline-block;
+  width: 1.4rem;
+  height: 0.7rem;
+  margin: 0 0.3rem;
+  border: 2px solid var(--status-late, var(--status-blocked, var(--color-danger)));
+  border-radius: 3px;
+  vertical-align: middle;
+}
+.gantt-legend .ms-diamond.overdue {
+  border-color: var(--status-late, var(--status-blocked, var(--color-danger)));
 }
 /* /qol:t10 */
 /* qol:t07 */

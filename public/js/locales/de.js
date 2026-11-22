@@ -645,6 +645,7 @@ export default {
   ganttLegendActual: "Ist",
   ganttLegendProgress: "Fortschritt",
   ganttLegendOverdue: "Überfällig",
+  ganttLegendLate: "Verspätet (Termin überschritten)",
   ganttOngoing: "laufend",
   // /qol:t10
   // qol:t07
