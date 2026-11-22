@@ -118,5 +118,9 @@ describe("project dialog return URL", () => {
     expect(returnHashFor("#/p/a", false)).toBe("#/");
     expect(returnHashFor("#/p/b", true, "#/?cat=x")).toBe("#/?cat=x");
     expect(returnHashFor("", false)).toBe("#/");
+    // a link that changed the hash to the project first: fall back to the last grid hash
+    expect(returnHashFor("#/p/a", false, "#/", "#/?cat=research&status=active")).toBe("#/?cat=research&status=active");
+    expect(returnHashFor("#/p/b", true, "#/?cat=x", "#/?other=1")).toBe("#/?cat=x");
+    expect(returnHashFor("#/p/a", false, "#/", "")).toBe("#/");
   });
 });
