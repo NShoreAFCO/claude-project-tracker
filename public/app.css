@@ -1567,7 +1567,7 @@ tr.group-head th {
   background: var(--color-tint);
   color: var(--color-text-strong);
 }
-tr.overdue td:nth-child(5) {
+tr.overdue td.end-date {
   white-space: nowrap;
   min-width: max-content;
 }
