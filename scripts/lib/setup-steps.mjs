@@ -93,7 +93,10 @@ export async function runSetup(o) {
         ctx.cfg.upstream = false;
         ctx.cfg.checks = { ...(ctx.cfg.checks ?? {}), denylist: false };
         const c = ctx.cfg;
-        c.app.name = await io.ask("Name shown in the dashboard header:", c.app.name);
+        const nameIsObj = c.app.name && typeof c.app.name === "object";
+        const nameDefault = nameIsObj ? (c.app.name.en ?? Object.values(c.app.name)[0] ?? "") : c.app.name;
+        const nameAnswer = await io.ask("Name shown in the dashboard header:", nameDefault);
+        if (!nameIsObj || nameAnswer !== nameDefault) c.app.name = nameAnswer;
         const locale = (await io.ask("Dashboard language (en or de):", c.app.locale)).toLowerCase();
         if (!["en", "de"].includes(locale)) throw new Error(`Language "${locale}" is not available. Use en or de.`);
         c.app.locale = locale;
