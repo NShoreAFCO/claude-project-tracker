@@ -84,9 +84,9 @@ const writeMenu = (label, items) => roleGate(menuButton(label, items), "write");
 let baseHash = "#/";
 
 /** Hash to return to for a dialog opened at `hash`; `dialogOpen` = another project dialog is already showing. */
-export function returnHashFor(hash, dialogOpen, previous = "#/") {
+export function returnHashFor(hash, dialogOpen, previous = "#/", lastBase = "#/") {
   if (!hash || hash === "#") return "#/";
-  if (hash.startsWith("#/p/")) return dialogOpen ? previous : "#/";
+  if (hash.startsWith("#/p/")) return dialogOpen ? previous : lastBase || "#/";
   return hash;
 }
 
@@ -100,8 +100,8 @@ export function projectHash(id, tab) {
   return `#/p/${encodeURIComponent(id)}${tab === "context" ? "/context" : tab === "risks" ? "/risks" : ""}`;
 }
 
-export async function openProject(id, { tab = "overview", owner = null, openDoc = null } = {}) {
-  baseHash = returnHashFor(location.hash, !!document.querySelector("dialog[open]"), baseHash);
+export async function openProject(id, { tab = "overview", owner = null, openDoc = null, lastBase = "#/" } = {}) {
+  baseHash = returnHashFor(location.hash, !!document.querySelector("dialog[open]"), baseHash, lastBase);
   const back = baseHash;
   let detail;
   let current = { tab, owner };
@@ -448,7 +448,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       "div.meta",
       h("span", `${t("originLabel")}: `, h("b", `${STRINGS.originIcon[p.origin] || ""} ${t(`origin.${p.origin}`)}`)),
       h("span", `${t("start")}: `, h("b", fmtDate(p.start_date))),
-      h("span", `${t("target")}: `, h("b", fmtDate(p.target_date))),
+      h("span", `${t("target")}: `, h("b", fmtDate(p.target_date)), lateChip(lateness(p.target_date, p.status === "active" ? "open" : "done"))),
       internal && p.repo_url ? h("span", `${t("repo")}: `, safeLink(p.repo_url)) : null,
       (p.tags || []).length
         ? h(

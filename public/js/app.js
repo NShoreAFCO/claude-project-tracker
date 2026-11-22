@@ -187,7 +187,7 @@ async function route() {
         renderGrid(main, state);
       }
       document.querySelectorAll("dialog[open]").forEach((d) => d.close());
-      openProject(parts[1], { tab: tabFromSegment(parts[2]) });
+      openProject(parts[1], { tab: tabFromSegment(parts[2]), lastBase: lastBaseHash });
       return;
     }
     // navigating to a base view closes any open popup (project, forms, dialogs)
@@ -198,7 +198,17 @@ async function route() {
   }
 }
 
-window.addEventListener("hashchange", route);
+/** Last hash that was not a project dialog; a link that jumps straight to `#/p/...` closes back to it. */
+let lastBaseHash = "#/";
+window.addEventListener("hashchange", (e) => {
+  try {
+    const old = new URL(e.oldURL).hash;
+    if (old && old !== "#" && !old.startsWith("#/p/")) lastBaseHash = old;
+  } catch {
+    /* keep the previous value */
+  }
+  route();
+});
 // A language saved in the profile form changes the shell too.
 window.addEventListener("tracker:locale", () => onLocaleChange());
 // Any successful write anywhere (forms, context panel, inbox) → reload cards and the current view.
