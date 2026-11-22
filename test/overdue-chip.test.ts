@@ -10,7 +10,9 @@ vi.mock("../public/js/api.js", () => ({ api: { upcomingWps: mocks.upcomingWps, p
 // @ts-expect-error plain browser module without types
 import { renderGrid } from "../public/js/grid.js";
 // @ts-expect-error plain browser module without types
-import { renderUpcoming, isOverdue } from "../public/js/portfolio.js";
+import { renderUpcoming } from "../public/js/portfolio.js";
+// @ts-expect-error plain browser module without types
+import { lateness } from "../public/js/lateness.js";
 // @ts-expect-error plain browser module without types
 import { milestoneItem } from "../public/js/schedule-view.js";
 // @ts-expect-error plain browser module without types
@@ -100,10 +102,10 @@ describe("overdue chip", () => {
     expect(chipText(byTitle("WP future"))).toBeNull();
   });
 
-  it("isOverdue stays a thin wrapper over the shared rule", () => {
-    expect(isOverdue("2026-05-01", new Date(NOW))).toBe(true);
-    expect(isOverdue("2026-05-08", new Date(NOW))).toBe(false);
-    expect(isOverdue(null, new Date(NOW))).toBe(false);
+  it("the shared rule: before today is late, today and no date are not", () => {
+    expect(lateness("2026-05-01", "open", new Date(NOW)).late).toBe(true);
+    expect(lateness("2026-05-08", "open", new Date(NOW)).late).toBe(false);
+    expect(lateness(null, "open", new Date(NOW)).late).toBe(false);
   });
 
   it("project dialog: an unreached milestone past its date has the chip, a reached one never", () => {

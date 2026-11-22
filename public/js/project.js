@@ -9,7 +9,7 @@ import { h, clear, openModal, statusChip, progressBar, copyText, toast, toastErr
 import { closureDialog } from "./closure.js";
 import { can, gate as roleGate } from "./access.js";
 import { renderMarkdown } from "./markdown.js";
-import { sortByCode, sortTreeByCode } from "./order.js";
+import { sortTreeByCode } from "./order.js";
 import { catChip } from "./categories.js";
 import {
   projectForm,
@@ -88,6 +88,15 @@ export function returnHashFor(hash, dialogOpen, previous = "#/", lastBase = "#/"
   if (!hash || hash === "#") return "#/";
   if (hash.startsWith("#/p/")) return dialogOpen ? previous : lastBase || "#/";
   return hash;
+}
+
+/**
+ * What a `#/p/<id>` route puts under the dialog and where closing it goes back to.
+ * Something already on screen stays (closing returns to the view it came from, `lastBase`);
+ * an empty page (deep link, reload) gets the plain grid and closes to `#/`.
+ */
+export function dialogUnderlay(hasContent, lastBase = "#/") {
+  return hasContent ? { renderGrid: false, closeTo: lastBase || "#/" } : { renderGrid: true, closeTo: "#/" };
 }
 
 /** Tab named by the last route segment; `kontext` is the old name of `context`. */
@@ -277,7 +286,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
 
   /** Rows of one tree level: gate rows before, milestone rows after their WP (running context). */
   function levelRows(list, shown, plan, rowOf) {
-    return sortByCode(list)
+    return list
       .filter((c) => !shown || shown.has(c.id))
       .flatMap((c) => [
         ...(plan.before.get(c.id) ?? []).map(rowOf),
@@ -565,7 +574,8 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         ],
       });
 
-    const shownTree = pruneTree(sortTreeByCode(d.workpackages), shownWps);
+    const sortedTree = sortTreeByCode(d.workpackages);
+    const shownTree = pruneTree(sortedTree, shownWps);
     const plan = placeMilestones(shownTree, d.milestones, (w) => fold.open.has(w.id) || (!!shownWps && fold.issuesOnly));
 
     const workpackageActions = h(
@@ -645,7 +655,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         t("workpackages"),
         workpackageActions,
         d.workpackages.length || d.milestones.length
-          ? h("ul.tree", [...levelRows(sortByCode(d.workpackages), shownWps, plan, rowOf), ...plan.tail.map(rowOf)])
+          ? h("ul.tree", [...levelRows(sortedTree, shownWps, plan, rowOf), ...plan.tail.map(rowOf)])
           : h("p.empty", t("noWorkpackages")),
       ),
       cblock(

@@ -205,11 +205,6 @@ export function utcDateString(date = new Date()) {
   return date.toISOString().slice(0, 10);
 }
 
-/** Whether a work package ending on `endDate` is overdue: its end date is before today (UTC). */
-export function isOverdue(endDate, now = new Date()) {
-  return lateness(endDate, "open", now).late;
-}
-
 let renderSeq = 0;
 
 /** Fetch rows for `view` and swap them in below its toolbar; a response that arrives after the route changed is dropped. */
