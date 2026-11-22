@@ -190,6 +190,7 @@ export default {
   fContextFile: "Handover file",
   fSessionId: "Last Claude Code session",
   fStart: "Start date",
+  dateHint: "Format: YYYY-MM-DD",
   fTarget: "Target date",
   fEnd: "End date",
   fProgressMode: "Progress",

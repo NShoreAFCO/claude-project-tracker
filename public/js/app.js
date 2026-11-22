@@ -1,4 +1,4 @@
-// Entry point: hash router (#/, #/gantt, #/inbox, #/search?q=…, #/p/<id>[/kontext]), nav and search.
+// Entry point: hash router (#/, #/gantt, #/inbox, #/search?q=…, #/p/<id>[/context]), nav and search.
 import config from "../instance/config.js";
 import { t, setLocale } from "./i18n.js";
 import { loadMe, POLICY } from "./access.js";
@@ -10,7 +10,7 @@ import { renderGantt } from "./gantt.js";
 import { renderMyDashboard } from "./mydash.js";
 import { renderUpcoming, renderMyWps, loadSummary } from "./portfolio.js";
 import { renderInbox } from "./inbox.js";
-import { openProject } from "./project.js";
+import { openProject, tabFromSegment } from "./project.js";
 import { renderPeople } from "./people.js";
 import { renderTrash } from "./trash.js";
 import { sidebarModel, renderSidebar, createDrawer, goHome } from "./sidebar.js";
@@ -187,7 +187,7 @@ async function route() {
         renderGrid(main, state);
       }
       document.querySelectorAll("dialog[open]").forEach((d) => d.close());
-      openProject(parts[1], { tab: parts[2] === "kontext" ? "context" : parts[2] === "risks" ? "risks" : "overview" });
+      openProject(parts[1], { tab: tabFromSegment(parts[2]) });
       return;
     }
     // navigating to a base view closes any open popup (project, forms, dialogs)

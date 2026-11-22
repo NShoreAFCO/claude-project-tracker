@@ -25,7 +25,10 @@ export function buildInstance(root) {
 
   mkdirSync(join(root, "src", "generated"), { recursive: true });
   const categories = enabledCategories(config);
-  const serverPart = { app: config.app, categories, policy: resolvePolicy(config), strings: overrides };
+  // server pages (sign-in consent) take one text: the English name, else the first
+  const n = config.app.name;
+  const serverName = typeof n === "string" ? n : n.en || Object.values(n)[0];
+  const serverPart = { app: { ...config.app, name: serverName }, categories, policy: resolvePolicy(config), strings: overrides };
   writeFileSync(
     join(root, "src", "generated", "instance.ts"),
     `${header}export const INSTANCE = ${JSON.stringify(serverPart, null, 2)} as const;\n`,

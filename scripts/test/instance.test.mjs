@@ -211,3 +211,12 @@ test("validateConfig checks the other policy fields", () => {
   ])
     assert.ok(problems.includes(f), `${f} missing in:\n${problems}`);
 });
+
+test("app.name accepts a per-language object and passes it to the dashboard unchanged", () => {
+  const c = clone(example);
+  c.app.name = { en: "Tracker", de: "Verfolger" };
+  assert.deepEqual(validateConfig(c), []);
+  assert.deepEqual(publicConfig(c).app.name, { en: "Tracker", de: "Verfolger" });
+  c.app.name = { en: "" };
+  assert.ok(validateConfig(c).some((p) => p.includes("app.name")));
+});

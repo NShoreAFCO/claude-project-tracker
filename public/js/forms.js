@@ -1,5 +1,5 @@
 // Forms for every entity (SPEC §9). Each successful write dispatches "tracker:changed" so open views reload.
-import { t } from "./i18n.js";
+import { t, dateFieldHint } from "./i18n.js";
 import { api } from "./api.js";
 import { h, formDialog, saveWithConflict, toast, confirmDialog, toastError, deleteText } from "./dom.js";
 import { PROJECT_CATEGORIES, WP_CATEGORIES, catLabel } from "./categories.js";
@@ -197,8 +197,8 @@ export async function projectForm(existing, { workpackages = [] } = {}) {
       { name: "local_path", label: t("fLocalPath"), value: p.local_path },
       { name: "context_file", label: t("fContextFile"), value: p.context_file },
       { name: "session_id", label: t("fSessionId"), value: p.session_id },
-      { name: "start_date", label: t("fStart"), type: "date", value: p.start_date },
-      { name: "target_date", label: t("fTarget"), type: "date", value: p.target_date },
+      { name: "start_date", label: t("fStart"), type: "date", hint: dateFieldHint(), value: p.start_date },
+      { name: "target_date", label: t("fTarget"), type: "date", hint: dateFieldHint(), value: p.target_date },
       {
         name: "progress_mode",
         label: t("fProgressMode"),
@@ -352,8 +352,8 @@ export async function wpForm(projectId, existing, tree, parentId = null, milesto
       { name: "weight", label: t("fWeight"), type: "number", min: 0, step: 0.5, value: w.weight ?? 1 },
       { name: "effort_planned_pd", label: t("fEffortPlanned"), type: "number", min: 0, step: 0.5, value: w.effort_planned_pd },
       { name: "effort_actual_pd", label: t("fEffortActual"), type: "number", min: 0, step: 0.5, value: w.effort_actual_pd },
-      { name: "start_date", label: t("fStart"), type: "date", value: w.start_date },
-      { name: "end_date", label: t("fEnd"), type: "date", value: w.end_date },
+      { name: "start_date", label: t("fStart"), type: "date", hint: dateFieldHint(), value: w.start_date },
+      { name: "end_date", label: t("fEnd"), type: "date", hint: dateFieldHint(), value: w.end_date },
       { name: "sort", label: t("fSort"), type: "number", step: 1, value: w.sort ?? 0 },
       { name: "depends_on", label: t("fDependsOn"), type: "checklist", options: wpOptions(tree, existing?.id), value: deps },
       { name: "description_md", label: t("fDescription"), type: "textarea", value: w.description_md },
@@ -414,7 +414,7 @@ export function milestoneForm(projectId, existing, tree) {
     narrow: false,
     fields: [
       { name: "title", label: t("fTitle"), required: true, value: m.title },
-      { name: "due_date", label: t("due"), type: "date", value: m.due_date },
+      { name: "due_date", label: t("due"), type: "date", hint: dateFieldHint(), value: m.due_date },
       { name: "workpackage_id", label: t("fOwnerWp"), type: "select", options: [["", t("none")], ...mains], value: m.workpackage_id ?? "" },
       { name: "sort", label: t("fSort"), type: "number", step: 1, value: m.sort ?? 0 },
       { name: "gate", label: t("fGate"), type: "checkbox", value: !!m.gate },
