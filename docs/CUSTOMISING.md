@@ -20,7 +20,7 @@ After any change: `npm run check`, then `npm run deploy` (it rebuilds the genera
 
 | Field | Meaning |
 |---|---|
-| `app.name` | shown in the header, the browser tab and the sign-in consent page |
+| `app.name` | shown in the header, the browser tab and the sign-in consent page. Either a text, or one text per language: `{ "en": "Project Tracker", "de": "Projekt-Tracker" }`. The dashboard picks the language in use, then `en`, then the first entry; the sign-in consent page always uses the `en` entry (or the first). |
 | `app.locale` | `en` or `de` |
 | `app.logo`, `app.favicon` | paths inside `instance/` |
 | `categories.project`, `categories.workpackage` | project and work types (README: "Choosing your project and work-package types") |

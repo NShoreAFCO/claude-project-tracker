@@ -40,7 +40,10 @@ export function validateConfig(c) {
   if (!isObj(c)) return ["config must be a JSON object"];
   if (!isObj(c.app)) p.push("app is missing");
   else {
-    if (typeof c.app.name !== "string" || !c.app.name.trim()) p.push("app.name must be a non-empty text");
+    const n = c.app.name;
+    const text = (v) => typeof v === "string" && v.trim();
+    const nameOk = text(n) || (isObj(n) && Object.keys(n).length > 0 && Object.values(n).every(text));
+    if (!nameOk) p.push("app.name must be a non-empty text, or an object of non-empty texts per language");
     if (!LOCALES.includes(c.app.locale)) p.push(`app.locale must be one of ${LOCALES.join(", ")}`);
     for (const f of ["logo", "favicon"])
       if (typeof c.app[f] !== "string" || !c.app[f]) p.push(`app.${f} must be a file path inside the instance folder`);

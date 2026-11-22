@@ -190,6 +190,7 @@ export default {
   fContextFile: "Übergabedatei",
   fSessionId: "Letzte Claude-Code-Sitzung",
   fStart: "Startdatum",
+  dateHint: "Format: JJJJ-MM-TT",
   fTarget: "Zieldatum",
   fEnd: "Enddatum",
   fProgressMode: "Fortschritt",

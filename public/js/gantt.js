@@ -1,5 +1,5 @@
 // Hand-rolled SVG Gantt (SPEC §9). Only work packages with dates get a bar; dates are never invented.
-import { t, fmtDate, fmtPct, INTL_LOCALE } from "./i18n.js";
+import { t, fmtDate, fmtPct, fmtMonth, fmtDayMonth } from "./i18n.js";
 import { lateness } from "./lateness.js";
 import { api } from "./api.js";
 import { h, clear, statusChip, toastError } from "./dom.js";
@@ -21,7 +21,6 @@ const toDay = (ymd) => {
   const [y, m, d] = ymd.slice(0, 10).split("-").map(Number);
   return Date.UTC(y, m - 1, d) / DAY;
 };
-const monthFmt = () => new Intl.DateTimeFormat(INTL_LOCALE, { month: "short", year: "2-digit", timeZone: "UTC" });
 
 let selected = "";
 let level = "all";
@@ -357,12 +356,11 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
 
   // week grid (Mondays) for short ranges, month grid otherwise
   if (span <= 120) {
-    const dm = new Intl.DateTimeFormat(INTL_LOCALE, { day: "2-digit", month: "2-digit", timeZone: "UTC" });
     // 1970-01-01 was a Thursday → Monday = day % 7 === 4
     for (let day = min + ((4 - (min % 7) + 7) % 7); day <= max; day += 7) {
       svg.append(
         s("line", { class: "grid-line", x1: x(day), x2: x(day), y1: TOP - 6, y2: height }),
-        s("text", { x: x(day) + 3, y: 13 }, dm.format(new Date(day * DAY))),
+        s("text", { x: x(day) + 3, y: 13 }, fmtDayMonth(new Date(day * DAY))),
       );
     }
   }
@@ -377,7 +375,7 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
     if (day < min || span <= 120) continue;
     svg.append(
       s("line", { class: "grid-line", x1: x(day), x2: x(day), y1: TOP - 6, y2: height }),
-      s("text", { x: x(day) + 4, y: 13 }, monthFmt().format(d)),
+      s("text", { x: x(day) + 4, y: 13 }, fmtMonth(d)),
     );
   }
 

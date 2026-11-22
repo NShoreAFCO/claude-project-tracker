@@ -1,4 +1,4 @@
-// Project popup: Overview (description, WP tree, branches, scorecard, token cost, timeline, copy buttons) and Kontext.
+// Project popup: Overview (description, WP tree, branches, scorecard, token cost, timeline, copy buttons) and Context.
 import { t, fmtDate, fmtDateTime, fmtNum, fmtPct, STRINGS } from "./i18n.js";
 import { lateness, lateChip } from "./lateness.js";
 import { renderRisks } from "./risks.js";
@@ -90,6 +90,16 @@ export function returnHashFor(hash, dialogOpen, previous = "#/") {
   return hash;
 }
 
+/** Tab named by the last route segment; `kontext` is the old name of `context`. */
+export function tabFromSegment(seg) {
+  return seg === "context" || seg === "kontext" ? "context" : seg === "risks" ? "risks" : "overview";
+}
+
+/** Route hash of a project tab. */
+export function projectHash(id, tab) {
+  return `#/p/${encodeURIComponent(id)}${tab === "context" ? "/context" : tab === "risks" ? "/risks" : ""}`;
+}
+
 export async function openProject(id, { tab = "overview", owner = null, openDoc = null } = {}) {
   baseHash = returnHashFor(location.hash, !!document.querySelector("dialog[open]"), baseHash);
   const back = baseHash;
@@ -107,7 +117,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         history.replaceState(null, "", back);
     },
   });
-  history.replaceState(null, "", `#/p/${encodeURIComponent(id)}${tab === "context" ? "/kontext" : tab === "risks" ? "/risks" : ""}`);
+  history.replaceState(null, "", projectHash(id, tab));
 
   const cblock = (key, title, actions, ...content) => {
     const open = fold.blocks[key];
@@ -160,7 +170,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
 
   function setTab(name, owner) {
     current = { tab: name, owner: owner ?? (name === "context" ? current.owner : null) };
-    history.replaceState(null, "", `#/p/${encodeURIComponent(id)}${name === "context" ? "/kontext" : name === "risks" ? "/risks" : ""}`);
+    history.replaceState(null, "", projectHash(id, name));
     render();
   }
 
