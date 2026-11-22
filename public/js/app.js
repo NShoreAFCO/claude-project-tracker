@@ -10,7 +10,7 @@ import { renderGantt } from "./gantt.js";
 import { renderMyDashboard } from "./mydash.js";
 import { renderUpcoming, renderMyWps, loadSummary } from "./portfolio.js";
 import { renderInbox } from "./inbox.js";
-import { openProject, tabFromSegment } from "./project.js";
+import { openProject, tabFromSegment, dialogUnderlay } from "./project.js";
 import { renderPeople } from "./people.js";
 import { renderTrash } from "./trash.js";
 import { sidebarModel, renderSidebar, createDrawer, goHome } from "./sidebar.js";
@@ -180,14 +180,15 @@ async function route() {
   try {
     if (!state.projects.length) await loadProjects();
     if (parts[0] === "p" && parts[1]) {
-      // deep link to a project: show the grid underneath, then the modal
-      if (state.view !== "grid" || !main.childElementCount) {
+      // link to a project: keep the view it came from under the modal; an empty page gets the grid
+      const under = dialogUnderlay(!!main.childElementCount, lastBaseHash);
+      if (under.renderGrid) {
         state.view = "grid";
         renderNav();
         renderGrid(main, state);
       }
       document.querySelectorAll("dialog[open]").forEach((d) => d.close());
-      openProject(parts[1], { tab: tabFromSegment(parts[2]), lastBase: lastBaseHash });
+      openProject(parts[1], { tab: tabFromSegment(parts[2]), lastBase: under.closeTo });
       return;
     }
     // navigating to a base view closes any open popup (project, forms, dialogs)

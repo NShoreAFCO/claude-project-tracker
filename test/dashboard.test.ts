@@ -174,7 +174,10 @@ describe("delete confirm names children", () => {
   });
   it("portfolio overdue uses the UTC date, like ageDays and the server", async () => {
     // @ts-expect-error untyped JS module
-    const { isOverdue, utcDateString } = await import("../public/js/portfolio.js");
+    const { utcDateString } = await import("../public/js/portfolio.js");
+    // @ts-expect-error untyped JS module
+    const { lateness } = await import("../public/js/lateness.js");
+    const isOverdue = (d: string | null, now: Date) => lateness(d, "open", now).late;
     // 23:30 UTC on the 25th is already the 26th for a user east of UTC (local getters say 26)
     const at = new Date("2026-10-25T23:30:00Z");
     const eastOfUtc = Object.assign(Object.create(at), {

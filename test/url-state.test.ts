@@ -123,4 +123,28 @@ describe("project dialog return URL", () => {
     expect(returnHashFor("#/p/b", true, "#/?cat=x", "#/?other=1")).toBe("#/?cat=x");
     expect(returnHashFor("#/p/a", false, "#/", "")).toBe("#/");
   });
+
+  it("a link from a non-grid view keeps that view underneath and closes back to it", async () => {
+    vi.doUnmock("../public/js/project.js");
+    vi.resetModules();
+    // @ts-expect-error plain browser module without types
+    const { dialogUnderlay, returnHashFor } = await import("../public/js/project.js");
+    // filtered grid on screen: nothing re-rendered, close returns to the filtered hash
+    let u = dialogUnderlay(true, "#/?cat=research&status=active");
+    expect(u).toEqual({ renderGrid: false, closeTo: "#/?cat=research&status=active" });
+    expect(returnHashFor("#/p/a", false, "#/", u.closeTo)).toBe("#/?cat=research&status=active");
+    // My dashboard and Upcoming stay under the dialog, so the URL matches what is shown
+    for (const base of ["#/my", "#/upcoming", "#/gantt?project=a"]) {
+      u = dialogUnderlay(true, base);
+      expect(u.renderGrid).toBe(false);
+      expect(returnHashFor("#/p/a", false, "#/", u.closeTo)).toBe(base);
+    }
+    // deep link or reload: empty page gets the grid and closes to #/ whatever the last base was
+    for (const base of ["#/", "#/my", ""]) {
+      u = dialogUnderlay(false, base);
+      expect(u).toEqual({ renderGrid: true, closeTo: "#/" });
+      expect(returnHashFor("#/p/a", false, "#/", u.closeTo)).toBe("#/");
+    }
+    expect(dialogUnderlay(true, "").closeTo).toBe("#/");
+  });
 });
