@@ -146,7 +146,7 @@ function wpTable(rows, showStart, grouped = null) {
 
     const late = lateness(row.end_date, row.status, now);
 
-    cells.push(h("td", {}, fmtDate(row.end_date), lateChip(late)));
+    cells.push(h("td", { class: "end-date" }, fmtDate(row.end_date), lateChip(late)));
 
     if (!showStart) {
       cells.push(h("td", {}, ownerContent(row.effective_owner)));

@@ -97,7 +97,7 @@ export function dateFieldHint() {
   i.type = "date";
   return i.type === "date" ? undefined : t("dateHint");
 }
-export const fmtNum =(n) => (n === null || n === undefined ? t("none") : nf.format(n));
+export const fmtNum = (n) => (n === null || n === undefined ? t("none") : nf.format(n));
 export const fmtPct = (n) => `${nf.format(Math.round((n ?? 0) * 10) / 10)} %`;
 export function fmtBytes(b) {
   if (b < 1024) return `${b} B`;

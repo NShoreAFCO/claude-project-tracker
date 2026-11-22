@@ -1565,6 +1565,11 @@ tr.group-head th {
   font-weight: 700;
   padding-top: 0.9rem;
   background: var(--color-tint);
+  color: var(--color-text-strong);
+}
+tr.overdue td.end-date {
+  white-space: nowrap;
+  min-width: max-content;
 }
 tr.today-divider td {
   padding: 0.3rem 0.6rem;

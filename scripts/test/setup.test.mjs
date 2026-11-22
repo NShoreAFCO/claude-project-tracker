@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
@@ -191,6 +191,36 @@ test("basics step asks for admin emails, defaulting to the first allowed email",
   assert.deepEqual(cfg.policy.admins, ["a@example.com"]);
   // the rest of the policy block keeps its defaults
   assert.equal(cfg.policy.default_role, "editor");
+});
+
+test("basics step keeps an object-form app name on Enter and replaces it when a name is typed", async () => {
+  const seed = (root) => {
+    cpSync(join(root, "instance.example"), join(root, "instance"), { recursive: true });
+    const p = join(root, "instance", "instance.config.json");
+    const c = JSON.parse(readFileSync(p, "utf8"));
+    c.app.name = { en: "Plan", de: "Plan DE" };
+    writeFileSync(p, JSON.stringify(c, null, 2));
+  };
+  const readName = (root) => JSON.parse(readFileSync(join(root, "instance", "instance.config.json"), "utf8")).app.name;
+
+  const root = tempRoot();
+  seed(root);
+  const io = scriptedIo(BASE_ANSWERS);
+  const ask = io.ask;
+  let offered = null;
+  io.ask = async (q, def) => (/name shown/i.test(q) ? ((offered = def), def) : ask(q, def));
+  const o = opts(root, { io });
+  const r = await runSetup(o.run);
+  assert.equal(r.ok, true, o.lines.join("\n"));
+  assert.equal(offered, "Plan");
+  assert.deepEqual(readName(root), { en: "Plan", de: "Plan DE" });
+
+  const root2 = tempRoot();
+  seed(root2);
+  const o2 = opts(root2, { io: scriptedIo([[/name shown/i, "Fresh"], ...BASE_ANSWERS]) });
+  const r2 = await runSetup(o2.run);
+  assert.equal(r2.ok, true, o2.lines.join("\n"));
+  assert.equal(readName(root2), "Fresh");
 });
 
 test("basics step normalises admin emails and refuses one that is not allowed", async () => {
