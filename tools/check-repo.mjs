@@ -89,7 +89,9 @@ const hexInCss = [...new Set([...css.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map((m) =
 check("app.css has no hex colours", hexInCss.length === 0, hexInCss.join(", "));
 const localDefs = new Set([...css.matchAll(/--([a-z0-9-]+)\s*:/g)].map((m) => m[1]));
 const used = [...new Set([...css.matchAll(/var\(--([a-z0-9-]+)/g)].map((m) => m[1]))];
-const offContract = used.filter((v) => !CONTRACT.includes(v) && !localDefs.has(v) && !/^cat-[pw]-/.test(v) && v !== "stripe");
+// optional theme tokens: used with a fallback at the point of use, never required in theme.css
+const OPTIONAL = ["status-late"];
+const offContract = used.filter((v) => !CONTRACT.includes(v) && !OPTIONAL.includes(v) && !localDefs.has(v) && !/^cat-[pw]-/.test(v) && v !== "stripe");
 check("app.css uses only contract tokens", offContract.length === 0, offContract.join(", "));
 
 const themeVars = Object.fromEntries([...theme.matchAll(/--([a-z0-9-]+)\s*:\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]));

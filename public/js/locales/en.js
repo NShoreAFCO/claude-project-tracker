@@ -640,6 +640,7 @@ export default {
   ganttLegendActual: "Actual",
   ganttLegendProgress: "Progress",
   ganttLegendOverdue: "Overdue",
+  ganttLegendLate: "Late (past due date)",
   ganttOngoing: "ongoing",
   // /qol:t10
   // qol:t07
