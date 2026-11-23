@@ -436,6 +436,7 @@ export default {
   ganttDoneProjects: "Abgeschlossene Projekte ({n})",
   ganttCollapse: "{title} einklappen",
   ganttExpand: "{title} ausklappen",
+  ganttOpenProject: "{title} öffnen",
   ganttLegendCategory: "Kategorie: Punkt vor dem Projektnamen",
 
   // inbox

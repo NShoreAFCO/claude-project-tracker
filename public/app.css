@@ -1276,13 +1276,10 @@ td .chip.late,
   stroke-width: 1.5;
   stroke-dasharray: 3 2;
 }
-.gantt .bar-bg.critical {
-  stroke: var(--status-blocked);
-  stroke-width: 3;
-}
-.gantt .ms.critical {
-  stroke: var(--status-blocked);
-  stroke-width: 3;
+/* critical path: a dark rail under the bar or mark; red outlines mean "late" only */
+.gantt .crit-rail {
+  fill: var(--color-text-strong);
+  stroke: none;
 }
 .gantt .dep.issue {
   stroke: var(--status-blocked);
@@ -1293,6 +1290,9 @@ td .chip.late,
 .gantt .dep.critical {
   stroke-width: 2.4;
   opacity: 1;
+}
+.gantt .dep.critical:not(.issue) {
+  stroke: var(--color-text-strong);
 }
 .gantt .dep-head.issue {
   fill: var(--status-blocked);
@@ -1389,9 +1389,10 @@ ul.issues .issue {
   border-top: 2px dashed var(--color-text-muted);
 }
 .legend-critical {
-  height: 0.7rem;
-  border: 3px solid var(--status-blocked);
-  border-radius: 3px;
+  height: 3px;
+  min-width: 1.4rem;
+  background: var(--color-text-strong);
+  vertical-align: middle;
 }
 .legend-issue {
   color: var(--status-blocked);
@@ -2677,6 +2678,16 @@ dialog.fixed .modal-foot {
   cursor: pointer;
 }
 .gantt .proj-head:focus-visible {
+  outline: 2px solid var(--color-accent);
+}
+.gantt .proj-link .proj-label {
+  fill: var(--color-link);
+  text-decoration: underline;
+}
+.gantt .proj-link:hover .proj-label {
+  text-decoration-thickness: 2px;
+}
+.gantt .proj-link:focus-visible {
   outline: 2px solid var(--color-accent);
 }
 .gantt .proj-caret {

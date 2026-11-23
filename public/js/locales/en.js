@@ -431,6 +431,7 @@ export default {
   ganttDoneProjects: "Completed projects ({n})",
   ganttCollapse: "Collapse {title}",
   ganttExpand: "Expand {title}",
+  ganttOpenProject: "Open {title}",
   ganttLegendCategory: "Category: dot before the project name",
 
   // inbox

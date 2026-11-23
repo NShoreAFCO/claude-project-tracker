@@ -44,12 +44,25 @@ const details: Record<string, any> = {
   },
   d: { workpackages: [wp("d1", "1", "Done top")], milestones: [] },
   m: { workpackages: [wp("m1", "1", "Long", { start_date: "2026-10-20", end_date: "2027-06-30" })], milestones: [] },
+  c: {
+    workpackages: [
+      wp("c1", "1", "Crit only", { critical: true }),
+      wp("c2", "2", "Late only", { start_date: "2020-01-01", end_date: "2020-01-10" }),
+      wp("c3", "3", "Crit and late", { critical: true, start_date: "2020-01-01", end_date: "2020-01-10" }),
+    ],
+    milestones: [
+      { id: "cm1", title: "Crit ms", workpackage_id: "c1", due_date: "2099-01-25", critical: true },
+      { id: "cm2", title: "Late ms", workpackage_id: "c2", due_date: "2020-01-12" },
+      { id: "cg1", title: "Crit gate", gate: true, decision_state: "pending", unlocks: ["c1"], due_date: "2099-01-01", critical: true },
+    ],
+  },
 };
 const state = {
   projects: [
     { id: "a", title: "Alpha", status: "active", category: PROJECT_CATEGORIES[0], health: { state: "late", reasons: [] } },
     { id: "d", title: "Finished", status: "done" },
     { id: "m", title: "Mid", status: "active" },
+    { id: "c", title: "Crit", status: "active" },
   ],
 };
 api.project = async (id: string) => details[id];
@@ -129,7 +142,7 @@ describe("gantt project groups", () => {
     const head = main.querySelector("g.proj-head") as FEl;
     expect(head.getAttribute("role")).toBe("button");
     expect(head.getAttribute("aria-expanded")).toBe("true");
-    expect(head.textContent).toContain("Alpha");
+    expect(head.getAttribute("aria-label")).toContain("Alpha");
     expect(head.textContent).toContain("Late");
     head.listeners.get("click")![0].fn({});
     await sleep();
@@ -141,5 +154,81 @@ describe("gantt project groups", () => {
   it("collapse state is dropped when the view is opened afresh", async () => {
     const main = await render("#/gantt?project=a");
     expect(main.querySelector("g.proj-head")!.getAttribute("aria-expanded")).toBe("true");
+  });
+});
+
+const setCritical = (main: FEl, on: boolean) => {
+  const label = main.querySelectorAll("label.check").find((l) => l.textContent.includes("Critical path"))!;
+  const input = label.querySelector("input") as FEl;
+  input.listeners.get("change")![0].fn({ target: { checked: on } });
+};
+const rails = (main: FEl) => bar(main, "crit-rail");
+const barOf = (main: FEl, title: string) => bar(main, "bar-bg").find((b) => b.textContent.includes(title))!;
+const strokes = (el: any) => (el.style.calls as [string, string][]).filter(([k]) => k === "stroke").map(([, v]) => v);
+
+describe("gantt critical path vs late", () => {
+  it("critical off: no rails anywhere", async () => {
+    const main = await render("#/gantt?project=c");
+    expect(rails(main)).toHaveLength(0);
+  });
+
+  it("critical bar: rail, no red stroke; late bar: red outline, no rail; both: outline and rail", async () => {
+    const first = await render("#/gantt?project=c");
+    setCritical(first, true);
+    await sleep();
+    const main = first;
+    try {
+      const crit = barOf(main, "1 Crit only");
+      const late = barOf(main, "2 Late only");
+      const both = barOf(main, "3 Crit and late");
+      expect(strokes(crit)).toEqual([]);
+      expect(main.querySelectorAll("rect").flatMap((r: any) => strokes(r)).some((v) => v.includes("--status-blocked)") && !v.includes("--status-late"))).toBe(false);
+      expect(late.classes.has("late")).toBe(true);
+      expect(both.classes.has("late")).toBe(true);
+      expect(strokes(both)[0]).toContain("--status-late");
+      // one rail per critical bar, plus one under the critical milestone and one under the critical gate
+      const railYs = rails(main).map((r) => Number(r.getAttribute("y")));
+      const barYs = [crit, late, both].map((b) => Number(b.getAttribute("y")) + Number(b.getAttribute("height")));
+      expect(rails(main)).toHaveLength(4);
+      expect(railYs.filter((y) => y > barYs[0] && y < barYs[0] + 7)).toHaveLength(3);
+      expect(railYs.filter((y) => y > barYs[1] && y < barYs[1] + 7)).toHaveLength(0);
+      expect(railYs.filter((y) => y > barYs[2] && y < barYs[2] + 7)).toHaveLength(1);
+      const bothRail = rails(main).find((r) => Number(r.getAttribute("y")) > barYs[2])!;
+      expect(bothRail.getAttribute("x")).toBe(both.getAttribute("x"));
+      expect(bothRail.getAttribute("width")).toBe(both.getAttribute("width"));
+      // the late milestone keeps its late class and gets no rail
+      const lateMs = main.querySelectorAll("polygon").find((p) => p.classes.has("late"))!;
+      expect(lateMs.classes.has("critical")).toBe(false);
+    } finally {
+      setCritical(main, false);
+      await sleep();
+    }
+  });
+
+  it("legend keeps its critical path entry", async () => {
+    const main = await render("#/gantt?project=c");
+    expect(main.querySelector("span.legend-critical")).not.toBeNull();
+  });
+});
+
+describe("gantt project link", () => {
+  it("the project title links to its dialog and does not fold the row", async () => {
+    const main = await render("#/gantt?project=a");
+    const link = main.querySelector("a.proj-link") as FEl;
+    expect(link.getAttribute("href")).toBe("#/p/a");
+    expect(link.getAttribute("aria-label")).toBe("Open Alpha");
+    expect(link.textContent).toContain("Alpha");
+    const head = main.querySelector("g.proj-head") as FEl;
+    expect(head.querySelector("a")).toBeNull();
+    let stopped = false;
+    link.listeners.get("click")![0].fn({ stopPropagation: () => (stopped = true) });
+    expect(stopped).toBe(true);
+    await sleep();
+    expect(main.querySelector("g.proj-head")!.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("the link is there in the all-projects view too", async () => {
+    const main = await render("#/gantt");
+    expect(main.querySelectorAll("a.proj-link").map((a) => a.getAttribute("href"))).toContain("#/p/a");
   });
 });
