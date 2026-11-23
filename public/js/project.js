@@ -11,6 +11,13 @@ import { can, gate as roleGate } from "./access.js";
 import { renderMarkdown } from "./markdown.js";
 import { sortTreeByCode } from "./order.js";
 import { catChip } from "./categories.js";
+import { healthChip } from "./health.js";
+
+/** Dialog heading: title, health chip (only when health is known), status chip. */
+export function headingNodes(p, health) {
+  const hc = healthChip(health);
+  return hc ? [p.title, " ", hc, " ", statusChip(p.status)] : [p.title, " ", statusChip(p.status)];
+}
 import {
   projectForm,
   wpForm,
@@ -210,7 +217,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
   function render() {
     const seq = ++renderSeq;
     const p = detail.project;
-    m.heading.replaceChildren(p.title, " ", statusChip(p.status));
+    m.heading.replaceChildren(...headingNodes(p, detail.health));
     clear(
       tabs,
       ["overview", "risks", "context"].map((name) =>
