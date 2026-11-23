@@ -36,7 +36,9 @@ After any change: `npm run check`, then `npm run deploy` (it rebuilds the genera
 | `admins` | the admin email(s) you gave in setup | these people get the `admin` role when they first sign in; later only while the tracker has no admin (otherwise an admin changes roles in the People view) |
 | `default_role` | `editor` | role of everyone else on first sign-in: `viewer` (read only), `editor`, `decider` (also closes projects, decides gates, verifies sign-offs) or `admin` (also roles, restore and purge) |
 | `locales` | `app.locale` first, then the other language | languages people may choose in the dashboard; a project's report `language` must be one of them. The OAuth sign-in pages use the instance default language |
-| `stale_days` | `14` | days without activity before a project counts as stale; a project type may set its own `stale_days` |
+| `stale_days` | `14` | days without activity before a project counts as stale; a project type may set its own `stale_days`; the dashboard health badge uses it for "stalled" |
+| `health_wp_late_days` | `7` | days an open work package may run past its end date before the project's health turns "at risk" |
+| `health_gate_soon_days` | `2` | days before its due date that a reached gate without a decision turns the project's health "at risk" |
 | `schedule_strict_default` | `false` | default for a project's strict schedule mode (schedule warnings become errors) |
 | `target_date_required_categories` | `research`, `product-development`, `product-launch`, `quality-regulatory` (those that exist) | project types that need a target date before they can become active (400 otherwise; a new project without status then starts as `idea`) |
 | `gates.require_decision` | `true` | gate milestones need a recorded decision |

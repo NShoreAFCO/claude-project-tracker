@@ -13,6 +13,10 @@ export interface Policy {
   locales: string[];
   /** Days without activity before a project counts as stale (category entries may override). */
   stale_days: number;
+  /** Days an open work package may run past its end date before the project is at risk. */
+  health_wp_late_days: number;
+  /** Days before its due date an undecided reached gate puts the project at risk. */
+  health_gate_soon_days: number;
   schedule_strict_default: boolean;
   /** Project types that need a target date before they can become active. */
   target_date_required_categories: string[];
