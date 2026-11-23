@@ -6,6 +6,7 @@ import { createProject } from "../src/data/projects";
 import { upsertWorkpackage } from "../src/data/workpackages";
 import { upsertMilestone } from "../src/data/milestones";
 import { upsertRisk } from "../src/data/risks";
+import { ensureUserPerson } from "../src/data/persons";
 import { healthByProject } from "../src/data/health";
 import { mcpApiHandler } from "../src/mcp/server";
 import type { Env } from "../src/types";
@@ -90,6 +91,22 @@ describe("healthByProject", () => {
     expect(map.get(decided)?.state).toBe("on_track");
   });
 
+  it("soft-deleted milestone, work package and risk do not count", async () => {
+    const p = await proj();
+    const m = await upsertMilestone(db, p, { title: "Gone", due_date: "2026-10-01" }, A);
+    const w = await upsertWorkpackage(db, p, { title: "GoneWp", status: "blocked", blocked_by: "x" }, A);
+    const r = await upsertRisk(db, p, { title: "GoneRisk", probability: 4, impact: 4 }, A);
+    const before = (await healthByProject(db, TODAY, [p])).get(p);
+    expect(before?.state).toBe("late");
+    const at = "2026-10-02T00:00:00.000Z";
+    await sql("UPDATE milestone SET deleted_at = ? WHERE id = ?", at, m.id);
+    await sql("UPDATE workpackage SET deleted_at = ? WHERE id = ?", at, w.id);
+    await sql("UPDATE risk SET deleted_at = ? WHERE id = ?", at, r.id);
+    const after = (await healthByProject(db, TODAY, [p])).get(p);
+    expect(after?.state).toBe("on_track");
+    expect(JSON.stringify(after)).not.toMatch(/Gone/);
+  });
+
   it("an active project without progress for stale_days is stalled when it has open work", async () => {
     const p = await proj();
     await upsertWorkpackage(db, p, { title: "Open", status: "todo" }, A);
@@ -111,6 +128,27 @@ describe("REST health field", () => {
     const detail = (await (await call(`/api/projects/${p}`, { jwt })).json()) as { project: { id: string }; health: unknown };
     expect(detail.project.id).toBe(p);
     expect(detail.health).toMatchObject({ state: "late" });
+  });
+
+  it("a viewer's project list and detail carry the same health as an editor's", async () => {
+    const addr = "health-viewer@example.com";
+    const envOverride = { ALLOWED_EMAILS: `user@example.com,${addr}` };
+    const person = await ensureUserPerson(db, addr);
+    await sql("UPDATE person SET access_role = 'viewer' WHERE id = ?", person.id);
+    const p = await proj();
+    await upsertMilestone(db, p, { title: "Old", due_date: "2000-01-01" }, A);
+    type Card = { id: string; health: unknown };
+    const read = async (email: string) => {
+      const jwt = await userJwt(email);
+      const list = (await (await call("/api/projects", { jwt, envOverride })).json()) as Card[];
+      const detail = (await (await call(`/api/projects/${p}`, { jwt, envOverride })).json()) as { health: unknown };
+      return { card: list.find((x) => x.id === p), detail };
+    };
+    const editor = await read("user@example.com");
+    const viewer = await read(addr);
+    expect(viewer.card?.health).toMatchObject({ state: "late" });
+    expect(viewer.card?.health).toEqual(editor.card?.health);
+    expect(viewer.detail.health).toEqual(editor.detail.health);
   });
 
   it("a closed project has health null", async () => {
