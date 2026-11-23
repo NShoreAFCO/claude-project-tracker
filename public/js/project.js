@@ -27,7 +27,23 @@ import {
 import { renderContextPanel, openDocViewer } from "./context.js";
 import { collectIssues, issuesByEntity } from "./schedule-ui.js";
 import { issueList, issueBadge, scheduleMeta, placeMilestones, pruneTree } from "./schedule-view.js";
-import { wpRow, wpItem, treeHead, splitDone, doneFold, rowActions, slimMilestoneRow } from "./wp-tree.js";
+import {
+  wpRow,
+  wpItem,
+  treeHead,
+  splitDone,
+  doneFold,
+  rowActions,
+  slimMilestoneRow,
+  wpDependencies,
+  depTargetId,
+  depLink,
+  depLine,
+  blockedRef,
+  sortRefs,
+  revealFold,
+  revealTarget,
+} from "./wp-tree.js";
 import { decisionDialog, baselineDialog } from "./gates-ui.js";
 
 /** Render sanitised markdown into a container (the only innerHTML use in the app). */
@@ -255,15 +271,43 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       t(ctxCount(kind, ownerId) === 1 ? "ctxDocsCount_one" : "ctxDocsCount", { n: ctxCount(kind, ownerId) }),
     );
 
-  /** blocked_by is wp:<id>, ms:<id>, ext:<text> or free text; show titles instead of ids. */
-  function blockedLabel(raw) {
-    const m = /^(wp|ms|ext):([\s\S]*)$/.exec(String(raw).trim());
-    if (!m) return raw;
-    if (m[1] === "ext") return m[2].trim();
-    const list = m[1] === "wp" ? flatten(detail.workpackages) : detail.milestones;
-    const hit = list.find((x) => x.id === m[2].trim());
-    return (hit && (m[1] === "wp" ? wpName(hit) : hit.title)) ?? m[2].trim();
+  /** blocked_by is wp:<id>, ms:<id>, ext:<text> or free text; wp: and ms: show a link, the rest stays text. */
+  const blockedLabel = (raw) => blockedRef(raw, flatten(detail.workpackages), detail.milestones, jumpTo);
+
+  // dependency links
+  /** Links to work packages (kind "wp") by id, comma separated; an unknown id stays text. */
+  function wpRefs(ids) {
+    const all = flatten(detail.workpackages);
+    const refs = sortRefs((ids || []).map((x) => all.find((w) => w.id === x)).filter(Boolean));
+    const nodes = refs.map((w) => depLink("wp", w, jumpTo));
+    const unknown = (ids || []).filter((x) => !all.some((w) => w.id === x));
+    return [...nodes, ...unknown].flatMap((n, i) => [i ? ", " : null, n]);
   }
+
+  /** Unfolds the way to a work package or milestone, re-renders, then scrolls to it, focuses it and highlights it. */
+  function jumpTo(kind, targetId) {
+    const domId = depTargetId(kind, targetId);
+    const found = () => document.getElementById(domId);
+    if (current.tab !== "overview") {
+      current = { tab: "overview", owner: null };
+      history.replaceState(null, "", projectHash(id, "overview"));
+    }
+    if (kind === "wp") {
+      const shown = fold.issuesOnly && collectIssues(detail).length ? issueWpIds(detail) : null;
+      revealFold(sortTreeByCode(detail.workpackages), targetId, fold, shown);
+    }
+    render();
+    let el = found();
+    if (!el) {
+      // a milestone row may sit in the done group or be filtered out
+      fold.issuesOnly = false;
+      fold.doneOpen = true;
+      render();
+      el = found();
+    }
+    revealTarget(el, { reduceMotion: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches });
+  }
+  // /dependency links
   function blockedAge(w) {
     const n = w.status === "blocked" ? ageDays(w.blocked_since) : null;
     return n === null ? null : ` · ${t("blockedSince", { n, date: fmtDate(w.blocked_since) })}`;
@@ -353,8 +397,10 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       );
     if (leaf && w.last_progress_at) schedMeta.push(lastActivity(w.last_progress_at));
 
+    const deps = wpDependencies(w, flatten(detail.workpackages), detail.milestones);
     const row = wpRow({
       depth,
+      id: depTargetId("wp", w.id),
       fold: {
         leaf,
         open,
@@ -382,6 +428,8 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       owner: personBadge(w.effective_owner, { inherited: !w.owner, label: w.owner ? t("fOwner") : t("inheritedOwner") }),
       progress: slider,
       below: [
+        depLine("dep-on", t("fDependsOn"), deps.dependsOn, jumpTo),
+        depLine("dep-by", t("neededBy"), deps.neededBy, jumpTo),
         rowActions({
           edit: { label: t("edit"), onClick: () => wpForm(id, w, detail.workpackages, null, detail.milestones) },
           menuLabel: t("moreActions"),
@@ -405,7 +453,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         }),
         schedMeta.length ? h("div.meta", schedMeta) : null,
         issueList(w, titleOf),
-        w.blocked_by ? h("div.blocked", `${t("blockedBy")}: ${blockedLabel(w.blocked_by)}`, blockedAge(w)) : null,
+        w.blocked_by ? h("div.blocked", `${t("blockedBy")}: `, blockedLabel(w.blocked_by), blockedAge(w)) : null,
         w.waiting_reason ? h("div.blocked", `${t("fWaitingReason")}: ${w.waiting_reason}`) : null,
         w.drop_reason ? h("div.blocked", `${t("fDropReason")}: ${w.drop_reason}`) : null,
         w.description_md ? h("details.blocked", h("summary", t("description")), mdBlock(w.description_md)) : null,
@@ -580,8 +628,9 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
     const rowOf = (ms) =>
       slimMilestoneRow(ms, {
         today,
-        requiresText: ms.requires?.length ? ms.requires.map((wpId) => wpTitle[wpId] || wpId).join(", ") : t("none"),
-        unlocksText: ms.unlocks?.length ? ms.unlocks.map((wpId) => wpTitle[wpId] || wpId).join(", ") : t("none"),
+        id: depTargetId("ms", ms.id),
+        requiresText: ms.requires?.length ? wpRefs(ms.requires) : t("none"),
+        unlocksText: ms.unlocks?.length ? wpRefs(ms.unlocks) : t("none"),
         actions: rowActions({
           edit: { label: t("edit"), onClick: () => milestoneForm(id, ms, detail.workpackages) },
           menuLabel: t("moreActions"),

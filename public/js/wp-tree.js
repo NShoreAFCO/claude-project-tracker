@@ -4,6 +4,7 @@ import { t } from "./i18n.js";
 import { h, menuButton } from "./dom.js";
 import { fmtDate } from "./i18n.js";
 import { milestoneView, decisionLabel } from "./schedule-ui.js";
+import { compareCode } from "./order.js";
 
 /** Tier of a row by depth: 1 for the top level, 2 for its children, 3 for everything deeper. */
 export function tierOf(depth) {
@@ -28,11 +29,11 @@ export function treeHead() {
  * One tree row. parts: { code, title, badges, status, dates, owner, progress, below }
  * fold: { leaf, open, label, onToggle }. A top-level row carries the block border on its li, see `wpItem`.
  */
-export function wpRow({ depth, fold, code, title, badges = [], status, dates, owner, progress, below = [] }) {
+export function wpRow({ depth, fold, id = null, code, title, badges = [], status, dates, owner, progress, below = [] }) {
   const tier = tierOf(depth);
   return h(
     `div.wp.tw-row.tier-${tier}`,
-    { dataset: { tier: String(tier) } },
+    { id, dataset: { tier: String(tier) } },
     !fold.leaf
       ? h(
           "button.chev.tw-fold",
@@ -106,21 +107,125 @@ export function rowActions({ edit, items = [], menuLabel, gate = (x) => x }) {
 }
 
 /** Slim gate or milestone row inside the tree: icon, code, title, state, due date, requires, unlocks, one action. */
-export function slimMilestoneRow(ms, { today, requiresText, unlocksText, actions = null }) {
+export function slimMilestoneRow(ms, { today, requiresText, unlocksText, actions = null, id = null }) {
   const { state, gate, decision } = milestoneView(ms, today);
   const stateLabel = state === "done" ? t("reached") : state === "overdue" ? t("overdue") : t("msOpen");
   return h(
     "li.tw-ms.ms." + (gate ? "underlay-gate" : "underlay-milestone"),
-    { dataset: { kind: gate ? "gate" : "milestone" } },
+    { id, dataset: { kind: gate ? "gate" : "milestone" } },
     h("span.ms-diamond." + state, { "aria-hidden": "true", class: gate ? "gate" : "" }),
     h("span.tw-ms-code", ms.code || (gate ? t("gateMark") : "")),
     h("strong.tw-ms-title", ms.title),
     h("span.ms-state." + state, stateLabel),
     gate ? h("span.badge.decision.decision-" + decision, decisionLabel(decision)) : null,
     h("span.tw-ms-due", `${t("due")}: ${fmtDate(ms.due_date)}`),
-    h("span.tw-ms-req", `${t("requires")}: ${requiresText}`),
-    h("span.tw-ms-unl", `${t("unlocks")}: ${unlocksText}`),
+    h("span.tw-ms-req", t("requires"), ": ", requiresText),
+    h("span.tw-ms-unl", t("unlocks"), ": ", unlocksText),
     actions,
   );
 }
 // /dialog layout
+
+// dependency links
+const idList = (raw) => {
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw !== "string" || !raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+};
+
+/** Items in code order; an item without a code goes last, by title. */
+export function sortRefs(items) {
+  return [...items].sort((a, b) => compareCode(a.code, b.code) || String(a.title).localeCompare(String(b.title)));
+}
+
+/**
+ * Dependencies of one work package: { dependsOn: [wp], neededBy: [{ kind, item }] } in code order.
+ * neededBy holds the work packages whose depends_on hold it and the milestones whose requires hold it.
+ */
+export function wpDependencies(w, allWps, milestones = []) {
+  const byId = new Map(allWps.map((x) => [x.id, x]));
+  const dependsOn = sortRefs(idList(w.depends_on).map((id) => byId.get(id)).filter(Boolean)).map((item) => ({ kind: "wp", item }));
+  const needed = [
+    ...allWps.filter((x) => idList(x.depends_on).includes(w.id)).map((item) => ({ kind: "wp", item })),
+    ...milestones.filter((ms) => (ms.requires || []).includes(w.id)).map((item) => ({ kind: "ms", item })),
+  ];
+  const neededBy = needed.sort((a, b) => compareCode(a.item.code, b.item.code) || String(a.item.title).localeCompare(String(b.item.title)));
+  return { dependsOn, neededBy };
+}
+
+/** DOM id of a work package row or milestone row, the target of a dependency link. */
+export const depTargetId = (kind, id) => `dep-${kind}-${id}`;
+
+/** One link to a work package or milestone: its code (title in the title attribute), or the title without a code. */
+export function depLink(kind, item, onJump) {
+  return h(
+    "button.linkbtn.dep-link",
+    {
+      type: "button",
+      title: item.code ? item.title : null,
+      on: { click: () => onJump(kind, item.id) },
+    },
+    item.code || item.title,
+  );
+}
+
+/** blocked_by is wp:<id>, ms:<id>, ext:<text> or free text: wp: and ms: give a link, everything else stays text. */
+export function blockedRef(raw, allWps, milestones, onJump) {
+  const m = /^(wp|ms|ext):([\s\S]*)$/.exec(String(raw).trim());
+  if (!m) return raw;
+  const ref = m[2].trim();
+  if (m[1] === "ext") return ref;
+  const hit = (m[1] === "wp" ? allWps : milestones).find((x) => x.id === ref);
+  return hit ? depLink(m[1], hit, onJump) : ref;
+}
+
+/** "Depends on: WP1, WP2" as a muted line; null when there are no references. */
+export function depLine(cls, label, refs, onJump) {
+  if (!refs.length) return null;
+  return h(
+    `div.meta.dep-line.${cls}`,
+    label,
+    ": ",
+    refs.flatMap((r, i) => [i ? ", " : null, depLink(r.kind, r.item, onJump)]),
+  );
+}
+
+/** Ids from the top-level work package down to the work package itself (empty when it is not in the tree). */
+export function pathTo(tree, id, trail = []) {
+  for (const w of tree || []) {
+    const here = [...trail, w.id];
+    if (w.id === id) return here;
+    const hit = pathTo(w.children, id, here);
+    if (hit.length) return hit;
+  }
+  return [];
+}
+
+/**
+ * Makes a work package visible by changing the fold state: unfolds all its ancestors, opens the done group when its
+ * top-level work package is finished, and turns the issues-only filter off when `shown` (a Set or null) hides it.
+ */
+export function revealFold(tree, id, fold, shown = null) {
+  const path = pathTo(tree, id);
+  if (!path.length) return;
+  for (const a of path.slice(0, -1)) fold.open.add(a);
+  const top = tree.find((w) => w.id === path[0]);
+  if (top && isDoneWp(top)) fold.doneOpen = true;
+  if (fold.issuesOnly && shown && !shown.has(id)) fold.issuesOnly = false;
+}
+
+/** Scrolls the target into view, moves focus to it and highlights it for 2 s (`dep-target`). */
+export function revealTarget(el, { reduceMotion = false, timer = setTimeout } = {}) {
+  if (!el) return;
+  if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "-1");
+  el.scrollIntoView?.({ block: "center", behavior: reduceMotion ? "auto" : "smooth" });
+  el.focus?.({ preventScroll: true });
+  el.classList.add("dep-target");
+  timer(() => el.classList.toggle("dep-target", false), 2000);
+}
+// /dependency links

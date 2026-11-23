@@ -704,4 +704,7 @@ export default {
   doneHide: "Hide",
   moveWorkpackage: "Move",
   // /dialog layout
+  // dependency links
+  neededBy: "Needed by",
+  // /dependency links
 };
