@@ -124,6 +124,18 @@ describe("project dialog return URL", () => {
     expect(returnHashFor("#/p/a", false, "#/", "")).toBe("#/");
   });
 
+  it("a reload while the dialog is open redraws the view underneath, not the grid", async () => {
+    vi.doUnmock("../public/js/project.js");
+    vi.resetModules();
+    // @ts-expect-error plain browser module without types
+    const { viewHashFor } = await import("../public/js/project.js");
+    expect(viewHashFor("#/p/a", "#/gantt?project=a")).toBe("#/gantt?project=a");
+    expect(viewHashFor("#/p/a/context", "#/upcoming")).toBe("#/upcoming");
+    expect(viewHashFor("#/p/a", "")).toBe("#/");
+    expect(viewHashFor("#/gantt", "#/?cat=x")).toBe("#/gantt");
+    expect(viewHashFor("", "#/gantt")).toBe("");
+  });
+
   it("a link from a non-grid view keeps that view underneath and closes back to it", async () => {
     vi.doUnmock("../public/js/project.js");
     vi.resetModules();
