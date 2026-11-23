@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { dispatch, installFakeDom, type FDoc, type FEl } from "./fake-dom";
 
 // @ts-expect-error plain browser module without types
+import { t } from "../public/js/i18n.js";
+// @ts-expect-error plain browser module without types
 import { LIST_COLUMNS, listView } from "../public/js/list-view.js";
 
 const project = (id: string, over: Record<string, unknown> = {}) => ({
@@ -63,7 +65,8 @@ describe("list view", () => {
     ]);
     expect(headers).toHaveLength(9);
     expect(headers.map((header) => header.getAttribute("scope"))).toEqual(Array(9).fill("col"));
-    expect(headers.map((header) => header.textContent)).toEqual(LIST_COLUMNS.map((key: string) => `list.col.${key}`));
+    expect(headers.map((header) => header.textContent)).toEqual(LIST_COLUMNS.map((key: string) => t(`list.col.${key}`)));
+    expect(headers.every((header) => header.textContent !== "" && !header.textContent.startsWith("list.col."))).toBe(true);
   });
 
   it("renders one row per project in input order", () => {
@@ -131,7 +134,8 @@ describe("list view", () => {
 
     expect(rows).toHaveLength(1);
     expect(empty.getAttribute("colspan")).toBe(String(LIST_COLUMNS.length));
-    expect(empty.textContent).toBe("list.empty");
+    expect(empty.textContent).toBe(t("list.empty"));
+    expect(empty.textContent).not.toBe("list.empty");
   });
 
   it("keeps markup-like project titles as text and does not use innerHTML", () => {

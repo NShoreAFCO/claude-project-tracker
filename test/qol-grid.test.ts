@@ -144,7 +144,6 @@ describe("grid render", () => {
       "underlay-milestone card-box next-ms",
       "underlay-gate card-box card-gate",
       "card-minor",
-      "card-actions",
     ]);
   });
 
@@ -153,7 +152,7 @@ describe("grid render", () => {
     renderGrid(main as any, state);
     expect(main.querySelector(".card-gate")).toBeNull();
     expect(main.querySelector(".next-ms")).toBeNull();
-    expect(card().children.map(classOf)).toEqual(["head", "card-target", "underlay-wp card-box wp-counts", "card-minor", "card-actions"]);
+    expect(card().children.map(classOf)).toEqual(["head", "card-target", "underlay-wp card-box wp-counts", "card-minor"]);
   });
 
   it("375 px: cards sit in one fluid .cards container and long box titles are single-line ellipsis boxes", () => {

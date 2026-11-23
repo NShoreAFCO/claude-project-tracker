@@ -1414,11 +1414,6 @@ ul.issues .issue {
   color: var(--status-blocked);
   font-weight: 700;
 }
-.card-actions {
-  margin-top: 0.5rem;
-  display: flex;
-  justify-content: flex-end;
-}
 a.btn.small {
   text-decoration: none;
   display: inline-flex;
@@ -2611,3 +2606,86 @@ dialog.fixed .modal-foot {
   background: var(--color-surface);
 }
 /* /health */
+
+/* list mode */
+.list-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+  margin-bottom: 0.5rem;
+}
+.list-view {
+  min-width: 960px;
+  font-size: 14px;
+  line-height: 1.25;
+}
+.list-view th,
+.list-view td {
+  border: 0;
+  border-bottom: 1px solid var(--tier-rule, var(--color-border));
+  padding: 6px 10px;
+  vertical-align: middle;
+}
+.list-view th {
+  font-size: 13px;
+  white-space: nowrap;
+}
+.list-view tbody tr:nth-child(even) {
+  background: transparent;
+}
+.list-view .list-row {
+  height: 52px;
+  max-height: 56px;
+  cursor: pointer;
+}
+.list-view .list-row:hover {
+  background: var(--color-tint);
+}
+.list-view .list-project {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-weight: 600;
+}
+.list-view .list-link {
+  all: unset;
+  cursor: pointer;
+  font-weight: 600;
+}
+.list-view .list-link:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.list-view .health-reason,
+.list-view .list-next-date,
+.list-view .wp-counts {
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+.list-view .health-reason {
+  max-width: 28ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.list-view .list-next-title {
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.list-view td.num,
+.list-view th:nth-child(8) {
+  text-align: right;
+}
+.list-view .progress-row {
+  min-width: 90px;
+}
+.list-view td.empty {
+  text-align: center;
+  padding: 1.5rem;
+  color: var(--color-text-muted);
+}
+.view-toggle {
+  flex: none;
+}
+/* /list mode */

@@ -2,7 +2,7 @@ import { h, statusChip, personBadge, progressBar } from "./dom.js";
 import { t, fmtDate, fmtDateTime } from "./i18n.js";
 import { lateness, lateChip } from "./lateness.js";
 import { healthChip, healthLine } from "./health.js";
-import { catVar } from "./categories.js";
+import { catDot } from "./categories.js";
 
 export const LIST_COLUMNS = ["health", "project", "status", "target", "next", "progress", "owner", "wps", "activity"];
 
@@ -47,10 +47,7 @@ function projectRow(project, persons, onOpen) {
   const projectCell = cell(
     h(
       "div.list-project",
-      h("span.cat-dot", {
-        "aria-hidden": "true",
-        style: { "--dot": catVar("p", project.category) },
-      }),
+      catDot("p", project.category),
       title,
     ),
     healthLine(project.health),
@@ -84,7 +81,7 @@ function projectRow(project, persons, onOpen) {
       : cell(t("none")),
     cell(progressBar(project.progress)),
     cell(owner),
-    cell(wpCounts(project.wp_counts)),
+    h("td.num", wpCounts(project.wp_counts)),
     cell(fmtDateTime(project.last_activity)),
   );
 }
