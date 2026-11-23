@@ -585,15 +585,6 @@ section.block > header h3 {
   padding: 0.5rem 0;
   border-bottom: 1px solid var(--color-border);
 }
-.wp .title {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  align-items: center;
-}
-.wp .title strong {
-  font-weight: 600;
-}
 .wp .actions {
   display: flex;
   gap: 0.3rem;
