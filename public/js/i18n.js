@@ -45,7 +45,7 @@ export function setLocale(code) {
   dtf = new Intl.DateTimeFormat(INTL_LOCALE, { dateStyle: "medium", timeStyle: "short" });
   df = new Intl.DateTimeFormat(INTL_LOCALE, { dateStyle: "medium" });
   nf = new Intl.NumberFormat(INTL_LOCALE);
-  mf = new Intl.DateTimeFormat(INTL_LOCALE, { month: "short", year: "2-digit", timeZone: "UTC" });
+  mf = new Intl.DateTimeFormat(INTL_LOCALE, { month: "short", year: "numeric", timeZone: "UTC" });
   dmf = new Intl.DateTimeFormat(INTL_LOCALE, { day: "2-digit", month: "2-digit", timeZone: "UTC" });
 
   if (typeof document !== "undefined") {

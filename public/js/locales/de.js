@@ -435,6 +435,10 @@ export default {
   ganttToday: "Heute",
   ganttProject: "Projekt",
   ganttAllProjects: "Alle Projekte",
+  ganttDoneProjects: "Abgeschlossene Projekte ({n})",
+  ganttCollapse: "{title} einklappen",
+  ganttExpand: "{title} ausklappen",
+  ganttLegendCategory: "Kategorie: Punkt vor dem Projektnamen",
 
   // inbox
   inboxTitle: "Eingang",

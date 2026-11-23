@@ -2689,3 +2689,93 @@ dialog.fixed .modal-foot {
   flex: none;
 }
 /* /list mode */
+
+/* gantt tiers */
+.gantt {
+  --gantt-plan: color-mix(in srgb, var(--color-text-muted) 24%, transparent);
+  --gantt-plan-line: color-mix(in srgb, var(--color-text-muted) 55%, transparent);
+  --gantt-done: color-mix(in srgb, var(--color-text-muted) 75%, var(--color-text-strong, var(--color-text)));
+  --gantt-late: var(--status-late, var(--status-blocked, var(--color-danger)));
+}
+.gantt .proj-row {
+  fill: var(--tier-band, var(--color-tint));
+}
+.gantt .proj-head {
+  cursor: pointer;
+}
+.gantt .proj-head:focus-visible {
+  outline: 2px solid var(--color-accent);
+}
+.gantt .proj-caret {
+  fill: var(--color-text-muted);
+}
+.gantt .proj-label {
+  font-weight: 700;
+}
+.gantt .proj-health {
+  font-size: 11px;
+  font-weight: 600;
+  fill: var(--c, var(--color-text-muted));
+}
+.gantt .proj-health.h-on-track {
+  --c: var(--health-on-track, var(--status-doing));
+}
+.gantt .proj-health.h-at-risk {
+  --c: var(--health-at-risk, var(--status-waiting, var(--status-hold)));
+}
+.gantt .proj-health.h-late {
+  --c: var(--health-late, var(--gantt-late));
+}
+.gantt .proj-health.h-stalled {
+  --c: var(--health-stalled, var(--status-dropped));
+}
+.gantt .proj-health.h-on-hold {
+  --c: var(--health-on-hold, var(--status-hold));
+}
+.gantt .wp-code {
+  font-variant-numeric: tabular-nums;
+  fill: var(--color-text-muted);
+}
+.gantt .wp-title.tier-1 {
+  font-weight: 650;
+}
+.gantt .wp-title.tier-2 {
+  font-weight: 400;
+}
+.gantt .bar-bg {
+  fill: var(--gantt-plan);
+  fill-opacity: 1;
+  stroke: var(--gantt-plan-line);
+  stroke-width: 1;
+}
+.gantt .bar-fill {
+  fill: var(--gantt-done);
+  stroke: none;
+}
+.gantt .bar-actual {
+  fill: none;
+  stroke: var(--gantt-done);
+}
+.gantt .bar-overdue {
+  stroke: var(--gantt-late);
+}
+.legend-planned {
+  background: color-mix(in srgb, var(--color-text-muted) 24%, transparent);
+  border-color: color-mix(in srgb, var(--color-text-muted) 55%, transparent);
+}
+.legend-progress {
+  background: color-mix(in srgb, var(--color-text-muted) 75%, var(--color-text-strong, var(--color-text)));
+  border-color: transparent;
+}
+.legend-today {
+  display: inline-block;
+  width: 0;
+  height: 0.9rem;
+  margin: 0 0.4rem;
+  border-left: 2px solid var(--color-accent);
+  vertical-align: middle;
+}
+.gantt-legend .cat-dot {
+  margin-right: 0.3rem;
+}
+/* /gantt tiers */
