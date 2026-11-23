@@ -712,4 +712,24 @@ export default {
   // dependency links
   neededBy: "Benötigt von",
   // /dependency links
+  // health
+  healthState: { on_hold: "Pausiert", late: "Verspätet", at_risk: "Gefährdet", stalled: "Stockt", on_track: "Im Plan" },
+  healthReason: {
+    on_hold: "Pausiert",
+    milestone_overdue: "{label} seit {n} T überfällig",
+    gate_overdue: "Gate {label} seit {n} T überfällig",
+    target_passed: "Zieltermin {date} vor {n} T überschritten",
+    high_risk: "Hohes Risiko: {title}",
+    wp_blocked: "{label} blockiert",
+    gate_today: "Gate {label} heute fällig",
+    gate_tomorrow: "Gate {label} morgen fällig",
+    gate_in: "Gate {label} in {n} T fällig",
+    wp_late: "{label} seit {n} T überfällig",
+    no_activity: "Seit {n} Tagen keine Aktivität",
+    no_activity_unknown: "Keine aktuelle Aktivität",
+    next_milestone: "Als Nächstes: {label} · {date}",
+    next_milestone_undated: "Als Nächstes: {label}",
+  },
+  filterHealth: "Zustand",
+  // /health
 };

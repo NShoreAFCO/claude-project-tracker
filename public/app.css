@@ -380,7 +380,8 @@ button.badge {
 }
 .card h2 {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 16px;
+  font-weight: 600;
 }
 .card .head {
   display: flex;
@@ -2560,3 +2561,53 @@ dialog.fixed .modal-foot {
   }
 }
 /* /dependency links */
+
+/* health */
+.chip.health {
+  font-size: 12px;
+  font-weight: 600;
+}
+.chip.h-on-track {
+  --c: var(--health-on-track, var(--status-doing));
+}
+.chip.h-at-risk {
+  --c: var(--health-at-risk, var(--status-waiting, var(--status-hold)));
+}
+.chip.h-late {
+  --c: var(--health-late, var(--status-late, var(--status-blocked, var(--color-danger))));
+}
+.chip.h-stalled {
+  --c: var(--health-stalled, var(--status-dropped));
+}
+.chip.h-on-hold {
+  --c: var(--health-on-hold, var(--status-hold));
+}
+.card .head .chip.health {
+  flex: none;
+}
+.health-reason {
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+.health-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.5rem;
+  margin: 0 0 0.75rem;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+.health-filter button.chip {
+  cursor: pointer;
+  font-family: inherit;
+  border-top: 1px solid transparent;
+  border-right: 1px solid transparent;
+  border-bottom: 1px solid transparent;
+}
+.health-filter button.chip[aria-pressed='true'] {
+  border-color: var(--c);
+  border-left-width: 4px;
+  background: var(--color-surface);
+}
+/* /health */
