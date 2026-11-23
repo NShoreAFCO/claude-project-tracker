@@ -89,3 +89,15 @@ The work package tree tells work packages, sub-packages and tasks apart. Three o
 | `--tier-band` | `--color-tint` | header band of a top-level work package |
 | `--tier-rule` | `--color-border` at 60 % | rule between rows inside a work package block |
 | `--tier-guide` | `--color-border` | vertical indent guides for sub-packages and tasks |
+
+## Optional health tokens
+
+The health chip on a project card uses five more optional tokens in `instance/theme.css`; each falls back where it is used.
+
+| Token | Falls back to | Used for |
+|---|---|---|
+| `--health-on-track` | `--status-doing` | health chip "On track" |
+| `--health-at-risk` | `--status-waiting` | health chip "At risk" |
+| `--health-late` | `--status-late` | health chip "Late" |
+| `--health-stalled` | `--status-dropped` | health chip "Stalled" |
+| `--health-on-hold` | `--status-hold` | health chip "On hold" |

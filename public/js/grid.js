@@ -9,11 +9,12 @@ import { summaryBar, KPI_KEYS } from "./portfolio.js";
 import { lateness, lateChip } from "./lateness.js";
 import { GRID_FILTER_KEY } from "./sidebar.js";
 import { PROJECT_CATEGORIES, catVar, catDot, catLabel, knownCategory } from "./categories.js";
+import { healthChip, healthLine, HEALTH_ORDER } from "./health.js";
 
 const PROJECT_STATUSES = ["idea", "active", "on_hold", "done", "abandoned"];
 const COMPLETED = ["done", "abandoned"];
 const COMPLETED_MODES = ["hide", "only", "all"];
-const PERSISTED = ["completed", "tags", "status", "owner"];
+const PERSISTED = ["completed", "tags", "status", "owner", "health"];
 
 /** Completed mode of a filter; anything unknown (incl. the home reset's empty string) is the default `hide`. */
 export function completedMode(filter) {
@@ -47,6 +48,7 @@ export function filterProjects(projects, filter, kpiIds = null) {
       (!kpiIds || kpiIds.has(p.id)) &&
       (mode === "all" || (mode === "only") === COMPLETED.includes(p.status)) &&
       (!filter.status || p.status === filter.status) &&
+      (!filter.health || p.health?.state === filter.health) &&
       tags.every((x) => (p.tags || []).includes(x)) &&
       (!filter.owner || (filter.owner === "none" ? !p.owner_initials : p.owner_id === filter.owner)) &&
       (!category || (category === "none" ? p.category === null : p.category === category)),
@@ -72,6 +74,7 @@ export function loadGridFilter(filter, storage) {
       if (COMPLETED_MODES.includes(saved.completed) && !filter.completed) filter.completed = saved.completed;
       if (Array.isArray(saved.tags) && !checkedTags(filter).length) filter.tags = saved.tags.filter((x) => typeof x === "string");
       for (const k of ["status", "owner"]) if (typeof saved[k] === "string" && !filter[k]) filter[k] = saved[k];
+      if (HEALTH_ORDER.includes(saved.health) && !filter.health) filter.health = saved.health;
     }
   } catch {
     // unreadable saved filter: ignore
@@ -89,6 +92,7 @@ export function filterToQuery(filter) {
   if (completedMode(filter) !== "hide") p.set("completed", completedMode(filter));
   if (checkedTags(filter).length) p.set("tags", checkedTags(filter).join(","));
   if (filter.owner) p.set("owner", filter.owner);
+  if (HEALTH_ORDER.includes(filter.health)) p.set("health", filter.health);
   return p;
 }
 
@@ -109,7 +113,9 @@ export function applyGridQuery(filter, params) {
   const completed = params.get("completed");
   const tags = (params.get("tags") || "").split(",").filter(Boolean);
   const owner = params.get("owner");
+  const health = params.get("health");
   const next = {
+    health: HEALTH_ORDER.includes(health) ? health : "",
     kpi: KPI_KEYS.includes(attention) ? attention : "",
     category: cat || "",
     status: PROJECT_STATUSES.includes(status) ? status : "",
@@ -117,7 +123,7 @@ export function applyGridQuery(filter, params) {
     tags,
     owner: owner || "",
   };
-  if (!next.kpi && !next.category && !next.status && !next.completed && !tags.length && !next.owner) return false;
+  if (!next.kpi && !next.category && !next.status && !next.completed && !tags.length && !next.owner && !next.health) return false;
   Object.assign(filter, next);
   if (filter.status && !statusOptions(completedMode(filter)).includes(filter.status)) filter.status = "";
   hydrated = true; // the URL wins over the stored filter
@@ -175,6 +181,7 @@ function card(p, persons, blockedIds = null) {
     },
     h(
       "div.head",
+      healthChip(p.health),
       h("h2", h("button.card-link", { type: "button" }, p.title)),
       statusChip(p.status),
       h(
@@ -183,6 +190,7 @@ function card(p, persons, blockedIds = null) {
         STRINGS.originIcon[p.origin] || "",
       ),
     ),
+    healthLine(p.health),
     h(
       "div.card-target",
       noTarget || [
@@ -435,6 +443,32 @@ export function renderGrid(main, state, restore = null) {
 
   const shown = filterProjects(state.projects, filter, kpiIds);
 
+  // Health filter row: counts over the projects shown without the health filter itself, so the other states stay clickable
+  const counts = {};
+  for (const p of filterProjects(state.projects, { ...filter, health: "" }, kpiIds)) {
+    if (p.health) counts[p.health.state] = (counts[p.health.state] || 0) + 1;
+  }
+  const healthStates = HEALTH_ORDER.filter((s) => counts[s] || filter.health === s);
+  const healthRow = healthStates.length
+    ? h(
+        "div.health-filter",
+        { role: "group", "aria-label": t("filterHealth") },
+        h("span", `${t("filterHealth")}:`),
+        healthStates.map((s) =>
+          h(
+            `button.chip.health.h-${s.replace(/_/g, "-")}`,
+            {
+              type: "button",
+              [FOCUS]: `health-${s}`,
+              "aria-pressed": String(filter.health === s),
+              on: { click: () => change(() => (filter.health = filter.health === s ? "" : s)) },
+            },
+            `${t(`healthState.${s}`)} ${counts[s] || 0}`,
+          ),
+        ),
+      )
+    : null;
+
   clear(
     main,
     summaryBar(state.summary || null, kpi, (key) => ((filter.kpi = key), renderGrid(main, state))),
@@ -449,6 +483,7 @@ export function renderGrid(main, state, restore = null) {
       h("span.spacer"),
       can("write") ? h("button.btn", { type: "button", on: { click: () => projectForm(null) } }, `+ ${t("newProject")}`) : null,
     ),
+    healthRow,
     shown.length ? categoryBlocks(shown, persons, filter, state.projects, new Set(state.summary?.blocked?.project_ids ?? [])) : h("p.empty", t("noProjects")),
   );
 
