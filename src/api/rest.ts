@@ -1,5 +1,6 @@
 import type { Caller, Env, Identity, OwnerKind } from "../types";
 import { createProject, getProjectDetail, listProjects, updateProject } from "../data/projects";
+import { healthByProject } from "../data/health";
 import { listWorkpackagesOut, upsertWorkpackage } from "../data/workpackages";
 import { mineWorkpackages, openWorkpackages, summary, upcomingWorkpackages } from "../data/portfolio";
 import { listMilestones, upsertMilestone } from "../data/milestones";
@@ -96,8 +97,10 @@ route("GET", "/api/whoami", async ({ db, by, identity }) => ({ identity, person:
 route("GET", "/api/context/bundle", async ({ db, url }) => bundle(url, db));
 
 // ---- projects
-route("GET", "/api/projects", async ({ db, url, by }) =>
-  listProjects(
+const todayUtc = (): string => new Date().toISOString().slice(0, 10);
+// Health is added here, not in listProjects / getProjectDetail: the MCP tools share those and must not change.
+route("GET", "/api/projects", async ({ db, url, by }) => {
+  const cards = await listProjects(
     db,
     {
       status: url.searchParams.get("status") ?? undefined,
@@ -105,10 +108,16 @@ route("GET", "/api/projects", async ({ db, url, by }) =>
       owner: url.searchParams.get("owner") ?? undefined,
     },
     by,
-  ),
-);
+  );
+  const health = await healthByProject(db, todayUtc(), cards.map((c) => c.id));
+  return cards.map((c) => ({ ...c, health: health.get(c.id) ?? null }));
+});
 route("POST", "/api/projects", async ({ db, req, by }) => createProject(db, await readJson(req), by));
-route("GET", "/api/projects/:id", async ({ db, params, by }) => getProjectDetail(db, params[0], by));
+route("GET", "/api/projects/:id", async ({ db, params, by }) => {
+  const project = await getProjectDetail(db, params[0], by);
+  const health = await healthByProject(db, todayUtc(), [params[0]]);
+  return { ...project, health: health.get(params[0]) ?? null };
+});
 /** F9: read-only project report; format=md|html|pdf. Returns a ready Response (not JSON). */
 route("GET", "/api/projects/:id/report", async ({ db, env, url, params }) =>
   reportResponse(db, env, params[0], url.searchParams.get("format") ?? "html"),

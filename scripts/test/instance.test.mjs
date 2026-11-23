@@ -212,6 +212,27 @@ test("validateConfig checks the other policy fields", () => {
     assert.ok(problems.includes(f), `${f} missing in:\n${problems}`);
 });
 
+test("health thresholds default to 7 and 2; 0 and non-integers are rejected", () => {
+  const c = clone(example);
+  delete c.policy;
+  const p = resolvePolicy(c);
+  assert.equal(p.health_wp_late_days, 7);
+  assert.equal(p.health_gate_soon_days, 2);
+  for (const f of ["health_wp_late_days", "health_gate_soon_days"])
+    for (const bad of [0, -1, 1.5, "3"]) {
+      const d = clone(example);
+      d.policy = { ...d.policy, [f]: bad };
+      assert.ok(
+        validateConfig(d).some((x) => x.includes(`policy.${f}`)),
+        `${f}=${JSON.stringify(bad)} accepted`,
+      );
+    }
+  const ok = clone(example);
+  ok.policy = { ...ok.policy, health_wp_late_days: 10, health_gate_soon_days: 5 };
+  assert.deepEqual(validateConfig(ok), []);
+  assert.equal(resolvePolicy(ok).health_wp_late_days, 10);
+});
+
 test("app.name accepts a per-language object and passes it to the dashboard unchanged", () => {
   const c = clone(example);
   c.app.name = { en: "Tracker", de: "Verfolger" };
