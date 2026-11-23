@@ -430,6 +430,10 @@ export default {
   ganttToday: "Today",
   ganttProject: "Project",
   ganttAllProjects: "All projects",
+  ganttDoneProjects: "Completed projects ({n})",
+  ganttCollapse: "Collapse {title}",
+  ganttExpand: "Expand {title}",
+  ganttLegendCategory: "Category: dot before the project name",
 
   // inbox
   inboxTitle: "Inbox",
