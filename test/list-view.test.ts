@@ -106,6 +106,23 @@ describe("list view", () => {
     expect(healthCell.textContent).toBe("");
   });
 
+  it("gives the health reason a title and shows the same empty state for missing target and milestone", () => {
+    const table = render([
+      project("r", {
+        health: { state: "on_hold", reasons: [{ kind: "on_hold" }] },
+        target_date: null,
+        next_milestone: null,
+      }),
+    ]);
+    const row = table.querySelector("tr.list-row")!;
+    const reason = row.querySelector(".health-reason");
+
+    expect(reason).not.toBeNull();
+    expect(reason!.getAttribute("title")).toBe(reason!.textContent);
+    expect(row.children[3].textContent).toBe(t("none"));
+    expect(row.children[4].textContent).toBe(t("none"));
+  });
+
   it("opens the project once when its title is clicked", () => {
     const table = render([project("a")]);
     const title = table.querySelector("button.list-link")!;

@@ -2634,7 +2634,6 @@ dialog.fixed .modal-foot {
 }
 .list-view .list-row {
   height: 52px;
-  max-height: 56px;
   cursor: pointer;
 }
 .list-view .list-row:hover {
