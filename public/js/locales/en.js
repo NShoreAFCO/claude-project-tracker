@@ -698,4 +698,10 @@ export default {
   twColDates: "Dates",
   twColOwner: "Owner",
   // /tier language
+  // dialog layout
+  doneCount: "{n} done",
+  doneShow: "Show",
+  doneHide: "Hide",
+  moveWorkpackage: "Move",
+  // /dialog layout
 };

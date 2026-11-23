@@ -703,4 +703,10 @@ export default {
   twColDates: "Termine",
   twColOwner: "Verantwortlich",
   // /tier language
+  // dialog layout
+  doneCount: "{n} erledigt",
+  doneShow: "Anzeigen",
+  doneHide: "Ausblenden",
+  moveWorkpackage: "Verschieben",
+  // /dialog layout
 };
