@@ -122,6 +122,14 @@ export function returnHashFor(hash, dialogOpen, previous = "#/", lastBase = "#/"
 }
 
 /**
+ * Hash of the view to (re)render. While a project dialog is open the hash is `#/p/<id>`; a reload then
+ * redraws the view the dialog closes back to (`back`), not the grid.
+ */
+export function viewHashFor(hash, back = baseHash) {
+  return hash && hash.startsWith("#/p/") ? back || "#/" : hash;
+}
+
+/**
  * What a `#/p/<id>` route puts under the dialog and where closing it goes back to.
  * Something already on screen stays (closing returns to the view it came from, `lastBase`);
  * an empty page (deep link, reload) gets the plain grid and closes to `#/`.

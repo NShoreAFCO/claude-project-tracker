@@ -10,7 +10,7 @@ import { renderGantt } from "./gantt.js";
 import { renderMyDashboard } from "./mydash.js";
 import { renderUpcoming, renderMyWps, loadSummary } from "./portfolio.js";
 import { renderInbox } from "./inbox.js";
-import { openProject, tabFromSegment, dialogUnderlay } from "./project.js";
+import { openProject, tabFromSegment, dialogUnderlay, viewHashFor } from "./project.js";
 import { renderPeople } from "./people.js";
 import { renderTrash } from "./trash.js";
 import { sidebarModel, renderSidebar, createDrawer, goHome } from "./sidebar.js";
@@ -150,14 +150,15 @@ async function renderSearchResults(q) {
   clear(main, h("h2", t("searchResults", { q })), hits.length ? list : h("p.empty", t("searchNone")));
 }
 
-function parseHash() {
-  const raw = location.hash.replace(/^#/, "") || "/";
+function parseHash(hash = location.hash) {
+  const raw = hash.replace(/^#/, "") || "/";
   const [path, query = ""] = raw.split("?");
   return { parts: path.split("/").filter(Boolean).map(decodeURIComponent), params: new URLSearchParams(query) };
 }
 
 async function renderView() {
-  const { parts, params } = parseHash();
+  // under an open project dialog the hash is #/p/<id>: redraw the view the dialog closes back to
+  const { parts, params } = parseHash(viewHashFor(location.hash));
   const view = ["gantt", "inbox", "search", "people", "trash", "upcoming", "mine", "my"].includes(parts[0]) ? parts[0] : "grid";
   state.view = view;
   renderNav();
