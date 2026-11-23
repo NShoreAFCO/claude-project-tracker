@@ -13,11 +13,6 @@ import { sortTreeByCode } from "./order.js";
 import { catChip } from "./categories.js";
 import { healthChip } from "./health.js";
 
-/** Dialog heading: title, health chip (only when health is known), status chip. */
-export function headingNodes(p, health) {
-  const hc = healthChip(health);
-  return hc ? [p.title, " ", hc, " ", statusChip(p.status)] : [p.title, " ", statusChip(p.status)];
-}
 import {
   projectForm,
   wpForm,
@@ -52,6 +47,12 @@ import {
   revealTarget,
 } from "./wp-tree.js";
 import { decisionDialog, baselineDialog } from "./gates-ui.js";
+
+/** Dialog heading: title, health chip (only when health is known), status chip. */
+export function headingNodes(p, health) {
+  const hc = healthChip(health);
+  return hc ? [p.title, " ", hc, " ", statusChip(p.status)] : [p.title, " ", statusChip(p.status)];
+}
 
 /** Render sanitised markdown into a container (the only innerHTML use in the app). */
 export function mdBlock(src) {
