@@ -44,13 +44,16 @@ function projectRow(project, persons, onOpen) {
     project.title,
   );
 
+  const reason = healthLine(project.health);
+  // the reason is ellipsised in list mode; the title keeps the full text readable
+  if (reason) reason.setAttribute("title", reason.textContent);
   const projectCell = cell(
     h(
       "div.list-project",
       catDot("p", project.category),
       title,
     ),
-    healthLine(project.health),
+    reason,
   );
 
   const targetInfo = lateness(project.target_date, project.status === "active" ? "open" : "done");
@@ -72,7 +75,7 @@ function projectRow(project, persons, onOpen) {
     cell(healthChip(project.health)),
     projectCell,
     cell(statusChip(project.status)),
-    cell(fmtDate(project.target_date), lateChip(targetInfo)),
+    project.target_date ? cell(fmtDate(project.target_date), lateChip(targetInfo)) : cell(t("none")),
     milestone
       ? cell(
           h("div.list-next-title", milestone.title),
