@@ -2533,3 +2533,30 @@ dialog.fixed .modal-foot {
   margin-left: auto;
 }
 /* /dialog layout */
+
+/* dependency links */
+.tw-row .dep-line {
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+.dep-link {
+  font-size: inherit;
+  padding: 0;
+}
+.dep-target {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  animation: dep-flash 2s ease-out;
+}
+@keyframes dep-flash {
+  from {
+    background: color-mix(in srgb, var(--color-primary) 32%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dep-target {
+    animation: none;
+  }
+}
+/* /dependency links */

@@ -709,4 +709,7 @@ export default {
   doneHide: "Ausblenden",
   moveWorkpackage: "Verschieben",
   // /dialog layout
+  // dependency links
+  neededBy: "Benötigt von",
+  // /dependency links
 };
