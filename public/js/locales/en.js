@@ -80,8 +80,6 @@ export default {
   progress: "Progress",
   target: "Target",
   start: "Start",
-  openBranches: "Open branches",
-  contextDocs: "Context documents",
   lastActivity: "Last activity",
   blockedBy: "Blocked by",
   originLabel: "Origin",
@@ -727,4 +725,24 @@ export default {
   },
   filterHealth: "Health",
   // /health
+  // list mode
+  list: {
+    col: {
+      health: "Health",
+      project: "Project",
+      status: "Status",
+      target: "Target",
+      next: "Next milestone",
+      progress: "Progress",
+      owner: "Owner",
+      wps: "Work packages",
+      activity: "Last activity",
+    },
+    wp: { open: "{n} open", in_progress: "{n} in progress", waiting_blocked: "{n} waiting or blocked", done: "{n} done" },
+    empty: "No projects match the filters.",
+    view: "View",
+    cards: "Cards",
+    rows: "List",
+  },
+  // /list mode
 };

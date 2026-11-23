@@ -38,7 +38,7 @@ describe("grid URL state", () => {
   });
 
   it("round-trips parse and build", () => {
-    const f = { ...empty(), kpi: "overdue_milestones", category: "research", status: "active", completed: "all", tags: ["a", "b"], owner: "u1", health: "at_risk" };
+    const f = { ...empty(), kpi: "overdue_milestones", category: "research", status: "active", completed: "all", tags: ["a", "b"], owner: "u1", health: "at_risk", view: "list" };
     const hash = gridHash(f);
     const g = empty();
     expect(applyGridQuery(g, q(hash.split("?")[1]))).toBe(true);
