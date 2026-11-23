@@ -110,6 +110,17 @@ describe("shell render", () => {
     expect(e.defaultPrevented).toBe(true);
   });
 
+  it("the dashboard link calls back with an empty key, so it shows all categories again", () => {
+    const picked: string[] = [];
+    deps.onCategory = (ev: any, key: string) => (ev.preventDefault(), picked.push(key));
+    render({ filterCategory: "b" });
+    const e = dispatch(doc, links()[0], "click");
+    expect(picked).toEqual([""]);
+    expect(e.defaultPrevented).toBe(true);
+    dispatch(doc, links()[1], "click");
+    expect(picked).toEqual([""]);
+  });
+
   it("hides logout on localhost", () => {
     render({ hostname: "localhost" });
     expect(nav.querySelector(".nav-logout")).toBeNull();

@@ -75,7 +75,7 @@ function renderNav() {
   navToggle.textContent = t("navMenu");
 }
 
-/** Category entry: set the grid category filter and show the grid. */
+/** Category entry: set the grid category filter and show the grid. The dashboard entry passes "" (all categories). */
 function pickCategory(ev, key) {
   ev.preventDefault();
   state.filter.category = key;
