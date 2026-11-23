@@ -1,15 +1,28 @@
 # Changelog
 
-## Unreleased
+## v0.5.0 — 2026-11-23 (signals and order)
+
+No breaking change. No migration. Deploy only. Most changes are in the dashboard; MCP and REST keep their tool and output shapes.
+
+### Added
+- An "Overdue · n d" chip wherever a late date shows: active project target dates, next milestones on project cards, work package and milestone rows in a project, Deadlines, My work packages and My dashboard. Something is late when its date has passed and it is not done, dropped or reached. Late Gantt bars and milestones get a red outline, and the Gantt legend explains both.
+- The optional theme token `--status-late` sets the colour of the late chip and outlines. Without it they use `--status-blocked` (see `docs/THEMING.md`).
+- The dashboard URL keeps the grid filters and the active tile (`attention`, `cat`, `status`, `completed`, `tags`, `owner`), so a filtered view can be reloaded, bookmarked and shared. Closing a project returns to the view it was opened from.
+- `app.name` in the instance config may be a text per language (for example `{"en": "…", "de": "…"}`); the dashboard shows the one for the current language (see `docs/CUSTOMISING.md`).
+
+### Changed
+- Work packages are listed in code order (WP1, WP1.1, WP1.2, WP2, …) in the project view, the Gantt chart and the work package lists.
+- Deadlines is split into Overdue, This week and Later, with a Today divider.
+- Clearer labels: the attention tiles say what they count ("Projects with overdue milestones", "Blocked projects", …), and the labels for gates, progress and documents were reworded, in English and German.
+- The project context tab is at `#/p/<id>/context` in every language. Old `…/kontext` links still open it and are rewritten to `…/context`.
+- Dates in the dashboard use one formatter for the current language. Date fields show a YYYY-MM-DD hint where the browser has no date picker.
+- `get_guide` topic `batch` adds a short "Fewer turns" section: independent writes go in one message as parallel calls, tracker tools are loaded in one tool search, and `expected_version` is passed only where two writers are likely.
 
 ### Fixed
 - `GATE_LOCKED` for a dashboard person no longer includes the agent instructions (`record_gate_decision`, `log_progress` with `note: true`); agents still get them.
 - Write acknowledgements now include `reached_at` when an `upsert_milestone` reaches the milestone on its own (all `requires` done).
 - `get_guide` topic `context` no longer asks for `append_context` on `handover` after `log_progress`. One `log_progress` is the handover, with `handover_md` only where no session hook syncs `HANDOFF.md`, as the server instructions already say.
 - `docs/ai/claude-ai-project-instructions.md`: pass `expected_version` only where another writer may change the same WP.
-
-### Changed
-- `get_guide` topic `batch` adds a short "Fewer turns" section: independent writes go in one message as parallel calls, tracker tools are loaded in one tool search, and `expected_version` is passed only where two writers are likely.
 
 ## v0.4.0 — 2026-11-16 (cheaper defaults, briefing, batch writes)
 
