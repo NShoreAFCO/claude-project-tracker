@@ -692,4 +692,10 @@ export default {
   // qol:t16
   mydColItem: "Item",
   // /qol:t16
+  // tier language
+  twColCode: "Code",
+  twColTitle: "Title",
+  twColDates: "Dates",
+  twColOwner: "Owner",
+  // /tier language
 };

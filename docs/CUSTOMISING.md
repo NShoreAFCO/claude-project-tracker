@@ -77,3 +77,13 @@ A new language means a new locale file in core: contribute it upstream (`docs/UP
 | Contributing back | via a fork or a patch | pull request directly |
 
 Both work the same way otherwise. Use the template for a company deployment; use a fork if you mainly want to improve the package itself.
+
+## Optional tier tokens
+
+The work package tree tells work packages, sub-packages and tasks apart. Three optional tokens in `instance/theme.css` change its look; each falls back where it is used, so you never have to set them.
+
+| Token | Falls back to | Used for |
+|---|---|---|
+| `--tier-band` | `--color-tint` | header band of a top-level work package |
+| `--tier-rule` | `--color-border` at 60 % | rule between rows inside a work package block |
+| `--tier-guide` | `--color-border` | vertical indent guides for sub-packages and tasks |

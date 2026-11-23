@@ -27,6 +27,7 @@ import {
 import { renderContextPanel, openDocViewer } from "./context.js";
 import { collectIssues, issuesByEntity } from "./schedule-ui.js";
 import { issueList, issueBadge, scheduleMeta, milestoneItem, placeMilestones, pruneTree } from "./schedule-view.js";
+import { wpRow, wpItem, treeHead } from "./wp-tree.js";
 import { decisionDialog, baselineDialog } from "./gates-ui.js";
 
 /** Render sanitised markdown into a container (the only innerHTML use in the app). */
@@ -285,17 +286,17 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
   }
 
   /** Rows of one tree level: gate rows before, milestone rows after their WP (running context). */
-  function levelRows(list, shown, plan, rowOf) {
+  function levelRows(list, shown, plan, rowOf, depth = 1) {
     return list
       .filter((c) => !shown || shown.has(c.id))
       .flatMap((c) => [
         ...(plan.before.get(c.id) ?? []).map(rowOf),
-        wpNode(c, shown, plan, rowOf),
+        wpNode(c, shown, plan, rowOf, depth),
         ...(plan.after.get(c.id) ?? []).map(rowOf),
       ]);
   }
 
-  function wpNode(w, shown, plan, rowOf) {
+  function wpNode(w, shown, plan, rowOf, depth) {
     const leaf = !w.children?.length;
     const open = !leaf && (fold.open.has(w.id) || (shown && fold.issuesOnly));
     let slider = null;
@@ -331,44 +332,35 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       );
     if (leaf && w.last_progress_at) schedMeta.push(lastActivity(w.last_progress_at));
 
-    return h(
-      "li",
-      h(
-        "div.wp",
-        h(
-          "div.title",
-          !leaf
-            ? h(
-                "button.chev",
-                {
-                  type: "button",
-                  "aria-expanded": String(open),
-                  "aria-label": `${t(open ? "collapse" : "expand")} ${w.title}`,
-                  on: {
-                    click: () => {
-                      if (open) fold.open.delete(w.id);
-                      else fold.open.add(w.id);
-                      render();
-                    },
-                  },
-                },
-                h("span.fold-glyph", { "aria-hidden": "true" }, open ? "▾" : "▸"),
-              )
-            : null,
-          h("strong", w.code ? [h("span.wp-code", w.code), " ", w.title] : w.title),
-          statusChip(w.status),
-          w.effective_category ? catChip("w", w.effective_category, !w.category && !!w.effective_category) : null,
-          personBadge(w.effective_owner, { inherited: !w.owner, label: w.owner ? t("fOwner") : t("inheritedOwner") }),
-          w.is_human ? h("span.badge.human", { title: t("human"), "aria-label": t("human") }, "👤") : null,
-          w.locked ? h("span.badge.locked", { title: t("lockedBy", { name }) }, "🔒 ", t("locked")) : null,
-          issueBadge(w, titleOf),
-          w.critical ? h("span.badge.critical", t("criticalMark")) : null,
-          verifyBadge(w),
-          !leaf ? h("span.meta", t("subCount", { n: w.children.length })) : null,
-          ctxBadge("workpackage", w.id),
-          dates,
-        ),
-        slider,
+    const row = wpRow({
+      depth,
+      fold: {
+        leaf,
+        open,
+        label: `${t(open ? "collapse" : "expand")} ${w.title}`,
+        onToggle: () => {
+          if (open) fold.open.delete(w.id);
+          else fold.open.add(w.id);
+          render();
+        },
+      },
+      code: w.code,
+      title: w.title,
+      badges: [
+        w.effective_category ? catChip("w", w.effective_category, !w.category && !!w.effective_category) : null,
+        w.is_human ? h("span.badge.human", { title: t("human"), "aria-label": t("human") }, "👤") : null,
+        w.locked ? h("span.badge.locked", { title: t("lockedBy", { name }) }, "🔒 ", t("locked")) : null,
+        issueBadge(w, titleOf),
+        w.critical ? h("span.badge.critical", t("criticalMark")) : null,
+        verifyBadge(w),
+        !leaf ? h("span.meta", t("subCount", { n: w.children.length })) : null,
+        ctxBadge("workpackage", w.id),
+      ],
+      status: statusChip(w.status),
+      dates,
+      owner: personBadge(w.effective_owner, { inherited: !w.owner, label: w.owner ? t("fOwner") : t("inheritedOwner") }),
+      progress: slider,
+      below: [
         h(
           "div.actions",
           leaf && w.status !== "done" && w.status !== "dropped" ? writeBtn(t("adjustProgress"), () => adjustProgressDialog(id, w)) : null,
@@ -391,9 +383,9 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         w.waiting_reason ? h("div.blocked", `${t("fWaitingReason")}: ${w.waiting_reason}`) : null,
         w.drop_reason ? h("div.blocked", `${t("fDropReason")}: ${w.drop_reason}`) : null,
         w.description_md ? h("details.blocked", h("summary", t("description")), mdBlock(w.description_md)) : null,
-      ),
-      !leaf && open ? h("ul", levelRows(w.children, shown, plan, rowOf)) : null,
-    );
+      ].filter(Boolean),
+    });
+    return wpItem(depth, row, !leaf && open ? h("ul", levelRows(w.children, shown, plan, rowOf, depth + 1)) : null);
   }
 
   /** Verified (person + date) or done-but-unverified (legacy rows, verification required). */
@@ -655,7 +647,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         t("workpackages"),
         workpackageActions,
         d.workpackages.length || d.milestones.length
-          ? h("ul.tree", [...levelRows(sortedTree, shownWps, plan, rowOf), ...plan.tail.map(rowOf)])
+          ? h("ul.tree.tw-tree", [h("li.tw-headrow", treeHead()), ...levelRows(sortedTree, shownWps, plan, rowOf), ...plan.tail.map(rowOf)])
           : h("p.empty", t("noWorkpackages")),
       ),
       cblock(

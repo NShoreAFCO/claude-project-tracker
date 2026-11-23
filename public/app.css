@@ -2179,3 +2179,278 @@ details.cat-empty[open] > summary.cat-head::before {
   margin: 0 0.3rem;
 }
 /* /qol:t16 */
+/* tier language */
+/* WP tree: one bordered block per top-level WP; tier 1 band, tier 2 white, tier 3 muted; meta in shared columns */
+.tw-tree {
+  container-type: inline-size;
+  display: grid;
+  gap: 10px;
+  --tw-x: 132px;
+}
+.tw-tree ul {
+  padding: 0;
+  margin: 0;
+  border-left: 0;
+}
+.tw-head,
+.tw-row {
+  display: grid;
+  align-items: center;
+  column-gap: 10px;
+  grid-template-columns: [fold] 36px [code] 66px [ttl] minmax(0, 1fr) [st] 104px [dt] 200px [own] 34px [pct] 130px;
+}
+.tw-head {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  padding: 0 10px 2px;
+}
+.tw-head > span {
+  min-width: 0;
+}
+.tw-h-code {
+  grid-column: code;
+}
+.tw-h-ttl {
+  grid-column: ttl;
+}
+.tw-h-st {
+  grid-column: st;
+  text-align: right;
+}
+.tw-h-dt {
+  grid-column: dt;
+  text-align: right;
+}
+.tw-h-own {
+  grid-column: own;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tw-h-pct {
+  grid-column: pct;
+  text-align: right;
+}
+.tw-block {
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.tw-row.wp {
+  padding: 7px 10px;
+  min-height: 40px;
+  font-size: 14px;
+  border-bottom: 0;
+  border-top: 1px solid var(--tier-rule, color-mix(in srgb, var(--color-border) 60%, transparent));
+  gap: 0 10px;
+  position: relative;
+}
+.tw-block > .tw-row.wp {
+  border-top: 0;
+}
+.tw-row.tier-1 {
+  background-color: var(--tier-band, var(--color-tint));
+  min-height: 46px;
+}
+.tw-name {
+  font-weight: 400;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+.tier-1 .tw-name {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--color-text-strong, var(--color-text));
+}
+.tier-2 .tw-name {
+  color: var(--color-text-strong, var(--color-text));
+}
+.tw-code {
+  grid-column: code;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tier-1 .tw-code {
+  font-weight: 700;
+  color: var(--color-text-strong, var(--color-text));
+}
+.tier-2 .tw-code {
+  font-weight: 650;
+  color: var(--color-text-strong, var(--color-text));
+}
+.tier-3 .tw-code {
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+.tw-ttl {
+  grid-column: ttl;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.tier-2 .tw-ttl {
+  padding-left: 18px;
+}
+.tier-3 .tw-ttl {
+  padding-left: 36px;
+}
+/* indent guides: 1 px vertical lines, drawn on the row so they run through its second line too */
+.tw-row.tier-2,
+.tw-row.tier-3 {
+  background-image: linear-gradient(var(--tier-guide, var(--color-border)), var(--tier-guide, var(--color-border)));
+  background-size: 1px 100%;
+  background-repeat: no-repeat;
+  background-position: calc(var(--tw-x) + 6px) 0;
+}
+.tw-row.tier-3 {
+  background-image:
+    linear-gradient(var(--tier-guide, var(--color-border)), var(--tier-guide, var(--color-border))),
+    linear-gradient(var(--tier-guide, var(--color-border)), var(--tier-guide, var(--color-border)));
+  background-size:
+    1px 100%,
+    1px 100%;
+  background-position:
+    calc(var(--tw-x) + 6px) 0,
+    calc(var(--tw-x) + 24px) 0;
+}
+.tw-st,
+.tw-dt,
+.tw-own,
+.tw-pct {
+  min-width: 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  font-variant-numeric: tabular-nums;
+}
+.tw-st {
+  grid-column: st;
+}
+.tw-dt {
+  grid-column: dt;
+  white-space: nowrap;
+  gap: 4px;
+}
+.tw-own {
+  grid-column: own;
+}
+.tw-pct {
+  grid-column: pct;
+}
+.tw-pct input[type="range"] {
+  width: 70px;
+  min-width: 0;
+}
+.tw-pct .progress-row,
+.tw-pct .slider {
+  width: 100%;
+  min-width: 0;
+}
+.tw-row .chip,
+.tw-row .badge {
+  font-size: 12px;
+  font-weight: 600;
+}
+.tw-row .initials {
+  font-size: 12px;
+}
+.tw-row .meta {
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+.tw-below {
+  grid-column: ttl / -1;
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
+  min-width: 0;
+}
+.tw-below .actions {
+  justify-content: flex-start;
+}
+.tw-fold,
+.tw-nofold {
+  grid-column: fold;
+  grid-row: 1 / span 2;
+}
+.tw-nofold {
+  width: 36px;
+}
+/* fold toggle: as tall as the row */
+.tw-fold {
+  align-self: stretch;
+  margin: -7px 0 -7px -10px;
+  width: 36px;
+  min-width: 36px;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+.tw-fold:hover {
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+  color: var(--color-text-strong, var(--color-text));
+}
+.tw-headrow {
+  list-style: none;
+}
+@container (max-width: 720px) {
+  .tw-tree {
+    --tw-x: 122px;
+  }
+  .tw-head {
+    display: none;
+  }
+  .tw-row {
+    grid-template-columns: [fold] 36px [code] 56px [ttl] minmax(0, 1fr) [st] auto;
+    row-gap: 6px;
+  }
+  .tw-st {
+    grid-column: st;
+    grid-row: 1;
+  }
+  .tw-dt {
+    grid-column: code / st;
+    grid-row: 2;
+    justify-content: flex-start;
+  }
+  .tw-own {
+    grid-column: st;
+    grid-row: 2;
+  }
+  .tw-pct {
+    grid-column: code / -1;
+    grid-row: 3;
+    justify-content: flex-start;
+  }
+  .tw-fold,
+  .tw-nofold {
+    grid-row: 1 / span 3;
+  }
+  .tw-below {
+    grid-column: code / -1;
+  }
+  .tier-2 .tw-ttl {
+    padding-left: 12px;
+  }
+  .tier-3 .tw-ttl {
+    padding-left: 24px;
+  }
+  .tw-row.tier-2 {
+    background-position: calc(var(--tw-x) + 4px) 0;
+  }
+  .tw-row.tier-3 {
+    background-position:
+      calc(var(--tw-x) + 4px) 0,
+      calc(var(--tw-x) + 16px) 0;
+  }
+}
+/* /tier language */
