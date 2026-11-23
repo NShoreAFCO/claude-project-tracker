@@ -93,6 +93,37 @@ describe("code order in the work package tree", () => {
   });
 });
 
+describe("focus after a fold toggle", () => {
+  it("focuses the rebuilt control once render has replaced the old one", async () => {
+    const doc = installFakeDom() as any;
+    // @ts-expect-error untyped JS module
+    const { renderRefocus } = (await import("../public/js/project.js")) as any;
+    const host = doc.createElement("div");
+    doc.body.append(host);
+    const build = () => {
+      const li = doc.createElement("li");
+      li.setAttribute("id", "wp-1");
+      const b = doc.createElement("button");
+      b.setAttribute("class", "chev");
+      li.append(b);
+      host.replaceChildren(li);
+    };
+    build();
+    const old = host.querySelector("button.chev");
+    old.focus();
+    renderRefocus(build, () => doc.getElementById("wp-1")?.querySelector("button.chev"));
+    const fresh = host.querySelector("button.chev");
+    expect(fresh).not.toBe(old);
+    expect(doc.activeElement).toBe(fresh);
+  });
+  it("does nothing when the control is gone", async () => {
+    installFakeDom();
+    // @ts-expect-error untyped JS module
+    const { renderRefocus } = (await import("../public/js/project.js")) as any;
+    expect(() => renderRefocus(() => {}, () => null)).not.toThrow();
+  });
+});
+
 describe("dialog heading health chip", () => {
   const p = { title: "Alpha", status: "active" };
   const text = (nodes: any[]) => nodes.map((n) => (typeof n === "string" ? n : n.textContent)).join("");

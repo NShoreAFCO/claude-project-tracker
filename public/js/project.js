@@ -48,6 +48,12 @@ import {
 } from "./wp-tree.js";
 import { decisionDialog, baselineDialog } from "./gates-ui.js";
 
+/** Re-renders, then puts keyboard focus back on the control that was toggled (the render replaces it). */
+export function renderRefocus(render, find) {
+  render();
+  find()?.focus();
+}
+
 /** Dialog heading: title, health chip (only when health is known), status chip. */
 export function headingNodes(p, health) {
   const hc = healthChip(health);
@@ -361,7 +367,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         open: fold.doneOpen,
         onToggle: () => {
           fold.doneOpen = !fold.doneOpen;
-          render();
+          renderRefocus(render, () => document.querySelector("button.tw-donefold-btn"));
         },
         rows: rows(done),
       }),
@@ -416,7 +422,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         onToggle: () => {
           if (open) fold.open.delete(w.id);
           else fold.open.add(w.id);
-          render();
+          renderRefocus(render, () => document.getElementById(depTargetId("wp", w.id))?.querySelector("button.chev"));
         },
       },
       code: w.code,
@@ -551,7 +557,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
               on: {
                 click: () => {
                   fold.issuesOnly = !fold.issuesOnly;
-                  render();
+                  renderRefocus(render, () => document.querySelector("button.badge.issue"));
                 },
               },
             },
