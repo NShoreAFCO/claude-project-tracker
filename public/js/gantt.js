@@ -457,6 +457,10 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed, toggleGr
   const markX = (mk) =>
     mk.kind === "gate" ? x((partsOf(mk.row)?.extent ?? { from: toDay(mk.row.start_date) }).from) - 4 : x(toDay(mk.date) + 0.5);
 
+  // critical path: a dark rail under the bar or mark (red stays for "late", a state)
+  const critRail = (x1, x2, y) =>
+    s("rect", { class: "crit-rail", x: x1, y: y + ROW - 5, width: Math.max(2, x2 - x1), height: 3 });
+
   if (showDeps) {
     const defs = s(
       "defs",
@@ -558,6 +562,7 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed, toggleGr
           titleOf,
         ),
       );
+    if (crit) svg.append(mk.kind === "gate" ? critRail(cx - 2, cx + 9, y) : critRail(cx - (state === "done" ? 10 : 8), cx + (state === "done" ? 10 : 8), y));
     if (mk.kind === "gate") {
       const top = cy - 9;
       const bot = cy + 9;
@@ -618,10 +623,16 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed, toggleGr
         s("rect", { class: "proj-row", x: 0, y, width, height: ROW }),
         s("path", { class: "proj-caret", d: open ? `M8,${y + 12} h8 l-4,6 z` : `M10,${y + 9} v12 l6,-6 z` }),
         dot,
-        s("text", { class: "proj-label", x: 42, y: y + 20 }, name, ...(name !== r.p.title ? [s("title", {}, r.p.title)] : [])),
         ...(hs ? [s("text", { class: `proj-health h-${hs.replace(/_/g, "-")}`, x: LABEL - 10, y: y + 20, "text-anchor": "end" }, t(`healthState.${hs}`))] : []),
       );
-      svg.append(g);
+      // the title opens the project dialog; it sits beside the toggle row, not inside it, so a click never folds the group
+      const link = s(
+        "a",
+        { class: "proj-link", href: `#/p/${encodeURIComponent(r.p.id)}`, "aria-label": t("ganttOpenProject", { title: r.p.title }) },
+        s("text", { class: "proj-label", x: 42, y: y + 20 }, name, ...(name !== r.p.title ? [s("title", {}, r.p.title)] : [])),
+      );
+      link.addEventListener("click", (e) => e.stopPropagation?.());
+      svg.append(g, link);
       return;
     }
 
@@ -645,7 +656,7 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed, toggleGr
       s("title", {}, barTooltip(`${w.code ? `${w.code} ${w.title}` : w.title}: ${range} · ${fmtPct(pct)}${lateText}`, w, titleOf));
     const barY = y + 7;
     const barH = ROW - 14;
-    // bars are neutral (colour comes from the CSS classes); only state (late, critical) colours a bar
+    // bars are neutral (colour comes from the CSS classes); only "late" colours a bar, critical gets a rail
     const rect = (cls, span, extra = {}) =>
       s("rect", { class: cls, x: x(span.from), y: barY, width: Math.max(2, x(span.to) - x(span.from)), height: barH, rx: 3, ...extra }, title());
 
@@ -687,15 +698,13 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed, toggleGr
       ["block", "bar-fill bar-actual-block"],
     ]) {
       if (!parts[key]) continue;
-      const el = rect(cls, parts[key]);
-      if (showCritical && w.critical) {
-        el.classList.add("critical");
-        el.style.setProperty("stroke", "var(--status-blocked)");
-        el.style.setProperty("stroke-width", "3");
-      }
-      svg.append(el);
+      svg.append(rect(cls, parts[key]));
     }
     if (parts.actual) svg.append(rect("bar-actual", parts.actual));
+    if (showCritical && w.critical) {
+      const span = parts.planned ?? parts.extent;
+      svg.append(critRail(x(span.from), x(span.to), y));
+    }
     if (parts.overdue) {
       const { from, to, closed } = parts.overdue;
       const yTop = barY;
