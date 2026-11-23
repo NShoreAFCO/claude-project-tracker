@@ -1,7 +1,6 @@
 import { t, fmtDate } from "./i18n.js";
 import { h } from "./dom.js";
-import { lateness, lateChip } from "./lateness.js";
-import { parseIssues, issueText, milestoneView, decisionLabel, slipText } from "./schedule-ui.js";
+import { parseIssues, issueText, slipText } from "./schedule-ui.js";
 
 /** Builds the schedule issue list for an entity. */
 export function issueList(entity, titleOf) {
@@ -64,58 +63,6 @@ export function issueBadge(entity, titleOf) {
     },
     "⚠ ",
     String(issues.length),
-  );
-}
-
-/** Builds a milestone list item. */
-export function milestoneItem(ms, { today, titleOf, requiresText, unlocksText, actions = [], decide }) {
-  const { state, gate, decision } = milestoneView(ms, today);
-  const stateLabel = state === "done" ? t("reached") : state === "overdue" ? t("overdue") : t("msOpen");
-
-  const meta = [
-    h("span", `${t("due")}: ${fmtDate(ms.due_date)}`, " ", lateChip(lateness(ms.due_date, state === "done" ? "reached" : "open"))),
-    h("span", `${t("requires")}: ${requiresText}`),
-    h("span", `${t("unlocks")}: ${unlocksText}`),
-  ];
-
-  for (const node of scheduleMeta(ms)) {
-    if (node.classList.contains("critical")) {
-      continue;
-    }
-    meta.push(node);
-  }
-
-  let lastDecision = null;
-  if (gate && ms.decisions?.length) {
-    const last = ms.decisions[ms.decisions.length - 1];
-    lastDecision = h(
-      "div.meta.last-decision",
-      t("decisionBy", {
-        decision: decisionLabel(last.decision),
-        name: last.decided_by?.name ?? "",
-        date: fmtDate(last.decided_at.slice(0, 10)),
-      }),
-    );
-  }
-
-  const actionNodes = [];
-  if (gate && typeof decide === "function") {
-    actionNodes.push(h("button.btn.small.secondary", { type: "button", on: { click: decide } }, t("recordDecision")));
-  }
-  actionNodes.push(...actions);
-
-  return h(
-    "li.ms." + (gate ? "underlay-gate" : "underlay-milestone"),
-    h("span.ms-diamond." + state, { "aria-hidden": "true", class: gate ? "gate" : "" }),
-    h("strong", ms.title),
-    h("span.ms-state." + state, stateLabel),
-    gate ? h("span.badge.gate", t("gateMark")) : null,
-    gate ? h("span.badge.decision.decision-" + decision, decisionLabel(decision)) : null,
-    ms.critical ? h("span.badge.critical", t("criticalMark")) : null,
-    h("div.meta", meta),
-    lastDecision,
-    issueList(ms, titleOf),
-    h("div.actions", actionNodes),
   );
 }
 

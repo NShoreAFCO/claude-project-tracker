@@ -14,7 +14,7 @@ import { renderUpcoming } from "../public/js/portfolio.js";
 // @ts-expect-error plain browser module without types
 import { lateness } from "../public/js/lateness.js";
 // @ts-expect-error plain browser module without types
-import { milestoneItem } from "../public/js/schedule-view.js";
+import { slimMilestoneRow } from "../public/js/wp-tree.js";
 // @ts-expect-error plain browser module without types
 import { renderGantt } from "../public/js/gantt.js";
 
@@ -110,9 +110,9 @@ describe("overdue chip", () => {
 
   it("project dialog: an unreached milestone past its date has the chip, a reached one never", () => {
     const opts = { today: "2026-05-08", titleOf: () => "", requiresText: "-", unlocksText: "-" };
-    const late = milestoneItem({ id: "m1", title: "M1", due_date: "2026-05-01", done: false }, opts);
+    const late = slimMilestoneRow({ id: "m1", title: "M1", due_date: "2026-05-01", done: false }, opts);
     expect(chipText(late)).toBe("⚠Overdue · 7 d");
-    const reached = milestoneItem({ id: "m2", title: "M2", due_date: "2026-05-01", done: true }, opts);
+    const reached = slimMilestoneRow({ id: "m2", title: "M2", due_date: "2026-05-01", done: true }, opts);
     expect(chipText(reached)).toBeNull();
   });
 

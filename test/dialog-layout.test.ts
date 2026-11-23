@@ -101,6 +101,38 @@ describe("gate and milestone rows", () => {
     expect(li.querySelector(".tw-ms-due")!.textContent).toContain("2026");
   });
 
+  it("keeps the overdue chip, schedule issues, baseline, slip and critical mark on the row", () => {
+    const ms = {
+      id: "m",
+      title: "Late one",
+      due_date: "2026-11-01",
+      done: false,
+      critical: true,
+      baseline_end: "2026-10-20",
+      slip_days: 12,
+      schedule_issues: JSON.stringify([{ type: "needs_unscheduled", related_id: "w" }]),
+    };
+    const li = tree.slimMilestoneRow(ms, { ...base, titleOf: () => "Some WP" });
+    doc.body.append(li);
+    expect(li.querySelector(".chip.late")).not.toBeNull();
+    expect(li.querySelector(".badge.issue")).not.toBeNull();
+    expect(li.querySelector(".slip")).not.toBeNull();
+    expect(li.querySelector(".badge.critical")).not.toBeNull();
+    expect(li.textContent).toContain("2026");
+  });
+
+  it("shows the last decision of a gate", () => {
+    const decided = {
+      ...gate,
+      decision_state: "go",
+      decisions: [{ decision: "go", decided_by: { name: "Sam Lead" }, decided_at: "2026-11-20T10:00:00Z" }],
+    };
+    const li = tree.slimMilestoneRow(decided, base);
+    doc.body.append(li);
+    expect(li.querySelector(".tw-ms-last")!.textContent).toContain("Sam Lead");
+    expect(tree.slimMilestoneRow(gate, base).querySelector(".tw-ms-last")).toBeNull();
+  });
+
   it("a gate sits before the first WP it unlocks", () => {
     const tr = [
       { id: "x", title: "X", children: [] },
