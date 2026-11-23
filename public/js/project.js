@@ -26,8 +26,8 @@ import {
 } from "./forms.js";
 import { renderContextPanel, openDocViewer } from "./context.js";
 import { collectIssues, issuesByEntity } from "./schedule-ui.js";
-import { issueList, issueBadge, scheduleMeta, milestoneItem, placeMilestones, pruneTree } from "./schedule-view.js";
-import { wpRow, wpItem, treeHead } from "./wp-tree.js";
+import { issueList, issueBadge, scheduleMeta, placeMilestones, pruneTree } from "./schedule-view.js";
+import { wpRow, wpItem, treeHead, splitDone, doneFold, rowActions, slimMilestoneRow } from "./wp-tree.js";
 import { decisionDialog, baselineDialog } from "./gates-ui.js";
 
 /** Render sanitised markdown into a container (the only innerHTML use in the app). */
@@ -115,11 +115,17 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
   const back = baseHash;
   let detail;
   let current = { tab, owner };
-  const fold = { open: new Set(), issuesOnly: false, blocks: { branches: false, tokenCost: false, timeline: true } };
+  const fold = {
+    open: new Set(),
+    issuesOnly: false,
+    doneOpen: false,
+    blocks: { description: false, scorecard: false, branches: false, tokenCost: false, timeline: true },
+  };
   const tabs = h("div.tabs", { role: "tablist" });
   const m = openModal({
     title: t("loading"),
     headExtra: tabs,
+    fixed: true,
     onClose: () => {
       window.removeEventListener("tracker:changed", onChanged);
       // only reset the URL if it still points at this project (close events fire asynchronously)
@@ -287,13 +293,28 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
 
   /** Rows of one tree level: gate rows before, milestone rows after their WP (running context). */
   function levelRows(list, shown, plan, rowOf, depth = 1) {
-    return list
-      .filter((c) => !shown || shown.has(c.id))
-      .flatMap((c) => [
+    const rows = (items) =>
+      items.flatMap((c) => [
         ...(plan.before.get(c.id) ?? []).map(rowOf),
         wpNode(c, shown, plan, rowOf, depth),
         ...(plan.after.get(c.id) ?? []).map(rowOf),
       ]);
+    const visible = list.filter((c) => !shown || shown.has(c.id));
+    if (depth > 1) return rows(visible);
+    // top level: done work packages fold into one line above the open blocks
+    const { open, done } = splitDone(visible);
+    return [
+      ...doneFold({
+        count: done.length,
+        open: fold.doneOpen,
+        onToggle: () => {
+          fold.doneOpen = !fold.doneOpen;
+          render();
+        },
+        rows: rows(done),
+      }),
+      ...rows(open),
+    ];
   }
 
   function wpNode(w, shown, plan, rowOf, depth) {
@@ -361,22 +382,27 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       owner: personBadge(w.effective_owner, { inherited: !w.owner, label: w.owner ? t("fOwner") : t("inheritedOwner") }),
       progress: slider,
       below: [
-        h(
-          "div.actions",
-          leaf && w.status !== "done" && w.status !== "dropped" ? writeBtn(t("adjustProgress"), () => adjustProgressDialog(id, w)) : null,
-          leaf &&
+        rowActions({
+          edit: { label: t("edit"), onClick: () => wpForm(id, w, detail.workpackages, null, detail.milestones) },
+          menuLabel: t("moreActions"),
+          gate: (el) => roleGate(el, "write"),
+          items: [
+            leaf && w.status !== "done" && w.status !== "dropped"
+              ? { label: t("adjustProgress"), onClick: () => adjustProgressDialog(id, w) }
+              : null,
+            leaf &&
             w.progress >= 100 &&
             w.status !== "done" &&
             w.status !== "dropped" &&
             can(w.verification === "sign_off" ? "verify_sign_off" : "write")
-            ? smallBtn(t("markComplete"), () => markCompleteDialog(id, w), "secondary")
-            : null,
-          writeBtn(t("edit"), () => wpForm(id, w, detail.workpackages, null, detail.milestones)),
-          writeBtn(`+ ${t("addSubWorkpackage")}`, () => wpForm(id, null, detail.workpackages, w.id, detail.milestones)),
-          writeMenu(t("moreActions"), [
+              ? { label: t("markComplete"), onClick: () => markCompleteDialog(id, w) }
+              : null,
+            { label: t("addSubWorkpackage"), onClick: () => wpForm(id, null, detail.workpackages, w.id, detail.milestones) },
+            { label: t("addMilestone"), onClick: () => milestoneForm(id, null, detail.workpackages) },
+            { label: t("moveWorkpackage"), onClick: () => wpForm(id, w, detail.workpackages, null, detail.milestones) },
             { label: t("delete"), danger: true, onClick: () => deleteEntity("workpackage", w.id, w.title, id) },
-          ]),
-        ),
+          ],
+        }),
         schedMeta.length ? h("div.meta", schedMeta) : null,
         issueList(w, titleOf),
         w.blocked_by ? h("div.blocked", `${t("blockedBy")}: ${blockedLabel(w.blocked_by)}`, blockedAge(w)) : null,
@@ -552,18 +578,19 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
     const today = utcDateString();
 
     const rowOf = (ms) =>
-      milestoneItem(ms, {
+      slimMilestoneRow(ms, {
         today,
-        titleOf,
         requiresText: ms.requires?.length ? ms.requires.map((wpId) => wpTitle[wpId] || wpId).join(", ") : t("none"),
         unlocksText: ms.unlocks?.length ? ms.unlocks.map((wpId) => wpTitle[wpId] || wpId).join(", ") : t("none"),
-        decide: can("decide") ? () => decisionDialog({ project: p, milestone: ms }) : undefined,
-        actions: [
-          writeBtn(t("edit"), () => milestoneForm(id, ms, detail.workpackages)),
-          writeMenu(t("moreActions"), [
+        actions: rowActions({
+          edit: { label: t("edit"), onClick: () => milestoneForm(id, ms, detail.workpackages) },
+          menuLabel: t("moreActions"),
+          gate: (el) => roleGate(el, "write"),
+          items: [
+            ms.gate && can("decide") ? { label: t("recordDecision"), onClick: () => decisionDialog({ project: p, milestone: ms }) } : null,
             { label: t("delete"), danger: true, onClick: () => deleteEntity("milestone", ms.id, ms.title, id) },
-          ]),
-        ],
+          ],
+        }),
       });
 
     const sortedTree = sortTreeByCode(d.workpackages);
@@ -608,11 +635,20 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       closureBlocks,
       copies,
       block(
+        t("workpackages"),
+        workpackageActions,
+        d.workpackages.length || d.milestones.length
+          ? h("ul.tree.tw-tree", [h("li.tw-headrow", treeHead()), ...levelRows(sortedTree, shownWps, plan, rowOf), ...plan.tail.map(rowOf)])
+          : h("p.empty", t("noWorkpackages")),
+      ),
+      cblock(
+        "description",
         t("description"),
         writeBtn(t("edit"), () => projectForm(p, { workpackages: d.workpackages })),
         p.description_md ? mdBlock(p.description_md) : h("p.meta", p.summary || t("noDescription")),
       ),
-      block(
+      cblock(
+        "scorecard",
         t("scorecard"),
         writeBtn(t("setScores"), () => scoresForm(id, d.scores), "secondary"),
         d.scores.length
@@ -642,13 +678,6 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
               ),
             )
           : h("p.empty", t("noScores")),
-      ),
-      block(
-        t("workpackages"),
-        workpackageActions,
-        d.workpackages.length || d.milestones.length
-          ? h("ul.tree.tw-tree", [h("li.tw-headrow", treeHead()), ...levelRows(sortedTree, shownWps, plan, rowOf), ...plan.tail.map(rowOf)])
-          : h("p.empty", t("noWorkpackages")),
       ),
       cblock(
         "branches",
