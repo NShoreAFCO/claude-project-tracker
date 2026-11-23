@@ -2503,6 +2503,7 @@ dialog.fixed .modal-foot {
   font-size: 12px;
 }
 .tw-ms .tw-ms-due,
+.tw-ms .tw-ms-last,
 .tw-ms .tw-ms-req,
 .tw-ms .tw-ms-unl {
   color: var(--color-text-muted);

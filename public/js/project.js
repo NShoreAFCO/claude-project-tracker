@@ -636,6 +636,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
     const rowOf = (ms) =>
       slimMilestoneRow(ms, {
         today,
+        titleOf,
         id: depTargetId("ms", ms.id),
         requiresText: ms.requires?.length ? wpRefs(ms.requires) : t("none"),
         unlocksText: ms.unlocks?.length ? wpRefs(ms.unlocks) : t("none"),

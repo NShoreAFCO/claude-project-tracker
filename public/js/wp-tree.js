@@ -1,9 +1,10 @@
 // Work package tree rows: tier language (depth 1 = work package, 2 = sub-work package, 3+ = task).
 // Pure layout: the caller builds the content parts, the fold state and its callback are passed in.
-import { t } from "./i18n.js";
+import { t, fmtDate } from "./i18n.js";
 import { h, menuButton } from "./dom.js";
-import { fmtDate } from "./i18n.js";
 import { milestoneView, decisionLabel } from "./schedule-ui.js";
+import { issueBadge, scheduleMeta } from "./schedule-view.js";
+import { lateness, lateChip } from "./lateness.js";
 import { compareCode } from "./order.js";
 
 /** Tier of a row by depth: 1 for the top level, 2 for its children, 3 for everything deeper. */
@@ -106,10 +107,21 @@ export function rowActions({ edit, items = [], menuLabel, gate = (x) => x }) {
   return gate(box);
 }
 
-/** Slim gate or milestone row inside the tree: icon, code, title, state, due date, requires, unlocks, one action. */
-export function slimMilestoneRow(ms, { today, requiresText, unlocksText, actions = null, id = null }) {
+/**
+ * Slim gate or milestone row inside the tree: icon, code, title, state, due date with its overdue chip, schedule
+ * issues, baseline / slip / critical mark, last gate decision, requires, unlocks, one action.
+ */
+export function slimMilestoneRow(ms, { today, titleOf, requiresText, unlocksText, actions = null, id = null }) {
   const { state, gate, decision } = milestoneView(ms, today);
   const stateLabel = state === "done" ? t("reached") : state === "overdue" ? t("overdue") : t("msOpen");
+  const last = gate && ms.decisions?.length ? ms.decisions[ms.decisions.length - 1] : null;
+  const lastText = last
+    ? t("decisionBy", {
+        decision: decisionLabel(last.decision),
+        name: last.decided_by?.name ?? "",
+        date: fmtDate((last.decided_at ?? "").slice(0, 10)),
+      })
+    : null;
   return h(
     "li.tw-ms.ms." + (gate ? "underlay-gate" : "underlay-milestone"),
     { id, dataset: { kind: gate ? "gate" : "milestone" } },
@@ -118,7 +130,10 @@ export function slimMilestoneRow(ms, { today, requiresText, unlocksText, actions
     h("strong.tw-ms-title", ms.title),
     h("span.ms-state." + state, stateLabel),
     gate ? h("span.badge.decision.decision-" + decision, decisionLabel(decision)) : null,
-    h("span.tw-ms-due", `${t("due")}: ${fmtDate(ms.due_date)}`),
+    h("span.tw-ms-due", `${t("due")}: ${fmtDate(ms.due_date)}`, " ", lateChip(lateness(ms.due_date, state === "done" ? "reached" : "open"))),
+    issueBadge(ms, titleOf),
+    ...scheduleMeta(ms),
+    lastText ? h("span.tw-ms-last.meta", lastText) : null,
     h("span.tw-ms-req", t("requires"), ": ", requiresText),
     h("span.tw-ms-unl", t("unlocks"), ": ", unlocksText),
     actions,
