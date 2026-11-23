@@ -1,10 +1,12 @@
 // Hand-rolled SVG Gantt (SPEC §9). Only work packages with dates get a bar; dates are never invented.
-import { t, fmtDate, fmtPct, INTL_LOCALE } from "./i18n.js";
+import { t, fmtDate, fmtPct, fmtMonth, fmtDayMonth } from "./i18n.js";
+import { lateness } from "./lateness.js";
 import { api } from "./api.js";
 import { h, clear, statusChip, toastError } from "./dom.js";
 import { openProject } from "./project.js";
 import { WP_CATEGORIES, catVar, catDot, catLabel } from "./categories.js";
 import { collectIssues } from "./schedule-ui.js";
+import { sortByCode } from "./order.js";
 import { issueEdgeKeys, ghostBar, ghostDiamond, issueMark, slipMark, barTooltip, barParts, placeMarks, markDate, markEdges, markArrowPath, markHalf } from "./gantt-marks.js";
 
 const NS = "http://www.w3.org/2000/svg";
@@ -19,7 +21,6 @@ const toDay = (ymd) => {
   const [y, m, d] = ymd.slice(0, 10).split("-").map(Number);
   return Date.UTC(y, m - 1, d) / DAY;
 };
-const monthFmt = () => new Intl.DateTimeFormat(INTL_LOCALE, { month: "short", year: "2-digit", timeZone: "UTC" });
 
 let selected = "";
 let level = "all";
@@ -116,7 +117,7 @@ export async function renderGantt(main, state) {
 
   for (const [p, detail] of detailsBy) {
     const projectRows = [];
-    const roots = detail.workpackages || [];
+    const roots = sortByCode(detail.workpackages || []);
     const projectMilestones = detail.milestones || [];
 
     const collectDescendantSpan = (root) => {
@@ -171,7 +172,7 @@ export async function renderGantt(main, state) {
           visibleByWp.set(w.id, top);
         }
 
-        for (const child of w.children || []) walkAll(child, depth + 1, top);
+        for (const child of sortByCode(w.children)) walkAll(child, depth + 1, top);
         return;
       }
 
@@ -192,7 +193,7 @@ export async function renderGantt(main, state) {
         undated.push({ type: "wp", w, p });
       }
 
-      for (const child of w.children || []) walkAll(child, depth + 1, null);
+      for (const child of sortByCode(w.children)) walkAll(child, depth + 1, null);
     };
 
     const markTop = (w, rootId) => (topOf.set(w.id, rootId), (w.children || []).forEach((c) => markTop(c, rootId)));
@@ -355,12 +356,11 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
 
   // week grid (Mondays) for short ranges, month grid otherwise
   if (span <= 120) {
-    const dm = new Intl.DateTimeFormat(INTL_LOCALE, { day: "2-digit", month: "2-digit", timeZone: "UTC" });
     // 1970-01-01 was a Thursday → Monday = day % 7 === 4
     for (let day = min + ((4 - (min % 7) + 7) % 7); day <= max; day += 7) {
       svg.append(
         s("line", { class: "grid-line", x1: x(day), x2: x(day), y1: TOP - 6, y2: height }),
-        s("text", { x: x(day) + 3, y: 13 }, dm.format(new Date(day * DAY))),
+        s("text", { x: x(day) + 3, y: 13 }, fmtDayMonth(new Date(day * DAY))),
       );
     }
   }
@@ -375,7 +375,7 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
     if (day < min || span <= 120) continue;
     svg.append(
       s("line", { class: "grid-line", x1: x(day), x2: x(day), y1: TOP - 6, y2: height }),
-      s("text", { x: x(day) + 4, y: 13 }, monthFmt().format(d)),
+      s("text", { x: x(day) + 4, y: 13 }, fmtMonth(d)),
     );
   }
 
@@ -481,12 +481,16 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
     const state = milestoneState(m, today);
     const crit = showCritical && m.critical ? " critical" : "";
     const gateText = m.gate ? ` · ${t("ganttGate")}: ${t(`decisionState.${m.decision_state}`)}` : "";
+    // the milestone state already says "overdue"; the day count comes from the shared helper
+    const late = state === "overdue" ? lateness(m.due_date, "open") : null;
+    const lateCls = late?.late ? " late" : "";
+    const lateText = late?.late ? ` · ${t("lateChipTitle", { date: late.date, n: late.days })}` : "";
     const tip = () =>
       s(
         "title",
         {},
         barTooltip(
-          `${mk.label} ${m.title}${mk.date ? `: ${fmtDate(mk.date)}` : ""} · ${milestoneStateLabel(state)}${gateText}`,
+          `${mk.label} ${m.title}${mk.date ? `: ${fmtDate(mk.date)}` : ""} · ${milestoneStateLabel(state)}${gateText}${lateText}`,
           m,
           titleOf,
         ),
@@ -497,7 +501,7 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
       svg.append(
         s(
           "g",
-          { class: `gate-mark decision-${m.decision_state}${crit}` },
+          { class: `gate-mark decision-${m.decision_state}${crit}${lateCls}` },
           s("path", { class: "gate-pole", d: `M${cx},${bot} V${top}` }),
           s("path", { class: "gate-flag", d: `M${cx},${top} h8 l-3,4 l3,4 h-8 z` }),
           s("text", { class: "mark-label", x: cx - 3, y: cy + 4, "text-anchor": "end" }, mk.label),
@@ -514,7 +518,7 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
         "g",
         {},
         s("polygon", {
-          class: `ms ms-${state}${crit}`,
+          class: `ms ms-${state}${crit}${lateCls}`,
           points: `${cx},${cy - half} ${cx + half},${cy} ${cx},${cy + half} ${cx - half},${cy}`,
         }),
         s("text", { class: "mark-label", x: cx + half + 3, y: cy + 4 }, mk.label),
@@ -548,7 +552,10 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
     const range = r.actualOnly
       ? `${fmtDate(w.actual_start || w.actual_end)} – ${w.actual_end ? fmtDate(w.actual_end) : t("ganttOngoing")}`
       : `${fmtDate(r.start_date)} – ${fmtDate(r.end_date)}`;
-    const title = () => s("title", {}, barTooltip(`${w.code ? `${w.code} ${w.title}` : w.title}: ${range} · ${fmtPct(pct)}`, w, titleOf));
+    const late = lateness(w.end_date, w.status);
+    const lateText = late.late ? ` · ${t("lateChipTitle", { date: late.date, n: late.days })}` : "";
+    const title = () =>
+      s("title", {}, barTooltip(`${w.code ? `${w.code} ${w.title}` : w.title}: ${range} · ${fmtPct(pct)}${lateText}`, w, titleOf));
     const colour = catVar("w", w.bar_category);
     const barY = y + 7;
     const barH = ROW - 14;
@@ -579,6 +586,12 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
     if (parts.planned) {
       const bg = rect("bar-bg", parts.planned);
       if (showCritical && w.critical) bg.classList.add("critical");
+      if (late.late) {
+        bg.classList.add("late");
+        // inline, because rect() sets the category colour inline
+        bg.style.setProperty("stroke", "var(--status-late, var(--status-blocked, var(--color-danger)))");
+        bg.style.setProperty("stroke-width", "2");
+      }
       svg.append(bg);
     }
     if (parts.progress && parts.progress.to > parts.progress.from) svg.append(rect("bar-fill", parts.progress));
@@ -640,6 +653,7 @@ function legend(allMarks = []) {
     h("span", h("span.legend-actual"), t("ganttLegendActual")),
     h("span", h("span.legend-progress"), t("ganttLegendProgress")),
     h("span", h("span.legend-overdue"), t("ganttLegendOverdue")),
+    h("span", h("span.legend-late"), t("ganttLegendLate")),
     h("span", h("span.legend-ghost"), t("ganttBaseline")),
     h("span", h("span.legend-critical"), t("ganttCritical")),
     h("span", h("span.legend-issue", { "aria-hidden": "true" }, "⚠"), t("ganttIssues")),

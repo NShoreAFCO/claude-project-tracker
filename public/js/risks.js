@@ -1,5 +1,5 @@
 // Risks & deviations tab: 5x5 heat map, list and form (spec F6). heatMapCells/heatMapSvg/riskForm drafted by Copilot.
-import { t, fmtDate } from "./i18n.js";
+import { t, fmtDate, dateFieldHint } from "./i18n.js";
 import { api } from "./api.js";
 import { can, gate as roleGate } from "./access.js";
 import { h, clear, formDialog, saveWithConflict, toast, toastError, errorText, personBadge, menuButton } from "./dom.js";
@@ -101,7 +101,7 @@ export function riskForm(projectId, existing, { persons, workpackages, milestone
       value: existing?.response ?? "",
     },
     { name: "action", label: t("fRiskAction"), type: "textarea", rows: 3, value: existing?.action ?? null, full: true },
-    { name: "due_date", label: t("due"), type: "date", value: existing?.due_date ?? null },
+    { name: "due_date", label: t("due"), type: "date", hint: dateFieldHint(), value: existing?.due_date ?? null },
     {
       name: "status",
       label: t("fRiskStatus"),
@@ -140,6 +140,7 @@ export function riskForm(projectId, existing, { persons, workpackages, milestone
       name: "nc_effectiveness_check_date",
       label: t("fNcEffectivenessCheck"),
       type: "date",
+      hint: dateFieldHint(),
       value: existing?.nc_effectiveness_check_date ?? null,
       showWhen: nc,
     },

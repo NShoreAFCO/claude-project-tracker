@@ -71,10 +71,12 @@ export async function decisionDialog({ project, milestone }) {
   );
 
   const links = gateLinksBlock(milestone);
+  const state = milestone.decision_state === "pending" || (milestone.reached === true && !milestone.decision_state) ? h("p.meta.gate-state", decisionLabel("pending")) : null;
+  const introParts = [intro, state, links].filter(Boolean);
 
   return formDialog({
     title: t("decisionTitle", { name: milestone.title }),
-    intro: links ? h("div", intro, links) : intro,
+    intro: introParts.length > 1 ? h("div", introParts) : intro,
     submitLabel: t("recordDecision"),
     fields: [
       {

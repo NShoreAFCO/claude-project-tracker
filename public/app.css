@@ -1049,6 +1049,20 @@ details.inherited > summary {
 .gantt .ms-overdue {
   stroke: var(--ms-overdue);
 }
+.gantt .ms.late {
+  stroke: var(--status-late, var(--status-blocked, var(--color-danger)));
+  stroke-width: 2px;
+}
+.gantt .gate-mark.late .gate-flag {
+  stroke: var(--status-late, var(--status-blocked, var(--color-danger)));
+  stroke-width: 2px;
+}
+.card-target .chip.late,
+.box-sub .chip.late,
+td .chip.late,
+.meta .chip.late {
+  margin-left: 0.4rem;
+}
 .gantt-legend {
   display: flex;
   flex-wrap: wrap;
@@ -1114,6 +1128,14 @@ details.inherited > summary {
 }
 .chip.flag-closure {
   --c: var(--status-done);
+}
+.chip.late {
+  --c: var(--status-late, var(--status-blocked, var(--color-danger)));
+  background: var(--color-surface);
+  border: 2px solid var(--c);
+  border-left-width: 4px;
+  color: var(--status-late, var(--status-blocked, var(--color-danger)));
+  font-weight: 600;
 }
 .chip .age {
   font-weight: 400;
@@ -1536,6 +1558,25 @@ tr.overdue td:nth-child(4),
 tr.overdue td:nth-child(5) {
   font-weight: 700;
 }
+tr.group-head th {
+  text-align: left;
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding-top: 0.9rem;
+  background: var(--color-tint);
+  color: var(--color-text-strong);
+}
+tr.overdue td.end-date {
+  white-space: nowrap;
+  min-width: max-content;
+}
+tr.today-divider td {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  border-top: 2px solid var(--color-accent, currentColor);
+  border-bottom: 2px solid var(--color-accent, currentColor);
+}
 .report-actions {
   display: inline-flex;
   align-items: center;
@@ -1856,6 +1897,18 @@ details.cat-empty[open] > summary.cat-head::before {
 }
 .legend-overdue {
   border: 2px dashed var(--color-primary);
+}
+.legend-late {
+  display: inline-block;
+  width: 1.4rem;
+  height: 0.7rem;
+  margin: 0 0.3rem;
+  border: 2px solid var(--status-late, var(--status-blocked, var(--color-danger)));
+  border-radius: 3px;
+  vertical-align: middle;
+}
+.gantt-legend .ms-diamond.overdue {
+  border-color: var(--status-late, var(--status-blocked, var(--color-danger)));
 }
 /* /qol:t10 */
 /* qol:t07 */

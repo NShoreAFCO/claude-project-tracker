@@ -1,5 +1,6 @@
-// Project popup: Overview (description, WP tree, branches, scorecard, token cost, timeline, copy buttons) and Kontext.
+// Project popup: Overview (description, WP tree, branches, scorecard, token cost, timeline, copy buttons) and Context.
 import { t, fmtDate, fmtDateTime, fmtNum, fmtPct, STRINGS } from "./i18n.js";
+import { lateness, lateChip } from "./lateness.js";
 import { renderRisks } from "./risks.js";
 import { basisLabel, riskChip, staleChip, lastActivity } from "./progress-view.js";
 import { utcDateString } from "./portfolio.js";
@@ -8,6 +9,7 @@ import { h, clear, openModal, statusChip, progressBar, copyText, toast, toastErr
 import { closureDialog } from "./closure.js";
 import { can, gate as roleGate } from "./access.js";
 import { renderMarkdown } from "./markdown.js";
+import { sortTreeByCode } from "./order.js";
 import { catChip } from "./categories.js";
 import {
   projectForm,
@@ -78,7 +80,38 @@ const smallBtn = (label, onClick, cls = "ghost") => h(`button.btn.small.${cls}`,
 const writeBtn = (label, onClick, cls) => roleGate(smallBtn(label, onClick, cls), "write");
 const writeMenu = (label, items) => roleGate(menuButton(label, items), "write");
 
-export async function openProject(id, { tab = "overview", owner = null, openDoc = null } = {}) {
+/** The URL the project dialog was opened from; closing it puts this back instead of `#/`. */
+let baseHash = "#/";
+
+/** Hash to return to for a dialog opened at `hash`; `dialogOpen` = another project dialog is already showing. */
+export function returnHashFor(hash, dialogOpen, previous = "#/", lastBase = "#/") {
+  if (!hash || hash === "#") return "#/";
+  if (hash.startsWith("#/p/")) return dialogOpen ? previous : lastBase || "#/";
+  return hash;
+}
+
+/**
+ * What a `#/p/<id>` route puts under the dialog and where closing it goes back to.
+ * Something already on screen stays (closing returns to the view it came from, `lastBase`);
+ * an empty page (deep link, reload) gets the plain grid and closes to `#/`.
+ */
+export function dialogUnderlay(hasContent, lastBase = "#/") {
+  return hasContent ? { renderGrid: false, closeTo: lastBase || "#/" } : { renderGrid: true, closeTo: "#/" };
+}
+
+/** Tab named by the last route segment; `kontext` is the old name of `context`. */
+export function tabFromSegment(seg) {
+  return seg === "context" || seg === "kontext" ? "context" : seg === "risks" ? "risks" : "overview";
+}
+
+/** Route hash of a project tab. */
+export function projectHash(id, tab) {
+  return `#/p/${encodeURIComponent(id)}${tab === "context" ? "/context" : tab === "risks" ? "/risks" : ""}`;
+}
+
+export async function openProject(id, { tab = "overview", owner = null, openDoc = null, lastBase = "#/" } = {}) {
+  baseHash = returnHashFor(location.hash, !!document.querySelector("dialog[open]"), baseHash, lastBase);
+  const back = baseHash;
   let detail;
   let current = { tab, owner };
   const fold = { open: new Set(), issuesOnly: false, blocks: { branches: false, tokenCost: false, timeline: true } };
@@ -90,10 +123,10 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       window.removeEventListener("tracker:changed", onChanged);
       // only reset the URL if it still points at this project (close events fire asynchronously)
       if (location.hash.startsWith(`#/p/${encodeURIComponent(id)}`) && !document.querySelector("dialog[open]"))
-        history.replaceState(null, "", "#/");
+        history.replaceState(null, "", back);
     },
   });
-  history.replaceState(null, "", `#/p/${encodeURIComponent(id)}${tab === "context" ? "/kontext" : tab === "risks" ? "/risks" : ""}`);
+  history.replaceState(null, "", projectHash(id, tab));
 
   const cblock = (key, title, actions, ...content) => {
     const open = fold.blocks[key];
@@ -146,7 +179,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
 
   function setTab(name, owner) {
     current = { tab: name, owner: owner ?? (name === "context" ? current.owner : null) };
-    history.replaceState(null, "", `#/p/${encodeURIComponent(id)}${name === "context" ? "/kontext" : name === "risks" ? "/risks" : ""}`);
+    history.replaceState(null, "", projectHash(id, name));
     render();
   }
 
@@ -212,7 +245,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         "aria-label": t("contextBadge", { n: ctxCount(kind, ownerId) }),
         on: { click: () => setTab("context", { owner_kind: kind, owner_id: ownerId }) },
       },
-      `≡ ${ctxCount(kind, ownerId)}`,
+      t(ctxCount(kind, ownerId) === 1 ? "ctxDocsCount_one" : "ctxDocsCount", { n: ctxCount(kind, ownerId) }),
     );
 
   /** blocked_by is wp:<id>, ms:<id>, ext:<text> or free text; show titles instead of ids. */
@@ -280,7 +313,10 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       slider = h("div.slider", input, h("output", fmtPct(w.progress)));
     } else slider = progressBar(w.effective_progress);
 
-    const dates = w.start_date || w.end_date ? h("span.meta", `${fmtDate(w.start_date)} – ${fmtDate(w.end_date)}`) : null;
+    const dates =
+      w.start_date || w.end_date
+        ? h("span.meta", `${fmtDate(w.start_date)} – ${fmtDate(w.end_date)}`, " ", lateChip(lateness(w.end_date, w.status)))
+        : null;
     const lockingMilestone = w.locked ? detail.milestones.find((ms) => ms.unlocks?.includes(w.id) && ms.reached_at === null) : null;
     const name = lockingMilestone?.title || "";
     const schedMeta = scheduleMeta(w).filter((n) => !n.classList.contains("critical"));
@@ -421,7 +457,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       "div.meta",
       h("span", `${t("originLabel")}: `, h("b", `${STRINGS.originIcon[p.origin] || ""} ${t(`origin.${p.origin}`)}`)),
       h("span", `${t("start")}: `, h("b", fmtDate(p.start_date))),
-      h("span", `${t("target")}: `, h("b", fmtDate(p.target_date))),
+      h("span", `${t("target")}: `, h("b", fmtDate(p.target_date)), lateChip(lateness(p.target_date, p.status === "active" ? "open" : "done"))),
       internal && p.repo_url ? h("span", `${t("repo")}: `, safeLink(p.repo_url)) : null,
       (p.tags || []).length
         ? h(
@@ -538,7 +574,8 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         ],
       });
 
-    const shownTree = pruneTree(d.workpackages, shownWps);
+    const sortedTree = sortTreeByCode(d.workpackages);
+    const shownTree = pruneTree(sortedTree, shownWps);
     const plan = placeMilestones(shownTree, d.milestones, (w) => fold.open.has(w.id) || (!!shownWps && fold.issuesOnly));
 
     const workpackageActions = h(
@@ -618,7 +655,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         t("workpackages"),
         workpackageActions,
         d.workpackages.length || d.milestones.length
-          ? h("ul.tree", [...levelRows(d.workpackages, shownWps, plan, rowOf), ...plan.tail.map(rowOf)])
+          ? h("ul.tree", [...levelRows(sortedTree, shownWps, plan, rowOf), ...plan.tail.map(rowOf)])
           : h("p.empty", t("noWorkpackages")),
       ),
       cblock(

@@ -47,6 +47,8 @@ Coloured stripes and outlines on status chips. Marks, never text: each ≥ 3:1 a
 
 Card chips for the status rules: `--status-blocked` (the red "Blocked" chip of a project with a blocked top-level work package) and `--status-waiting` (the amber "Waiting" chip). The chip text stays `--color-text-strong`; the tokens only colour the bar and outline, so they are marks like the others (≥ 3:1 on `--color-surface`). Existing instance themes must add both tokens (`npm run check` reports them as missing).
 
+`--status-late` colours the outline and text of the "Overdue · n d" chip. It also draws the red outline on late Gantt bars and late milestones. It is optional: where it is used, it falls back to `--status-blocked`, so a value in `theme.css` always wins. Set it in a theme to use another red (≥ 4.5:1 on `--color-surface`, as it is used for text).
+
 ### Risk marks
 
 Fills for the risk heat map, the score chips and the risk type chips: `--risk-low`, `--risk-medium`, `--risk-high`, `--risk-critical` (score bands 1–4, 5–9, 10–14, 15–25) and `--risk-nc` (nonconformity) and `--risk-opportunity`. Text sits on these fills, so `--color-text-strong` on each must reach ≥ 7:1 (light to mid tones). Existing instance themes must add all six tokens (`npm run check` reports them as missing).

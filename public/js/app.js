@@ -1,16 +1,16 @@
-// Entry point: hash router (#/, #/gantt, #/inbox, #/search?q=…, #/p/<id>[/kontext]), nav and search.
+// Entry point: hash router (#/, #/gantt, #/inbox, #/search?q=…, #/p/<id>[/context]), nav and search.
 import config from "../instance/config.js";
 import { t, setLocale } from "./i18n.js";
 import { loadMe, POLICY } from "./access.js";
 import { renderUserBar } from "./userbar.js";
 import { api } from "./api.js";
 import { h, clear, toastError } from "./dom.js";
-import { renderGrid } from "./grid.js";
+import { renderGrid, applyGridQuery } from "./grid.js";
 import { renderGantt } from "./gantt.js";
 import { renderMyDashboard } from "./mydash.js";
 import { renderUpcoming, renderMyWps, loadSummary } from "./portfolio.js";
 import { renderInbox } from "./inbox.js";
-import { openProject } from "./project.js";
+import { openProject, tabFromSegment, dialogUnderlay } from "./project.js";
 import { renderPeople } from "./people.js";
 import { renderTrash } from "./trash.js";
 import { sidebarModel, renderSidebar, createDrawer, goHome } from "./sidebar.js";
@@ -169,7 +169,10 @@ async function renderView() {
   else if (view === "gantt") await renderGantt(main, state);
   else if (view === "inbox") await renderInbox(main, state);
   else if (view === "search") await renderSearchResults(params.get("q") || "");
-  else renderGrid(main, state);
+  else {
+    applyGridQuery(state.filter, params);
+    renderGrid(main, state);
+  }
 }
 
 async function route() {
@@ -177,14 +180,15 @@ async function route() {
   try {
     if (!state.projects.length) await loadProjects();
     if (parts[0] === "p" && parts[1]) {
-      // deep link to a project: show the grid underneath, then the modal
-      if (state.view !== "grid" || !main.childElementCount) {
+      // link to a project: keep the view it came from under the modal; an empty page gets the grid
+      const under = dialogUnderlay(!!main.childElementCount, lastBaseHash);
+      if (under.renderGrid) {
         state.view = "grid";
         renderNav();
         renderGrid(main, state);
       }
       document.querySelectorAll("dialog[open]").forEach((d) => d.close());
-      openProject(parts[1], { tab: parts[2] === "kontext" ? "context" : parts[2] === "risks" ? "risks" : "overview" });
+      openProject(parts[1], { tab: tabFromSegment(parts[2]), lastBase: under.closeTo });
       return;
     }
     // navigating to a base view closes any open popup (project, forms, dialogs)
@@ -195,7 +199,17 @@ async function route() {
   }
 }
 
-window.addEventListener("hashchange", route);
+/** Last hash that was not a project dialog; a link that jumps straight to `#/p/...` closes back to it. */
+let lastBaseHash = "#/";
+window.addEventListener("hashchange", (e) => {
+  try {
+    const old = new URL(e.oldURL).hash;
+    if (old && old !== "#" && !old.startsWith("#/p/")) lastBaseHash = old;
+  } catch {
+    /* keep the previous value */
+  }
+  route();
+});
 // A language saved in the profile form changes the shell too.
 window.addEventListener("tracker:locale", () => onLocaleChange());
 // Any successful write anywhere (forms, context panel, inbox) → reload cards and the current view.

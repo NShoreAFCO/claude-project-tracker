@@ -22,13 +22,22 @@ export let INTL_LOCALE;
 let dtf;
 let df;
 let nf;
+let mf;
+let dmf;
+
+/** Instance name: a string, or { en, de }; picks the locale, then en, then the first value. */
+export function pickName(name, locale) {
+  if (!name || typeof name !== "object") return name;
+  const v = name[locale] || name.en || Object.values(name).find((x) => typeof x === "string" && x);
+  return v || undefined;
+}
 
 export function setLocale(code) {
   if (!LOCALES[code]) return false;
 
   LOCALE = code;
   STRINGS = mergeStrings(LOCALES[LOCALE], {
-    appTitle: config.app?.name,
+    appTitle: pickName(config.app?.name, LOCALE),
     ...(config.strings?.[LOCALE] || {}),
   });
   INTL_LOCALE = INTL[LOCALE];
@@ -36,6 +45,8 @@ export function setLocale(code) {
   dtf = new Intl.DateTimeFormat(INTL_LOCALE, { dateStyle: "medium", timeStyle: "short" });
   df = new Intl.DateTimeFormat(INTL_LOCALE, { dateStyle: "medium" });
   nf = new Intl.NumberFormat(INTL_LOCALE);
+  mf = new Intl.DateTimeFormat(INTL_LOCALE, { month: "short", year: "2-digit", timeZone: "UTC" });
+  dmf = new Intl.DateTimeFormat(INTL_LOCALE, { day: "2-digit", month: "2-digit", timeZone: "UTC" });
 
   if (typeof document !== "undefined") {
     document.documentElement.lang = LOCALE;
@@ -76,6 +87,16 @@ export const fmtDate = (ymd) => {
   const [y, m, d] = ymd.slice(0, 10).split("-").map(Number);
   return df.format(new Date(y, m - 1, d));
 };
+/** Gantt axis labels (UTC): month + year, and day.month. */
+export const fmtMonth = (date) => mf.format(date);
+export const fmtDayMonth = (date) => dmf.format(date);
+/** Format hint for date inputs, only where the browser falls back to a plain text field. */
+export function dateFieldHint() {
+  if (typeof document === "undefined") return undefined;
+  const i = document.createElement("input");
+  i.type = "date";
+  return i.type === "date" ? undefined : t("dateHint");
+}
 export const fmtNum = (n) => (n === null || n === undefined ? t("none") : nf.format(n));
 export const fmtPct = (n) => `${nf.format(Math.round((n ?? 0) * 10) / 10)} %`;
 export function fmtBytes(b) {

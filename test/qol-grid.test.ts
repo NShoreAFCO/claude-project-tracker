@@ -4,7 +4,7 @@ import { dispatch, installFakeDom, type FDoc, type FEl } from "./fake-dom";
 
 vi.mock("../public/js/project.js", () => ({ openProject: vi.fn() }));
 vi.mock("../public/js/forms.js", () => ({ projectForm: vi.fn() }));
-vi.mock("../public/js/portfolio.js", () => ({ summaryBar: () => null }));
+vi.mock("../public/js/portfolio.js", () => ({ summaryBar: () => null, KPI_KEYS: ["overdue_milestones", "gates_awaiting_decision", "blocked", "stale", "schedule_issues", "open_high_risks", "missing_target_date", "missing_owner"] }));
 // @ts-expect-error plain browser module without types
 import { filterProjects, orderTags, statusOptions, completedMode, saveGridFilter, loadGridFilter, renderGrid } from "../public/js/grid.js";
 // @ts-expect-error plain browser module without types
@@ -225,5 +225,37 @@ describe("grid render", () => {
       dispatch(doc, tagBtn(), "click"); // close again
       expect(doc.listenerCount("keydown")).toBe(0);
     });
+  });
+
+  it("attention select lists all eight tile filters plus All, labelled like the tiles", () => {
+    renderGrid(main as any, state);
+    const sel = main.querySelectorAll("select").find((s) => s.getAttribute("aria-label") === "Attention")!;
+    const opts = sel.querySelectorAll("option");
+    expect(opts).toHaveLength(9);
+    expect(opts.slice(1).map((o) => o.getAttribute("value"))).toEqual([
+      "overdue_milestones",
+      "gates_awaiting_decision",
+      "blocked",
+      "stale",
+      "schedule_issues",
+      "open_high_risks",
+      "missing_target_date",
+      "missing_owner",
+    ]);
+    expect(opts[1].textContent).toBe("Projects with overdue milestones");
+  });
+
+  it("a reached gate without a decision reads the one phrase on the card", () => {
+    state.projects = [full("a", { current_gate: { title: "Go/No-go", due_date: null, decision_state: "pending" } })];
+    renderGrid(main as any, state);
+    expect(main.querySelector(".card-gate")!.textContent).toContain("Reached · decision pending");
+  });
+
+  it("a project in the blocked tile set shows the blocked line even without a blocked top-level work package", () => {
+    state.summary = { blocked: { count: 1, project_ids: ["a"] } };
+    renderGrid(main as any, state);
+    const cards = main.querySelectorAll("article.card");
+    expect(cards[0].querySelector(".flag-blocked")).not.toBeNull();
+    expect(cards[1].querySelector(".flag-blocked")).toBeNull();
   });
 });

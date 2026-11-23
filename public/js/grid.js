@@ -5,7 +5,8 @@ import { h, clear, statusChip, progressBar, personBadge, ageDays } from "./dom.j
 import { openProject } from "./project.js";
 import { projectForm } from "./forms.js";
 import { basisLabel, riskChip, staleChip } from "./progress-view.js";
-import { summaryBar } from "./portfolio.js";
+import { summaryBar, KPI_KEYS } from "./portfolio.js";
+import { lateness, lateChip } from "./lateness.js";
 import { GRID_FILTER_KEY } from "./sidebar.js";
 import { PROJECT_CATEGORIES, catVar, catDot, catLabel, knownCategory } from "./categories.js";
 
@@ -78,14 +79,68 @@ export function loadGridFilter(filter, storage) {
   return filter;
 }
 let hydrated = false;
+
+/** Filter as URL query params (`attention`, `cat`, `status`, `completed`, `tags`, `owner`); defaults are omitted. */
+export function filterToQuery(filter) {
+  const p = new URLSearchParams();
+  if (KPI_KEYS.includes(filter.kpi)) p.set("attention", filter.kpi);
+  if (filter.category) p.set("cat", filter.category);
+  if (filter.status) p.set("status", filter.status);
+  if (completedMode(filter) !== "hide") p.set("completed", completedMode(filter));
+  if (checkedTags(filter).length) p.set("tags", checkedTags(filter).join(","));
+  if (filter.owner) p.set("owner", filter.owner);
+  return p;
+}
+
+/** Hash for the grid view: `#/` or `#/?…`. */
+export function gridHash(filter) {
+  const q = filterToQuery(filter).toString();
+  return q ? `#/?${q}` : "#/";
+}
+
+/**
+ * Apply URL params to `filter`. Returns false (filter untouched) when the query has no valid grid param;
+ * otherwise the URL is the whole state: every field is reset first and unknown or bad values are ignored.
+ */
+export function applyGridQuery(filter, params) {
+  const attention = params.get("attention");
+  const cat = params.get("cat");
+  const status = params.get("status");
+  const completed = params.get("completed");
+  const tags = (params.get("tags") || "").split(",").filter(Boolean);
+  const owner = params.get("owner");
+  const next = {
+    kpi: KPI_KEYS.includes(attention) ? attention : "",
+    category: cat || "",
+    status: PROJECT_STATUSES.includes(status) ? status : "",
+    completed: COMPLETED_MODES.includes(completed) ? completed : "",
+    tags,
+    owner: owner || "",
+  };
+  if (!next.kpi && !next.category && !next.status && !next.completed && !tags.length && !next.owner) return false;
+  Object.assign(filter, next);
+  if (filter.status && !statusOptions(completedMode(filter)).includes(filter.status)) filter.status = "";
+  hydrated = true; // the URL wins over the stored filter
+  return true;
+}
+
+/** Mirror the filter into the hash of the grid view (no history entry); other routes are left alone. */
+export function syncGridUrl(filter, loc = globalThis.location, hist = globalThis.history) {
+  if (!loc || !hist) return;
+  const [path] = (loc.hash || "").replace(/^#/, "").split("?");
+  if (path !== "/" && path !== "") return;
+  const next = gridHash(filter);
+  if (loc.hash !== next) hist.replaceState(null, "", next);
+}
 /** Removes the open tag popover's document listener; a rerender discards that popover, so it must run first. */
 let disposePop = null;
 const FOCUS = "data-focus";
 
 /** Red "Blocked" (with age), amber "Waiting (n)" and "Closure due" chips of a card (spec F3). */
-function flagChips(p) {
+function flagChips(p, blockedIds = null) {
   const chips = [];
-  if (p.stalled_blocked) {
+  // the tile counts any blocked work package; the card shows the line for the same projects
+  if (p.stalled_blocked || blockedIds?.has(p.id)) {
     const n = ageDays(p.blocked_since);
     chips.push(h("span.chip.flag-blocked.outline", t("chipBlocked"), n === null ? null : h("span.age", t("ageDays", { n }))));
   }
@@ -106,7 +161,7 @@ function gateBox(g) {
   );
 }
 
-function card(p, persons) {
+function card(p, persons, blockedIds = null) {
   const owner = p.owner_initials ? { initials: p.owner_initials, name: persons.get(p.owner_id) || p.owner_initials } : null;
   const noTarget = noTargetChip(p);
   const ms = p.next_milestone;
@@ -128,7 +183,16 @@ function card(p, persons) {
         STRINGS.originIcon[p.origin] || "",
       ),
     ),
-    h("div.card-target", noTarget || [t("target"), ": ", h("b", fmtDate(p.target_date))]),
+    h(
+      "div.card-target",
+      noTarget || [
+        t("target"),
+        ": ",
+        h("b", fmtDate(p.target_date)),
+        // only an active project can be late; other statuses never show the chip
+        lateChip(lateness(p.target_date, p.status === "active" ? "open" : "done")),
+      ],
+    ),
     h(
       "div.underlay-wp.card-box.wp-counts",
       h("div.box-label", t("wpCountsLabel")),
@@ -147,14 +211,14 @@ function card(p, persons) {
           "div.underlay-milestone.card-box.next-ms",
           h("div.box-label", t("nextMilestone")),
           h("div.box-title", ms.title),
-          h("div.box-sub", ms.due_date ? fmtDate(ms.due_date) : t("noDate")),
+          h("div.box-sub", ms.due_date ? fmtDate(ms.due_date) : t("noDate"), lateChip(lateness(ms.due_date, "open"))),
         )
       : null,
     gateBox(p.current_gate),
     h(
       "div.card-minor",
       h("div.status-row", personBadge(owner, { label: t("fOwner") })),
-      flagChips(p),
+      flagChips(p, blockedIds),
       p.summary ? h("p.summary", p.summary) : null,
       progressBar(p.progress),
       h("div.meta", basisLabel(p.progress_basis)),
@@ -191,7 +255,7 @@ function noTargetChip(p) {
 }
 
 /** `all` = the unfiltered project list: a category is empty only when it has no projects at all. */
-function categoryBlocks(shown, persons, filter, all = shown) {
+function categoryBlocks(shown, persons, filter, all = shown, blockedIds = null) {
   return [...PROJECT_CATEGORIES, null]
     .map((key) => {
       const projects = shown.filter((p) => knownCategory("p", p.category) === key);
@@ -204,7 +268,7 @@ function categoryBlocks(shown, persons, filter, all = shown) {
           h("header.cat-head", catDot("p", key), h("h2", label), h("span.count", String(projects.length))),
           h(
             "div.cards",
-            projects.map((p) => card(p, persons)),
+            projects.map((p) => card(p, persons, blockedIds)),
           ),
         );
       }
@@ -365,8 +429,7 @@ export function renderGrid(main, state, restore = null) {
     "select",
     { "aria-label": t("filterAttention"), on: { change: (e) => ((filter.kpi = e.target.value), renderGrid(main, state)) } },
     h("option", { value: "" }, `${t("filterAttention")}: ${t("filterAll")}`),
-    ["gates_awaiting_decision", "stale"].map((k) => h("option", { value: k }, t(`filterKpi.${k}`))),
-    ["gates_awaiting_decision", "stale"].includes(kpi) ? null : kpi ? h("option", { value: kpi }, t(`kpi.${kpi}`)) : null,
+    KPI_KEYS.map((k) => h("option", { value: k }, t(`kpi.${k}`))),
   );
   attentionSel.value = kpi;
 
@@ -386,7 +449,7 @@ export function renderGrid(main, state, restore = null) {
       h("span.spacer"),
       can("write") ? h("button.btn", { type: "button", on: { click: () => projectForm(null) } }, `+ ${t("newProject")}`) : null,
     ),
-    shown.length ? categoryBlocks(shown, persons, filter, state.projects) : h("p.empty", t("noProjects")),
+    shown.length ? categoryBlocks(shown, persons, filter, state.projects, new Set(state.summary?.blocked?.project_ids ?? [])) : h("p.empty", t("noProjects")),
   );
 
   if (restore?.key) {
@@ -396,4 +459,5 @@ export function renderGrid(main, state, restore = null) {
       [...main.querySelectorAll(`[${FOCUS}]`)].find((el) => el.getAttribute(FOCUS) === restore.key) ?? (restore.popOpen ? tagBtn : null);
     target?.focus();
   }
+  syncGridUrl(filter);
 }
