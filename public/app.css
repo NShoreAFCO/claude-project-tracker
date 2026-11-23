@@ -809,14 +809,6 @@ details.inherited > summary {
   stroke: var(--color-accent);
   stroke-width: 2;
 }
-.gantt .bar-bg {
-  fill: var(--color-tint);
-  stroke: var(--color-primary);
-  stroke-width: 1;
-}
-.gantt .bar-fill {
-  fill: var(--color-primary);
-}
 .gantt .proj-row {
   fill: var(--color-tint);
 }
@@ -1853,10 +1845,6 @@ details.cat-empty[open] > summary.cat-head::before {
 }
 /* /qol:t06 */
 /* qol:t10 */
-.gantt .bar-bg {
-  fill-opacity: 0.3;
-  stroke-width: 1;
-}
 .gantt .bar-actual {
   fill: none;
   stroke-width: 2.5;
@@ -1882,14 +1870,8 @@ details.cat-empty[open] > summary.cat-head::before {
   border-radius: 3px;
   vertical-align: middle;
 }
-.legend-planned {
-  background: var(--color-tint);
-}
 .legend-actual {
   border-width: 3px;
-}
-.legend-progress {
-  background: var(--color-primary);
 }
 .legend-overdue {
   border: 2px dashed var(--color-primary);
