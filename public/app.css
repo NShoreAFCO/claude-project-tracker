@@ -2376,13 +2376,12 @@ details.cat-empty[open] > summary.cat-head::before {
   list-style: none;
 }
 @container (max-width: 720px) {
-  .tw-tree {
-    --tw-x: 122px;
-  }
   .tw-head {
     display: none;
   }
+  /* on the rows: a container query cannot restyle .tw-tree, the container itself */
   .tw-row {
+    --tw-x: 122px;
     grid-template-columns: [fold] 36px [code] 56px [ttl] minmax(0, 1fr) [st] auto;
     row-gap: 6px;
   }

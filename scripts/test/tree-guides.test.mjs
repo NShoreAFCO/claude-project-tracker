@@ -35,8 +35,13 @@ test("the guides sit inside that indent (tier 2 at +6 px of 18, tier 3 at +6 and
   assert.match(wide(".tw-row.tier-3"), /calc\(var\(--tw-x\) \+ 24px\) 0/);
 });
 
-test("narrow: nested rows start dates, progress and the line below at the indented title", () => {
+test("narrow: the guide origin moves with the title column, on the rows (a container query cannot style its container)", () => {
   assert.ok(narrowAt > 0, "container query present");
+  assert.match(narrow(".tw-row"), /--tw-x:\s*122px/);
+  assert.doesNotMatch(narrow(".tw-tree"), /--tw-x/);
+});
+
+test("narrow: nested rows start dates, progress and the line below at the indented title", () => {
   assert.match(narrow(".tw-row.tier-2"), /--tw-ind:\s*12px/);
   assert.match(narrow(".tw-row.tier-3"), /--tw-ind:\s*24px/);
   for (const tier of ["tier-2", "tier-3"]) {
