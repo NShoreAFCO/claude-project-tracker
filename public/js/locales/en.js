@@ -730,6 +730,28 @@ export default {
   // qol:t16
   mydColItem: "Item",
   // /qol:t16
+  // my work
+  mw: {
+    title: "My work",
+    decisions: "Decisions waiting on me",
+    overdue: "Overdue",
+    due14: "Due in 14 days",
+    blocked: "Waiting or blocked",
+    recent: "Recently changed",
+    empty: {
+      decisions: "No decisions waiting.",
+      overdue: "Nothing overdue.",
+      due14: "Nothing due in the next 14 days.",
+      blocked: "Nothing waiting or blocked.",
+      recent: "No changes in the last 7 days.",
+    },
+    reached: "Reached",
+    scopeLabel: "Scope",
+    scope: { assigned: "Assigned to me", all: "Mine and unassigned in my projects" },
+    projectLabel: "Project",
+    allProjects: "All projects",
+  },
+  // /my work
   // tier language
   twColCode: "Code",
   twColTitle: "Title",

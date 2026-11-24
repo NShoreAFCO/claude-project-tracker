@@ -106,6 +106,7 @@ export const REST_ACTIONS: Readonly<Record<string, Action>> = {
   "GET /api/workpackages/mine": "read",
   "GET /api/workpackages/open": "read",
   "GET /api/gates/open": "read",
+  "GET /api/me/recent": "read",
   "GET /api/persons/me/dashboard": "read",
   "PUT /api/persons/me/dashboard": "read",
   // work packages (completing or verifying a sign_off WP also needs "verify_sign_off", checked in the data layer)

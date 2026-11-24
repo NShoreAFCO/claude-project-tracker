@@ -2821,3 +2821,78 @@ fieldset.rule-kind label.check {
   gap: 0.5rem;
   align-items: center;
 }
+
+/* my work */
+.my-work {
+  display: grid;
+  gap: 1.25rem;
+}
+.my-work-host {
+  margin-top: 0.75rem;
+}
+.mw-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+}
+.mw-count {
+  padding: 0 0.5rem;
+  border-radius: 999px;
+  background: var(--color-tint);
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+.mw-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+.mw-row + .mw-row {
+  border-top: 1px solid var(--color-border);
+}
+.mw-link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+  width: 100%;
+  padding: 0.45rem 0.75rem;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.mw-link:hover {
+  background: var(--color-tint);
+}
+.mw-code,
+.mw-project,
+.mw-date,
+.mw-person {
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+.mw-title,
+.mw-summary {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+.mw-section .empty {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  color: var(--color-text-muted);
+}
+@media (min-width: 1400px) {
+  .my-work {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+}
+/* /my work */

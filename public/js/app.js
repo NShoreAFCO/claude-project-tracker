@@ -9,6 +9,7 @@ import { renderGrid, applyGridQuery } from "./grid.js";
 import { renderGantt } from "./gantt.js";
 import { renderMyDashboard } from "./mydash.js";
 import { renderUpcoming, renderMyWps, loadSummary } from "./portfolio.js";
+import { renderMyWork } from "./my-work-page.js";
 import { renderInbox } from "./inbox.js";
 import { openProject, tabFromSegment, dialogUnderlay, viewHashFor } from "./project.js";
 import { renderPeople } from "./people.js";
@@ -159,7 +160,7 @@ function parseHash(hash = location.hash) {
 async function renderView() {
   // under an open project dialog the hash is #/p/<id>: redraw the view the dialog closes back to
   const { parts, params } = parseHash(viewHashFor(location.hash));
-  const view = ["gantt", "inbox", "search", "people", "trash", "upcoming", "mine", "my"].includes(parts[0]) ? parts[0] : "grid";
+  const view = ["gantt", "inbox", "search", "people", "trash", "upcoming", "mine", "my", "work"].includes(parts[0]) ? parts[0] : "grid";
   state.view = view;
   renderNav();
   if (view === "people") await renderPeople(main, state);
@@ -167,6 +168,7 @@ async function renderView() {
   else if (view === "upcoming") await renderUpcoming(main);
   else if (view === "mine") await renderMyWps(main);
   else if (view === "my") await renderMyDashboard(main, state);
+  else if (view === "work") await renderMyWork(main, state);
   else if (view === "gantt") await renderGantt(main, state);
   else if (view === "inbox") await renderInbox(main, state);
   else if (view === "search") await renderSearchResults(params.get("q") || "");
