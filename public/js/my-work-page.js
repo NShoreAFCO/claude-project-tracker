@@ -193,7 +193,7 @@ export async function renderMyWork(main, state) {
   function drawManage(error) {
     renderViewsPanel(
       managePanel,
-      { prefs, current: () => ({ kind: draft.kind, projectId: draft.projectId }), persist, onOpen: (view) => openView(view.id) },
+      { prefs, showDefault: false, current: () => ({ kind: draft.kind, projectId: draft.projectId }), persist, onOpen: (view) => openView(view.id) },
       error,
     );
   }
@@ -257,28 +257,35 @@ export async function renderMyWork(main, state) {
     const assigned = scope === "assigned";
     const withProject = (params) => (projectId ? { ...params, project_id: projectId } : params);
     let data;
+    let recentError = null;
     try {
       const [gates, wps, recent] = await Promise.all([
         api.openGates(withProject({ scope: "me" })),
         api.myWps(withProject({ assigned_only: assigned ? 1 : "" })),
-        api.myRecent(withProject({ assigned_only: assigned ? 1 : "", days: 7, limit: 20 })),
+        api.myRecent(withProject({ assigned_only: assigned ? 1 : "", days: 7, limit: 20 })).catch((e) => ({ error: e })),
       ]);
-      data = { gates, wps, recent };
+      recentError = Array.isArray(recent) ? null : recent?.error || new Error("recent");
+      data = { gates, wps, recent: recentError ? [] : recent };
     } catch (error) {
       if (!droppedNow()) clear(host, h("p.mydash-error", {}, t("mydLoadFailed", { error: error?.message || String(error) })));
       return;
     }
     if (droppedNow()) return;
     const today = new Date().toISOString().slice(0, 10);
-    clear(
-      host,
-      myWorkSections(data, {
-        today,
-        onOpen: (id) => {
-          location.hash = `#/p/${encodeURIComponent(id)}`;
-        },
-      }),
-    );
+    const sections = myWorkSections(data, {
+      today,
+      onOpen: (id) => {
+        location.hash = `#/p/${encodeURIComponent(id)}`;
+      },
+    });
+    if (recentError) {
+      const empty = sections.querySelectorAll("section.mw-section")[4]?.querySelector("p.empty");
+      if (empty) {
+        empty.className = "mydash-error";
+        empty.textContent = t("mydLoadFailed", { error: recentError?.message || String(recentError) });
+      }
+    }
+    clear(host, sections);
   }
 
   if (currentView()) {
