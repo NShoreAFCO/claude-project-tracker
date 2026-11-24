@@ -109,6 +109,14 @@ describe("renderMyWork", () => {
     expect(main.querySelectorAll("li.mw-row")).toHaveLength(0);
   });
 
+  it("keeps four sections when only the recent feed fails", async () => {
+    api.myRecent.mockRejectedValue(new Error("recent down"));
+    await renderMyWork(main, { projects: [] });
+    expect(main.querySelectorAll("section.mw-section")).toHaveLength(5);
+    expect(main.querySelectorAll("p.mydash-error")).toHaveLength(1);
+    expect(main.querySelector("p.mydash-error")?.textContent).toContain("recent down");
+  });
+
   it("shows the server message when the caller has no person", async () => {
     api.whoami.mockResolvedValue({ person: null });
     api.openGates.mockRejectedValue(new Error("this is for people with a dashboard login"));
@@ -200,6 +208,14 @@ describe("saved views on My work", () => {
     await tick();
     expect(api.putDashboardPrefs).toHaveBeenCalledWith({ version: 1, views: [VIEWS[1]], active_projects: [] });
     expect(stripButtons().map((b) => b.textContent)).toEqual(["Overview", "Beta"]);
+  });
+
+  it("hides the default label and button in the manage panel but keeps reordering", async () => {
+    await renderMyWork(main, { projects: [] });
+    expect(main.querySelectorAll("button.mydash-default")).toHaveLength(0);
+    expect(main.querySelectorAll("ul.mydash-views")[0].textContent).not.toContain("Default");
+    expect(main.querySelectorAll("button.mydash-up")).toHaveLength(2);
+    expect(main.querySelectorAll("button.mydash-down")).toHaveLength(2);
   });
 
   it("still shows the sections when the prefs cannot be loaded", async () => {

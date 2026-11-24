@@ -166,6 +166,7 @@ export function createPrefsQueue({ getPrefs, setPrefs, onApplied, onFailed }) {
  */
 export function renderViewsPanel(host, ctx, error) {
   const { prefs, persist } = ctx;
+  const showDefault = ctx.showDefault !== false;
 
   const moveView = (id, delta) =>
     persist((current) => {
@@ -189,7 +190,7 @@ export function renderViewsPanel(host, ctx, error) {
         { type: "button", on: { click: () => ctx.onOpen(view) } },
         view.name,
       ),
-      first ? h("span", t("mydDefault")) : null,
+      first && showDefault ? h("span", t("mydDefault")) : null,
       h(
         "button.mydash-rename",
         {
@@ -225,7 +226,7 @@ export function renderViewsPanel(host, ctx, error) {
         },
         t("delete"),
       ),
-      first
+      first || !showDefault
         ? null
         : h(
             "button.mydash-default",
@@ -420,6 +421,7 @@ export async function renderMyDashboard(main, state) {
       viewsPanel,
       {
         prefs,
+        showDefault: true,
         current: () => ({ kind, projectId }),
         persist: persistPrefs,
         onOpen: (view) => {
