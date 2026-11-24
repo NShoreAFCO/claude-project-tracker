@@ -1,5 +1,5 @@
 -- Migration 0008 (release 0.7.0): inbox folder rules and an index for the inbox and its badge.
--- Additive only (a new table and a new index), so the previous Worker version keeps working on this schema.
+-- Additive only (a new table and new indexes), so the previous Worker version keeps working on this schema.
 
 -- Folder rules for unmatched Claude Code hook events: ignore them, or assign them to a project.
 CREATE TABLE inbox_rule (
@@ -13,3 +13,5 @@ CREATE TABLE inbox_rule (
 );
 -- The inbox and its badge read unassigned events by action.
 CREATE INDEX IF NOT EXISTS event_inbox ON event(action, id) WHERE project_id IS NULL;
+-- The "My work" feed reads events of the last days; without this it scans the whole event table.
+CREATE INDEX IF NOT EXISTS event_ts ON event(ts);

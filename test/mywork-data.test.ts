@@ -97,6 +97,37 @@ describe("GET /api/me/recent", () => {
     expect(ids).not.toContain(`${theirs.id}-g`);
   });
 
+  it("counts events on projects I own, not on projects someone else owns", async () => {
+    const mine = await createProject(db, { title: uniq("Owned project"), owner: "user@example.com" }, otherCaller);
+    const theirs = await createProject(db, { title: uniq("Their project"), owner: "other@example.com" }, otherCaller);
+    expect(await recentIds(`?project_id=${mine.id}`)).toContain(mine.id);
+    expect(await recentIds(`?project_id=${theirs.id}`)).not.toContain(theirs.id);
+  });
+
+  it("project_id keeps milestone and project events of that project only", async () => {
+    const a = await createProject(db, { title: uniq("Filter A"), owner: "user@example.com", decision_maker: "user@example.com" }, otherCaller);
+    const b = await createProject(db, { title: uniq("Filter B"), owner: "user@example.com", decision_maker: "user@example.com" }, otherCaller);
+    await upsertMilestone(db, a.id, { id: `${a.id}-g`, title: "Gate", gate: true }, otherCaller);
+    await upsertMilestone(db, b.id, { id: `${b.id}-g`, title: "Gate", gate: true }, otherCaller);
+    const unfiltered = await recentIds("?limit=100");
+    expect(unfiltered).toEqual(expect.arrayContaining([a.id, `${a.id}-g`, b.id, `${b.id}-g`]));
+    const ids = await recentIds(`?project_id=${a.id}`);
+    expect(ids).toEqual(expect.arrayContaining([a.id, `${a.id}-g`]));
+    expect(ids).not.toContain(b.id);
+    expect(ids).not.toContain(`${b.id}-g`);
+  });
+
+  it("reads events by the ts index, not by a full scan of event", async () => {
+    // Run the same statement under EXPLAIN QUERY PLAN by prefixing whatever recentForMe prepares.
+    const explain = { prepare: (sql: string) => db.prepare(`EXPLAIN QUERY PLAN ${sql}`) } as unknown as D1Database;
+    for (const opts of [{}, { assigned_only: true }]) {
+      const rows = (await recentForMe(explain, meCaller, opts)) as unknown as { detail: string }[];
+      const plan = rows.map((r) => r.detail).join("\n");
+      expect(plan).toMatch(/SEARCH e USING INDEX event_ts \(ts>\?\)/);
+      expect(plan).not.toMatch(/SCAN e\b/);
+    }
+  });
+
   it("gives viewers redacted fields and callers without a person a 403", async () => {
     const p = await createProject(db, { title: uniq("Viewer project"), owner: "O" }, SYS);
     await mk(p.id, `${p.id}-v`, { owner: viewer });
