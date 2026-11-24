@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.6.1 — 2026-11-24 (tree guide fix)
+
+No breaking change. No migration. Deploy only.
+
+### Fixed
+- In the project dialog, the tree indent guides no longer cross the details (dates, progress, dependencies, actions) of sub-package and task rows, also on narrow screens.
+- Dependency lists in the project dialog read "WP1, WP2" instead of "WP1 , WP2".
+
 ## v0.6.0 — 2026-11-24 (layout and visual hierarchy)
 
 No breaking change. No migration. Deploy only. The changes are in the dashboard and in REST project cards and detail; MCP keeps its tool and output shapes.

@@ -2260,14 +2260,16 @@ details.cat-empty[open] > summary.cat-head::before {
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 8px;
+  padding-left: var(--tw-ind, 0px);
 }
-.tier-2 .tw-ttl {
-  padding-left: 18px;
+/* one indent per tier: the title and the line below start there, right of the indent guides */
+.tw-row.tier-2 {
+  --tw-ind: 18px;
 }
-.tier-3 .tw-ttl {
-  padding-left: 36px;
+.tw-row.tier-3 {
+  --tw-ind: 36px;
 }
-/* indent guides: 1 px vertical lines, drawn on the row so they run through its second line too */
+/* indent guides: 1 px vertical lines inside the indent, drawn on the row so they run its full height */
 .tw-row.tier-2,
 .tw-row.tier-3 {
   background-image: linear-gradient(var(--tier-guide, var(--color-border)), var(--tier-guide, var(--color-border)));
@@ -2339,6 +2341,7 @@ details.cat-empty[open] > summary.cat-head::before {
   gap: 4px;
   margin-top: 4px;
   min-width: 0;
+  padding-left: var(--tw-ind, 0px);
 }
 .tw-below .actions {
   justify-content: flex-start;
@@ -2373,13 +2376,12 @@ details.cat-empty[open] > summary.cat-head::before {
   list-style: none;
 }
 @container (max-width: 720px) {
-  .tw-tree {
-    --tw-x: 122px;
-  }
   .tw-head {
     display: none;
   }
+  /* on the rows: a container query cannot restyle .tw-tree, the container itself */
   .tw-row {
+    --tw-x: 122px;
     grid-template-columns: [fold] 36px [code] 56px [ttl] minmax(0, 1fr) [st] auto;
     row-gap: 6px;
   }
@@ -2408,16 +2410,25 @@ details.cat-empty[open] > summary.cat-head::before {
   .tw-below {
     grid-column: code / -1;
   }
-  .tier-2 .tw-ttl {
-    padding-left: 12px;
+  /* nested rows: dates, progress and the line below start at the indented title, right of the guides */
+  .tier-2 .tw-dt,
+  .tier-3 .tw-dt {
+    grid-column: ttl / st;
+    padding-left: var(--tw-ind);
   }
-  .tier-3 .tw-ttl {
-    padding-left: 24px;
+  .tier-2 .tw-pct,
+  .tier-3 .tw-pct,
+  .tier-2 .tw-below,
+  .tier-3 .tw-below {
+    grid-column: ttl / -1;
+    padding-left: var(--tw-ind);
   }
   .tw-row.tier-2 {
+    --tw-ind: 12px;
     background-position: calc(var(--tw-x) + 4px) 0;
   }
   .tw-row.tier-3 {
+    --tw-ind: 24px;
     background-position:
       calc(var(--tw-x) + 4px) 0,
       calc(var(--tw-x) + 16px) 0;
@@ -2506,7 +2517,9 @@ dialog.fixed .modal-foot {
 /* /dialog layout */
 
 /* dependency links */
+/* a text line, not the flex .meta row: the ", " separators stay next to their codes */
 .tw-row .dep-line {
+  display: block;
   font-size: 13px;
   color: var(--color-text-muted);
 }
