@@ -6,6 +6,7 @@ import { createProject } from "../src/data/projects";
 import { ensureUserPerson } from "../src/data/persons";
 import { TOOL_ACTIONS } from "../src/auth/permissions";
 import { mcpApiHandler } from "../src/mcp/server";
+import { APPLY_CHUNKS_MAX, BOUND_MAX, INBOX_COUNT_SQL, createRule, dismissInbox, inboxListSql, restoreInbox } from "../src/data/inbox";
 import type { Env, Role } from "../src/types";
 
 const db = env.DB;
@@ -49,6 +50,44 @@ async function seed(cwd: string, entity: "hook" | "webhook" = "hook", action = "
     .bind(new Date().toISOString(), entity, action, `ended in ${cwd}`, JSON.stringify(diff))
     .run();
   return Number(r.meta.last_row_id);
+}
+/** `n` unmatched hook events in one statement, cwd `<base>/<i>`; returns their ids in order. */
+async function seedMany(n: number, base: string): Promise<number[]> {
+  await db
+    .prepare(
+      `WITH RECURSIVE k(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM k WHERE i < ?)
+       INSERT INTO event (ts, actor, entity, entity_id, action, summary, diff_json)
+       SELECT ?, 'svc', 'hook', ?, 'unmatched', 'bulk', json_object('hook', json_array(NULL, json_object('session_id', 's', 'cwd', ? || '/' || i, 'reason', 'exit'))) FROM k`,
+    )
+    .bind(n, new Date().toISOString(), base, base)
+    .run();
+  const { results } = await db.prepare("SELECT id FROM event WHERE entity = 'hook' AND entity_id = ? ORDER BY id").bind(base).all<{ id: number }>();
+  return results.map((r) => r.id);
+}
+
+/**
+ * The test D1 with every bind and batch recorded. Local D1 does not enforce the 100 bound parameters per statement
+ * that production does, so the tests count them.
+ */
+function countingDb(): { db: D1Database; binds: number[]; batches: number[] } {
+  const binds: number[] = [];
+  const batches: number[] = [];
+  const wrapped = {
+    prepare(sql: string) {
+      const st = db.prepare(sql);
+      const bind = st.bind.bind(st);
+      (st as any).bind = (...args: unknown[]) => {
+        binds.push(args.length);
+        return bind(...args);
+      };
+      return st;
+    },
+    batch(list: D1PreparedStatement[]) {
+      batches.push(list.length);
+      return db.batch(list);
+    },
+  };
+  return { db: wrapped as unknown as D1Database, binds, batches };
 }
 const ev = (id: number) => db.prepare("SELECT * FROM event WHERE id = ?").bind(id).first<any>();
 const count = async () => (await ed("GET", "/api/inbox/count")).body.open as number;
@@ -296,6 +335,75 @@ describe("rule matching in the session hook", () => {
     const row = await db.prepare("SELECT * FROM event WHERE entity = 'hook' AND entity_id = 'hk-trash'").first<any>();
     expect(row).toMatchObject({ action: "unmatched", project_id: null });
     expect(JSON.parse(row.diff_json).rule).toBeUndefined();
+  });
+});
+
+describe("D1 statement limits", () => {
+  const states = async (ids: number[]) => {
+    const { results } = await db
+      .prepare("SELECT action, COUNT(*) AS n FROM event WHERE id IN (SELECT value FROM json_each(?)) GROUP BY action")
+      .bind(JSON.stringify(ids))
+      .all<{ action: string; n: number }>();
+    return Object.fromEntries(results.map((r) => [r.action, r.n]));
+  };
+
+  it("dismisses and restores 200 ids with at most 100 bound parameters per statement", async () => {
+    const ids = await seedMany(200, "/lim/dm");
+    const d = countingDb();
+    expect(await dismissInbox(d.db, ids, SYS)).toBe(200);
+    expect(d.binds.length).toBeGreaterThan(2);
+    expect(Math.max(...d.binds)).toBeLessThanOrEqual(BOUND_MAX);
+    expect(await states(ids)).toEqual({ dismissed: 200 });
+    const r = countingDb();
+    expect(await restoreInbox(r.db, ids, SYS)).toBe(200);
+    expect(Math.max(...r.binds)).toBeLessThanOrEqual(BOUND_MAX);
+    expect(await states(ids)).toEqual({ unmatched: 200 });
+    await dismissInbox(db, ids, SYS);
+  });
+
+  it("apply_existing over 100 events binds at most 100 parameters per statement (ignore and assign)", async () => {
+    const ign = await seedMany(150, "/lim/ign");
+    const a = countingDb();
+    const r1 = await createRule(a.db, { kind: "ignore", path: "/lim/ign" }, SYS);
+    expect(r1.applied).toBe(150);
+    expect(r1.more).toBeUndefined();
+    expect(Math.max(...a.binds)).toBeLessThanOrEqual(BOUND_MAX);
+    expect(await states(ign)).toEqual({ ignored: 150 });
+
+    const p = await createProject(db, { title: "Inbox bulk assign", owner: "Owner" }, SYS);
+    const asg = await seedMany(150, "/lim/asg");
+    const b = countingDb();
+    const r2 = await createRule(b.db, { kind: "assign", path: "/lim/asg", project_id: p.id }, SYS);
+    expect(r2.applied).toBe(150);
+    expect(Math.max(...b.binds)).toBeLessThanOrEqual(BOUND_MAX);
+    expect(await states(asg)).toEqual({ assigned: 150 });
+  });
+
+  it("apply_existing writes at most 40 chunks per call and answers more: true", async () => {
+    const cap = APPLY_CHUNKS_MAX * BOUND_MAX;
+    const ids = await seedMany(cap + 5, "/lim/cap");
+    const c = countingDb();
+    const r = await createRule(c.db, { kind: "ignore", path: "/lim/cap" }, SYS);
+    expect(r).toMatchObject({ applied: cap, more: true });
+    expect(Math.max(...c.binds)).toBeLessThanOrEqual(BOUND_MAX);
+    // Rule insert + chunks + audit event, within D1's 50 queries per invocation on the free plan.
+    expect(c.batches).toEqual([APPLY_CHUNKS_MAX + 2]);
+    // Oldest first: the newest five stay unmatched.
+    expect(await states(ids.slice(0, cap))).toEqual({ ignored: cap });
+    expect(await states(ids.slice(cap))).toEqual({ unmatched: 5 });
+    await dismissInbox(db, ids.slice(cap), SYS);
+  });
+
+  it("the badge count and the open list use the event_inbox index", async () => {
+    const plan = async (sql: string, ...args: unknown[]) => {
+      const st = db.prepare(`EXPLAIN QUERY PLAN ${sql}`);
+      const { results } = await (args.length ? st.bind(...args) : st).all<{ detail: string }>();
+      return results.map((r) => r.detail).join("\n");
+    };
+    for (const p of [await plan(INBOX_COUNT_SQL), await plan(inboxListSql("open"), 100)]) {
+      expect(p).toMatch(/SEARCH (e|event) USING (COVERING )?INDEX event_inbox \(action=\?/);
+      expect(p).not.toMatch(/SCAN (e|event)\b/);
+    }
   });
 });
 

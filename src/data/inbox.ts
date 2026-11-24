@@ -26,8 +26,13 @@ export interface InboxRuleOut extends InboxRuleRow {
 
 /** Max ids per dismiss or restore request. */
 export const INBOX_IDS_MAX = 200;
-/** D1 binds at most 100 parameters per statement: id lists are written in chunks of this size. */
-const CHUNK = 100;
+/** D1 binds at most this many parameters per statement. */
+export const BOUND_MAX = 100;
+/**
+ * Max id chunks one `apply_existing` writes. Each chunk is one statement of the batch, and D1 counts every statement
+ * toward its queries per invocation (50 on the free plan), so the rest is left for a later call (`more: true`).
+ */
+export const APPLY_CHUNKS_MAX = 40;
 const PATH_MAX = 500;
 
 const STATE_ACTIONS: Record<InboxState, string> = {
@@ -35,12 +40,20 @@ const STATE_ACTIONS: Record<InboxState, string> = {
   dismissed: "('dismissed', 'ignored')",
 };
 
-function chunks<T>(list: T[]): T[][] {
+/** Splits an id list so that each statement binds at most BOUND_MAX parameters, `fixed` of them besides the ids. */
+function chunks<T>(list: T[], fixed: number): T[][] {
+  const size = BOUND_MAX - fixed;
   const out: T[][] = [];
-  for (let i = 0; i < list.length; i += CHUNK) out.push(list.slice(i, i + CHUNK));
+  for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
   return out;
 }
 const marks = (n: number): string => Array(n).fill("?").join(", ");
+
+/** The inbox list query (one bound parameter: the limit). */
+export const inboxListSql = (state: InboxState): string =>
+  `SELECT e.*, p.name AS person_name FROM event e LEFT JOIN person p ON p.id = e.person_id WHERE e.project_id IS NULL AND e.action IN ${STATE_ACTIONS[state]} ORDER BY e.id DESC LIMIT ?`;
+/** The badge count query. */
+export const INBOX_COUNT_SQL = "SELECT COUNT(*) AS n FROM event WHERE project_id IS NULL AND action = 'unmatched'";
 
 /** Inbox events, newest first. `dismissed` gives both dismissed and ignored rows. */
 export async function listInbox(db: D1Database, opts: { state?: string; limit?: number } = {}): Promise<EventOut[]> {
@@ -48,20 +61,13 @@ export async function listInbox(db: D1Database, opts: { state?: string; limit?: 
   if (state !== "open" && state !== "dismissed") throw new ValidationError("state must be open or dismissed");
   const raw = Math.trunc(opts.limit ?? 100);
   const limit = Number.isFinite(raw) ? Math.min(Math.max(raw, 1), 500) : 100;
-  const { results } = await db
-    .prepare(
-      `SELECT e.*, p.name AS person_name FROM event e LEFT JOIN person p ON p.id = e.person_id WHERE e.project_id IS NULL AND e.action IN ${STATE_ACTIONS[state]} ORDER BY e.id DESC LIMIT ?`,
-    )
-    .bind(limit)
-    .all<EventOut>();
+  const { results } = await db.prepare(inboxListSql(state)).bind(limit).all<EventOut>();
   return results;
 }
 
 /** Number of events to review (`unmatched`), without a cap. */
 export async function countInbox(db: D1Database): Promise<number> {
-  const row = await db
-    .prepare("SELECT COUNT(*) AS n FROM event WHERE project_id IS NULL AND action = 'unmatched'")
-    .first<{ n: number }>();
+  const row = await db.prepare(INBOX_COUNT_SQL).first<{ n: number }>();
   return row?.n ?? 0;
 }
 
@@ -85,7 +91,7 @@ async function moveState(
   const ids = parseIds(rawIds);
   const fromSql = `(${marks(from.length)})`;
   const found: number[] = [];
-  for (const part of chunks(ids)) {
+  for (const part of chunks(ids, from.length)) {
     const { results } = await db
       .prepare(`SELECT id FROM event WHERE project_id IS NULL AND action IN ${fromSql} AND id IN (${marks(part.length)})`)
       .bind(...from, ...part)
@@ -94,7 +100,7 @@ async function moveState(
   }
   if (!found.length) return 0;
   found.sort((a, b) => a - b);
-  const updates = chunks(found).map((part) =>
+  const updates = chunks(found, 1 + from.length).map((part) =>
     db
       .prepare(`UPDATE event SET action = ? WHERE project_id IS NULL AND action IN ${fromSql} AND id IN (${marks(part.length)})`)
       .bind(to, ...from, ...part),
@@ -142,12 +148,13 @@ const covers = (path: string, cwd: string): boolean => cwd === path || cwd.start
 /**
  * Creates a folder rule. With `apply_existing` (default true) it also applies to the `unmatched` hook events whose
  * cwd is the folder or below: ignore → `ignored`, assign → `assigned` on the project. Past events are not replayed.
+ * At most APPLY_CHUNKS_MAX chunks are written; `more: true` says that matching events were left `unmatched`.
  */
 export async function createRule(
   db: D1Database,
   input: Record<string, unknown>,
   by: Caller,
-): Promise<{ rule: InboxRuleOut; applied: number }> {
+): Promise<{ rule: InboxRuleOut; applied: number; more?: true }> {
   const kind = input.kind;
   if (kind !== "ignore" && kind !== "assign") throw new ValidationError("kind must be ignore or assign");
   if (typeof input.path !== "string") throw new ValidationError("path is required");
@@ -171,21 +178,29 @@ export async function createRule(
   const existing = await db.prepare("SELECT * FROM inbox_rule WHERE path = ?").bind(path).first<InboxRuleRow>();
   if (existing) throw new ConflictError(`a rule for ${path} already exists (${existing.id})`, existing);
 
-  const ids: number[] = [];
+  // The assign UPDATE binds the project id besides the ids.
+  const fixed = kind === "assign" ? 1 : 0;
+  const cap = APPLY_CHUNKS_MAX * (BOUND_MAX - fixed);
+  let ids: number[] = [];
+  let more = false;
   if (applyExisting) {
     const { results } = await db
       .prepare(
-        "SELECT id, CASE WHEN json_valid(diff_json) THEN json_extract(diff_json, '$.hook[1].cwd') END AS cwd FROM event WHERE project_id IS NULL AND action = 'unmatched' AND entity = 'hook'",
+        "SELECT id, CASE WHEN json_valid(diff_json) THEN json_extract(diff_json, '$.hook[1].cwd') END AS cwd FROM event WHERE project_id IS NULL AND action = 'unmatched' AND entity = 'hook' ORDER BY id",
       )
       .all<{ id: number; cwd: unknown }>();
     for (const r of results) {
       const c = typeof r.cwd === "string" ? normalisePath(r.cwd) : null;
       if (c && covers(path, c)) ids.push(r.id);
     }
+    if (ids.length > cap) {
+      more = true;
+      ids = ids.slice(0, cap);
+    }
   }
 
   const rule: InboxRuleRow = { id: newId(), kind, path, project_id: projectId, created_at: now(), created_by: by.actor };
-  const updates = chunks(ids).map((part) =>
+  const updates = chunks(ids, fixed).map((part) =>
     kind === "ignore"
       ? db
           .prepare(`UPDATE event SET action = 'ignored' WHERE project_id IS NULL AND action = 'unmatched' AND id IN (${marks(part.length)})`)
@@ -222,7 +237,7 @@ export async function createRule(
     throw e;
   }
   const applied = res.slice(1, 1 + updates.length).reduce((n, r) => n + (r.meta.changes ?? 0), 0);
-  return { rule: { ...rule, project_title: projectTitle }, applied };
+  return { rule: { ...rule, project_title: projectTitle }, applied, ...(more ? { more: true as const } : {}) };
 }
 
 /** Hard delete (rules are configuration, not tracker data) with an audit event. */
