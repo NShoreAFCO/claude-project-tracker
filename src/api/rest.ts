@@ -214,7 +214,7 @@ route("GET", "/api/me/recent", async ({ db, url, by }) => {
 });
 
 // ---- work packages
-route("GET", "/api/workpackages",async ({ db, url }) => listWorkpackagesOut(db, reqStr(url.searchParams.get("project_id"), "project_id")));
+route("GET", "/api/workpackages", async ({ db, url }) => listWorkpackagesOut(db, reqStr(url.searchParams.get("project_id"), "project_id")));
 route("POST", "/api/workpackages", async ({ db, req, by }) => {
   const { project_id, expected_version, ...input } = await readJson(req);
   return upsertWorkpackage(db, reqStr(project_id, "project_id"), input, by, optNum(expected_version));
