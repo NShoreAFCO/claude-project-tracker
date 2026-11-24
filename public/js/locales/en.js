@@ -585,6 +585,8 @@ export default {
   adjustProgress: "Adjust progress",
   adjustProgressTitle: "Adjust progress: {name}",
   adjustProgressHint: "Progress is not moved with the slider in the list. Set the new value here.",
+  // per-row "Log progress" button and its dialog hint
+  logProgressHint: "Sets the new total (0–100 %). 100 % completes the work package.",
   adjustProjectProgressHint: "Derived progress follows the work packages. A manual value needs a reason.",
   fProgressReason: "Reason for the manual value",
   heatCellTitle: "Probability {p} × impact {i}: {n} entries",
