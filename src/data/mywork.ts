@@ -9,6 +9,8 @@ export type RecentChange = EventOut & { project_title: string; wp_code: string |
  * Events of the last `days` days on my work: work packages `mineWorkpackages` would return (done and dropped ones
  * included), milestones of projects where I am the decision maker, and projects I own. Live projects only, and
  * never my own actions. Newest first. One query.
+ * INDEXED BY: without table statistics SQLite prefers walking the whole event table in id order for
+ * `ORDER BY e.id DESC LIMIT`; the ts index reads only the window and sorts it.
  */
 export async function recentForMe(
   db: D1Database,
@@ -33,7 +35,7 @@ export async function recentForMe(
   const { results } = await db
     .prepare(
       `SELECT e.*, pe.name AS person_name, p.title AS project_title, w.code AS wp_code
-       FROM event e
+       FROM event e INDEXED BY event_ts
        JOIN project p ON p.id = e.project_id AND ${LIVE("p")}
        LEFT JOIN workpackage w ON e.entity = 'workpackage' AND w.id = e.entity_id AND w.project_id = p.id AND ${LIVE("w")}
        LEFT JOIN milestone m ON e.entity = 'milestone' AND m.id = e.entity_id AND m.project_id = p.id AND ${LIVE("m")}
