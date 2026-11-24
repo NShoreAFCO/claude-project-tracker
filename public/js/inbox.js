@@ -140,7 +140,7 @@ function ruleDialog(e, events, capped, projects) {
       const body = { kind, path: folderSel.value || folders[0], apply_existing: !!apply.checked };
       if (kind === "assign") body.project_id = projectSel.value;
       const res = await api.createInboxRule(body);
-      toast(t("inboxRuleSaved", { n: res?.applied ?? 0 }));
+      toast(t(res?.more ? "inboxRuleSavedMore" : "inboxRuleSaved", { n: res?.applied ?? 0 }));
       m.close();
       changed();
     } catch (x) {
@@ -150,9 +150,11 @@ function ruleDialog(e, events, capped, projects) {
     }
   });
   m.foot.append(h("button.btn.ghost", { type: "button", on: { click: () => m.close() } }, t("cancel")), save);
+  folderSel.focus();
 }
 
 function rulesSection(rules) {
+  if (!rules) return h("section.inbox-rules", h("h3", t("inboxRulesTitle")), h("p.meta", { role: "alert" }, t("inboxRulesError")));
   const rows = rules.map((r) => {
     const del = h("button.btn.small.danger", { type: "button" }, t("inboxRuleDelete"));
     del.addEventListener("click", async () => {
@@ -201,7 +203,7 @@ export async function renderInbox(main, state) {
     [events, openCount, rules] = await Promise.all([
       api.inbox({ state: tab, limit: LIST_LIMIT }),
       api.inboxCount(),
-      editor ? api.inboxRules() : [],
+      editor ? api.inboxRules().catch(() => null) : [],
     ]);
   } catch (e) {
     toastError(e);
@@ -213,8 +215,10 @@ export async function renderInbox(main, state) {
   // ---- selection bar and select-all
   const all = h("input", { type: "checkbox", "aria-label": t("inboxSelectAll") });
   const bulkBtn = h("button.btn.small", { type: "button" });
-  const countText = h("span.meta");
-  const bar = h("div.inbox-bar", { role: "region", "aria-live": "polite", hidden: true }, countText, bulkBtn);
+  const countText = h("span.meta", { "aria-hidden": "true" });
+  // Always rendered (outside the hidden bar), so the first selection is announced.
+  const status = h("span.sr-only", { role: "status" });
+  const bar = h("div.inbox-bar", { hidden: true }, countText, bulkBtn);
   const boxes = [];
   const syncSelection = () => {
     const n = selected.size;
@@ -222,6 +226,7 @@ export async function renderInbox(main, state) {
     all.indeterminate = n > 0 && n < events.length;
     bar.hidden = n === 0;
     countText.textContent = t("inboxSelectedCount", { n });
+    status.textContent = n ? countText.textContent : "";
     bulkBtn.textContent = t(tab === "open" ? "inboxDismissSelected" : "inboxRestoreSelected", { n });
   };
   all.addEventListener("change", () => {
@@ -291,7 +296,7 @@ export async function renderInbox(main, state) {
       cells = h("span.meta.inbox-ignored", t("inboxIgnoredByRule"));
     }
     const box = editor
-      ? h("input", { type: "checkbox", "aria-label": t("inboxSelectRow"), value: String(e.id) })
+      ? h("input", { type: "checkbox", "aria-label": t("inboxSelectRow", { what: e.summary || e.entity }), value: String(e.id) })
       : null;
     if (box) {
       boxes.push(box);
@@ -328,6 +333,7 @@ export async function renderInbox(main, state) {
     h("h2", t("inboxTitle")),
     h("p.meta", t("inboxHint")),
     tabs,
+    editor ? status : null,
     editor ? bar : null,
     capped ? h("p.meta", t("inboxCapped", { n: LIST_LIMIT })) : null,
     events.length

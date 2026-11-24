@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   can: vi.fn(),
   changed: vi.fn(),
   openModal: vi.fn(),
+  toast: vi.fn(),
 }));
 
 vi.mock("../public/js/api.js", () => ({
@@ -38,7 +39,7 @@ vi.mock("../public/js/i18n.js", () => ({
 vi.mock("../public/js/dom.js", async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
   openModal: mocks.openModal,
-  toast: vi.fn(),
+  toast: mocks.toast,
   toastError: vi.fn(),
   confirmDialog: vi.fn(async () => true),
 }));
@@ -67,7 +68,7 @@ const state = { projects: [{ id: "p1", title: "Alpha" }] };
 
 let doc: FDoc;
 let main: FEl;
-const rowBoxes = () => main.querySelectorAll("input[type=checkbox]").filter((i) => i.getAttribute("aria-label") === "inboxSelectRow");
+const rowBoxes = () => main.querySelectorAll("input[type=checkbox]").filter((i) => (i.getAttribute("aria-label") || "").startsWith("inboxSelectRow"));
 const flush = () => new Promise((r) => setTimeout(r, 0));
 const buttons = (root: FEl, label: string) => root.querySelectorAll("button").filter((b) => b.textContent === label);
 
@@ -137,6 +138,25 @@ describe("selection and bulk dismiss", () => {
     expect(all.checked).toBe(false);
   });
 
+  it("keeps an always-rendered status region outside the hidden bar and names each row checkbox", async () => {
+    await render();
+    const bar = main.querySelector(".inbox-bar")!;
+    expect(bar.getAttribute("role")).toBeNull();
+    expect(bar.getAttribute("aria-live")).toBeNull();
+    const status = main.querySelector("[role=status]")!;
+    expect(status).toBeTruthy();
+    expect(status.textContent).toBe("");
+    const rows = rowBoxes();
+    rows[0].checked = true;
+    dispatch(doc, rows[0], "change");
+    expect(main.querySelector("[role=status]")!.textContent).toBe('inboxSelectedCount{"n":1}');
+    expect(rows.map((r) => r.getAttribute("aria-label"))).toEqual([
+      'inboxSelectRow{"what":"session in C:/work/demo/app"}',
+      'inboxSelectRow{"what":"session in C:/work/demo/lib"}',
+      'inboxSelectRow{"what":"push"}',
+    ]);
+  });
+
   it("bulk dismiss sends the checked ids and reloads", async () => {
     await render();
     const rows = rowBoxes();
@@ -166,6 +186,26 @@ describe("rule dialog", () => {
     expect(body.textContent).toContain('inboxRuleApply{"n":2}');
   });
 
+  it("toasts the more-variant when the server stopped at its cap", async () => {
+    mocks.createInboxRule.mockResolvedValue({ applied: 200, more: true });
+    await render();
+    dispatch(doc, buttons(main, "inboxRuleBtn")[0], "click");
+    const { foot } = mocks.openModal.mock.results[0].value;
+    dispatch(doc, buttons(foot, "save")[0], "click");
+    await flush();
+    expect(mocks.toast).toHaveBeenCalledWith('inboxRuleSavedMore{"n":200}');
+  });
+
+  it("toasts the plain message without more", async () => {
+    mocks.createInboxRule.mockResolvedValue({ applied: 2 });
+    await render();
+    dispatch(doc, buttons(main, "inboxRuleBtn")[0], "click");
+    const { foot } = mocks.openModal.mock.results[0].value;
+    dispatch(doc, buttons(foot, "save")[0], "click");
+    await flush();
+    expect(mocks.toast).toHaveBeenCalledWith('inboxRuleSaved{"n":2}');
+  });
+
   it("webhook rows have no Rule button", async () => {
     await render();
     expect(buttons(main, "inboxRuleBtn")).toHaveLength(2);
@@ -177,6 +217,16 @@ describe("rule dialog", () => {
     dispatch(doc, buttons(main, "inboxRuleBtn")[0], "click");
     const { body } = mocks.openModal.mock.results[0].value;
     expect(body.textContent).toContain('inboxRuleApplyAtLeast{"n":500}');
+  });
+});
+
+describe("rules fetch failure", () => {
+  it("keeps the list and shows an error line in the rules section", async () => {
+    mocks.inboxRules.mockRejectedValue(new Error("500"));
+    await render();
+    expect(rowBoxes()).toHaveLength(3);
+    expect(main.textContent).toContain("inboxRulesTitle");
+    expect(main.textContent).toContain("inboxRulesError");
   });
 });
 
