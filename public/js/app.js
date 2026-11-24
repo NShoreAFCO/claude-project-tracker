@@ -56,7 +56,7 @@ export async function refresh() {
 
 async function updateInboxCount() {
   try {
-    state.inboxCount = (await api.inbox()).length;
+    state.inboxCount = (await api.inboxCount()).open ?? 0;
   } catch {
     state.inboxCount = 0;
   }
