@@ -2776,3 +2776,48 @@ dialog.fixed .modal-foot {
   margin-right: 0.3rem;
 }
 /* /gantt tiers */
+
+/* inbox triage */
+.inbox-tabs {
+  margin: 0.5rem 0 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+}
+.inbox-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.5rem;
+  background: var(--color-tint);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+.inbox-bar[hidden] {
+  display: none;
+}
+.inbox-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.inbox-ignored {
+  color: var(--color-text-muted);
+}
+td.sel,
+th.sel {
+  width: 2rem;
+}
+.inbox-rules {
+  margin-top: 1.5rem;
+}
+fieldset.rule-kind {
+  border: 0;
+  padding: 0;
+  margin: 0.75rem 0;
+}
+fieldset.rule-kind label.check {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
