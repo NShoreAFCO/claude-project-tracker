@@ -2896,3 +2896,25 @@ fieldset.rule-kind label.check {
   }
 }
 /* /my work */
+/* my work shell */
+.mw-views {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4em;
+  align-items: center;
+  margin: 0.5em 0;
+}
+.mw-views-label {
+  font-weight: 600;
+}
+.mw-views button.active {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+.mw-manage {
+  margin: 1em 0;
+}
+.mw-manage > summary {
+  cursor: pointer;
+}
+/* /my work shell */

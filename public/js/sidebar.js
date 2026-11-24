@@ -7,7 +7,7 @@ export const LOGOUT_HREF = "/cdn-cgi/access/logout";
 export const showLogout = (hostname) => hostname !== "localhost" && hostname !== "127.0.0.1";
 
 /**
- * Entries from the top: dashboard, my dashboard, a categories group, the other views, then logout.
+ * Entries from the top: dashboard, my work, a categories group, the other views, then logout.
  * `labelKey` is a locale key; category entries carry the config key in `category`. The dashboard entry carries
  * `category: ""`: it clears the category filter (its plain `#/` link would keep it, since an empty query keeps the filter).
  */
@@ -15,7 +15,7 @@ export function sidebarModel({ view, categories, filterCategory, inboxCount, hos
   const home = view === "grid" && !filterCategory;
   const entry = (id, href, labelKey, current, extra) => ({ id, href, labelKey, current, ...extra });
   return {
-    top: [entry("dashboard", "#/", "navDashboard", home, { category: "" }), entry("my", "#/my", "navMy", view === "my")],
+    top: [entry("dashboard", "#/", "navDashboard", home, { category: "" }), entry("work", "#/work", "navWork", view === "work")],
     categories: categories.map((key) => ({
       id: `cat-${key}`,
       href: "#/",
@@ -25,7 +25,6 @@ export function sidebarModel({ view, categories, filterCategory, inboxCount, hos
     views: [
       entry("gantt", "#/gantt", "navGantt", view === "gantt"),
       entry("upcoming", "#/upcoming", "navUpcoming", view === "upcoming"),
-      entry("mine", "#/mine", "navMine", view === "mine"),
       entry("people", "#/people", "navPeople", view === "people"),
       entry("trash", "#/trash", "navTrash", view === "trash"),
       entry("inbox", "#/inbox", "navInbox", view === "inbox", { count: inboxCount || 0 }),

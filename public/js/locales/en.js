@@ -611,7 +611,6 @@ export default {
     token_efficiency: "0 = wasteful, 10 = very economical.",
   },
   navUpcoming: "Deadlines",
-  navMine: "My work packages",
   summaryBarLabel: "Portfolio summary",
   kpi: {
     overdue_milestones: "Projects with overdue milestones",
@@ -631,11 +630,6 @@ export default {
   deadlinesLater: "Later",
   deadlinesToday: "Today · {date}",
   upcomingEmpty: "No open work packages with an end date.",
-  mineTitle: "My work packages",
-  mineSortLabel: "Sort by",
-  mineSort: { project: "Project", in_progress: "In progress first", start: "Start date", end: "End date" },
-  mineAssignedOnly: "Assigned to me only",
-  mineEmpty: "No open work packages.",
   colProgress: "Progress",
   objectivesScope: "Objectives & scope",
   objectivesEmpty: "No objectives or scope recorded.",
@@ -668,7 +662,6 @@ export default {
   // /qol:t09
   // qol:t06
   navDashboard: "Dashboard",
-  navMy: "My dashboard",
   navCategories: "Categories",
   navLogout: "Log out",
   navMenu: "Menu",
@@ -752,6 +745,16 @@ export default {
     allProjects: "All projects",
   },
   // /my work
+  // my work shell
+  navWork: "My work",
+  mwShell: {
+    stripLabel: "Saved views",
+    sectionsView: "Overview",
+    manage: "Manage views",
+    draftHint: "A new view saves this option and project:",
+    draftKind: "Option for a new view",
+  },
+  // /my work shell
   // tier language
   twColCode: "Code",
   twColTitle: "Title",
