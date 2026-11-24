@@ -379,16 +379,6 @@ export async function listEvents(
   return results;
 }
 
-export async function listInbox(db: D1Database, limit = 100): Promise<EventOut[]> {
-  const { results } = await db
-    .prepare(
-      "SELECT e.*, p.name AS person_name FROM event e LEFT JOIN person p ON p.id = e.person_id WHERE e.project_id IS NULL AND e.action = 'unmatched' ORDER BY e.id DESC LIMIT ?",
-    )
-    .bind(Math.min(Math.max(Math.trunc(limit), 1), 500))
-    .all<EventOut>();
-  return results;
-}
-
 export async function assignInboxEvent(db: D1Database, eventId: number, projectId: string, by: Caller): Promise<void> {
   const ev = await db.prepare("SELECT * FROM event WHERE id = ?").bind(eventId).first<EventRow>();
   if (!ev) throw new NotFoundError(`event ${eventId} not found`);

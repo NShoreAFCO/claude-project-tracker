@@ -142,9 +142,16 @@ export const REST_ACTIONS: Readonly<Record<string, Action>> = {
   "POST /api/progress": "write",
   // events, inbox, search
   "GET /api/events": "read",
-  "GET /api/inbox": "read",
-  "POST /api/inbox/:id/assign": "write",
   "GET /api/search": "read",
+  // inbox triage (rules hold folder paths, hidden from viewers: even the list needs write)
+  "GET /api/inbox": "read",
+  "GET /api/inbox/count": "read",
+  "POST /api/inbox/dismiss": "write",
+  "POST /api/inbox/restore": "write",
+  "POST /api/inbox/:id/assign": "write",
+  "GET /api/inbox/rules": "write",
+  "POST /api/inbox/rules": "write",
+  "DELETE /api/inbox/rules/:id": "write",
   // context
   "GET /api/context": "read",
   "POST /api/context/upload": "write",
