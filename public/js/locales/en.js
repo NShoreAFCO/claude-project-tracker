@@ -466,7 +466,7 @@ export default {
   inboxRuleProject: "Project",
   inboxRuleApply: "Also apply to the {n} events already in the inbox",
   inboxRuleApplyAtLeast: "Also apply to the events already in the inbox (at least {n})",
-  inboxRuleSaved: "Rule saved. {n} existing events handled.",
+  inboxRuleSaved: "Rule saved. Existing events handled: {n}",
   inboxRulesTitle: "Folder rules",
   inboxRulesEmpty: "No folder rules yet.",
   inboxRuleKindIgnore: "Ignore",
