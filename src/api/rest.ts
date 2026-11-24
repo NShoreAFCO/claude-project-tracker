@@ -8,7 +8,8 @@ import { listRisks, upsertRisk, type RiskType } from "../data/risks";
 import { createBaseline } from "../data/baselines";
 import { overrideGateLock, recordGateDecision, type DecisionInput } from "../data/gates";
 import { linkBranch } from "../data/branches";
-import { assignInboxEvent, listEvents, listInbox, logProgress, logTokenCost, setScores } from "../data/logs";
+import { assignInboxEvent, listEvents, logProgress, logTokenCost, setScores } from "../data/logs";
+import { countInbox, createRule, deleteRule, dismissInbox, listInbox, listRules, restoreInbox } from "../data/inbox";
 import { deleteEntity, deletePreview, listTrash, purgeEntity, restoreEntity, type EntityKind } from "../data/entities";
 import { getContextBundle, listContext, readContext } from "../data/context-read";
 import {
@@ -292,13 +293,28 @@ route("GET", "/api/events", async ({ db, url, by }) =>
     by,
   ),
 );
-route("GET", "/api/inbox", async ({ db, by }) => redactEvents(await listInbox(db), by));
+route("GET", "/api/search", async ({ db, url }) => search(db, url.searchParams.get("q") ?? ""));
+
+// ---- inbox triage (unassigned hook and webhook events; no MCP tool). The fixed paths below never match
+// the /api/inbox/:id/assign pattern, which needs the /assign suffix. Dismiss and restore answer 200 (no create).
+route("GET", "/api/inbox", async ({ db, url, by }) =>
+  redactEvents(await listInbox(db, { state: url.searchParams.get("state") ?? undefined, limit: optNum(url.searchParams.get("limit")) }), by),
+);
+route("GET", "/api/inbox/count", async ({ db }) => ({ open: await countInbox(db) }));
+route("POST", "/api/inbox/dismiss", async ({ db, req, by }) => json({ dismissed: await dismissInbox(db, (await readJson(req)).ids, by) }));
+route("POST", "/api/inbox/restore", async ({ db, req, by }) => json({ restored: await restoreInbox(db, (await readJson(req)).ids, by) }));
 route("POST", "/api/inbox/:id/assign", async ({ db, req, by, params }) => {
   const { project_id } = await readJson(req);
   await assignInboxEvent(db, Number(params[0]), reqStr(project_id, "project_id"), by);
   return { ok: true };
 });
-route("GET", "/api/search", async ({ db, url }) => search(db, url.searchParams.get("q") ?? ""));
+// Rules hold folder paths, which viewers may not see (spec F12): even the list needs write.
+route("GET", "/api/inbox/rules", async ({ db }) => listRules(db));
+route("POST", "/api/inbox/rules", async ({ db, req, by }) => createRule(db, await readJson(req), by));
+route("DELETE", "/api/inbox/rules/:id", async ({ db, by, params }) => {
+  await deleteRule(db, params[0], by);
+  return { ok: true };
+});
 
 // ---- context
 route("GET", "/api/context", async ({ db, url }) =>
