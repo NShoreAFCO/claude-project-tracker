@@ -111,6 +111,15 @@ const smallBtn = (label, onClick, cls = "ghost") => h(`button.btn.small.${cls}`,
 const writeBtn = (label, onClick, cls) => roleGate(smallBtn(label, onClick, cls), "write");
 const writeMenu = (label, items) => roleGate(menuButton(label, items), "write");
 
+/** An open leaf has no children and is neither done nor dropped; only it takes a progress value of its own. */
+export const isOpenLeaf = (w) => !w.children?.length && w.status !== "done" && w.status !== "dropped";
+
+/** Visible "Log progress" button of an open leaf row (null for other rows and for viewers). Opens the dialog on that work package. */
+export function logProgressRowButton(projectId, tree, w) {
+  if (!isOpenLeaf(w)) return null;
+  return writeBtn(t("logProgress"), () => logProgressForm(projectId, tree, { wp: w }), "secondary");
+}
+
 /** The URL the project dialog was opened from; closing it puts this back instead of `#/`. */
 let baseHash = "#/";
 
@@ -388,7 +397,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
     const open = !leaf && (fold.open.has(w.id) || (shown && fold.issuesOnly));
     let slider = null;
     if (leaf) {
-      // read-only: changes go through "Adjust progress" (spec F7)
+      // read-only slider: changes go through "Log progress" (visible button) or "Adjust progress" (menu), spec F7
       const input = h("input", {
         type: "range",
         min: 0,
@@ -399,6 +408,11 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         "aria-label": `${t("progress")}: ${w.title}`,
       });
       slider = h("div.slider", input, h("output", fmtPct(w.progress)));
+      const logBtn = logProgressRowButton(id, detail.workpackages, w);
+      if (logBtn) {
+        logBtn.classList.add("row-log-progress");
+        slider = h("div.row-progress", slider, logBtn);
+      }
     } else slider = progressBar(w.effective_progress);
 
     const dates =

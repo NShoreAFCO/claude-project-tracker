@@ -590,6 +590,8 @@ export default {
   adjustProgress: "Fortschritt anpassen",
   adjustProgressTitle: "Fortschritt anpassen: {name}",
   adjustProgressHint: "Der Fortschritt wird nicht mehr mit dem Regler in der Liste verschoben. Neuen Wert hier setzen.",
+  // per-row "Log progress" button and its dialog hint
+  logProgressHint: "Setzt den neuen Gesamtwert (0–100 %). Bei 100 % gilt das Arbeitspaket als abgeschlossen.",
   adjustProjectProgressHint: "Der abgeleitete Fortschritt folgt den Arbeitspaketen. Ein manueller Wert braucht eine Begründung.",
   fProgressReason: "Begründung für den manuellen Wert",
   heatCellTitle: "Wahrscheinlichkeit {p} × Auswirkung {i}: {n} Einträge",
