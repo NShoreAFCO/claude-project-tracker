@@ -16,9 +16,6 @@ export const KPI_KEYS = [
   "missing_owner",
 ];
 
-let mineSort = "project";
-let mineAssignedOnly = false;
-
 export async function loadSummary() {
   try {
     return await api.portfolioSummary();
@@ -234,43 +231,5 @@ export function renderUpcoming(main) {
     "upcomingEmpty",
     false,
     (rows) => groupDeadlines(rows),
-  );
-}
-
-export function renderMyWps(main) {
-  const again = () => renderMyWps(main);
-  const makeToolbar = () =>
-    h(
-      "div.toolbar",
-      {},
-      h("h2", {}, t("mineTitle")),
-      h(
-        "select",
-        {
-          "aria-label": t("mineSortLabel"),
-          on: { change: (event) => ((mineSort = event.currentTarget.value), again()) },
-        },
-        ["project", "in_progress", "start", "end"].map((value) =>
-          h("option", { value, selected: mineSort === value }, t(`mineSort.${value}`)),
-        ),
-      ),
-      h(
-        "label.check",
-        {},
-        h("input", {
-          type: "checkbox",
-          checked: mineAssignedOnly,
-          on: { change: (event) => ((mineAssignedOnly = event.currentTarget.checked), again()) },
-        }),
-        t("mineAssignedOnly"),
-      ),
-    );
-  return renderList(
-    main,
-    "mine",
-    makeToolbar,
-    async () => sortWpRows(await api.myWps({ sort: mineSort, assigned_only: mineAssignedOnly ? 1 : "" }), mineSort),
-    "mineEmpty",
-    true,
   );
 }
