@@ -11,6 +11,8 @@ import { can, gate as roleGate } from "./access.js";
 import { renderMarkdown } from "./markdown.js";
 import { sortTreeByCode } from "./order.js";
 import { catChip } from "./categories.js";
+import { healthChip } from "./health.js";
+
 import {
   projectForm,
   wpForm,
@@ -26,8 +28,37 @@ import {
 } from "./forms.js";
 import { renderContextPanel, openDocViewer } from "./context.js";
 import { collectIssues, issuesByEntity } from "./schedule-ui.js";
-import { issueList, issueBadge, scheduleMeta, milestoneItem, placeMilestones, pruneTree } from "./schedule-view.js";
+import { issueList, issueBadge, scheduleMeta, placeMilestones, pruneTree } from "./schedule-view.js";
+import {
+  wpRow,
+  wpItem,
+  treeHead,
+  splitDone,
+  doneFold,
+  rowActions,
+  slimMilestoneRow,
+  wpDependencies,
+  depTargetId,
+  depLink,
+  depLine,
+  blockedRef,
+  sortRefs,
+  revealFold,
+  revealTarget,
+} from "./wp-tree.js";
 import { decisionDialog, baselineDialog } from "./gates-ui.js";
+
+/** Re-renders, then puts keyboard focus back on the control that was toggled (the render replaces it). */
+export function renderRefocus(render, find) {
+  render();
+  find()?.focus();
+}
+
+/** Dialog heading: title, health chip (only when health is known), status chip. */
+export function headingNodes(p, health) {
+  const hc = healthChip(health);
+  return hc ? [p.title, " ", hc, " ", statusChip(p.status)] : [p.title, " ", statusChip(p.status)];
+}
 
 /** Render sanitised markdown into a container (the only innerHTML use in the app). */
 export function mdBlock(src) {
@@ -91,6 +122,14 @@ export function returnHashFor(hash, dialogOpen, previous = "#/", lastBase = "#/"
 }
 
 /**
+ * Hash of the view to (re)render. While a project dialog is open the hash is `#/p/<id>`; a reload then
+ * redraws the view the dialog closes back to (`back`), not the grid.
+ */
+export function viewHashFor(hash, back = baseHash) {
+  return hash && hash.startsWith("#/p/") ? back || "#/" : hash;
+}
+
+/**
  * What a `#/p/<id>` route puts under the dialog and where closing it goes back to.
  * Something already on screen stays (closing returns to the view it came from, `lastBase`);
  * an empty page (deep link, reload) gets the plain grid and closes to `#/`.
@@ -114,11 +153,17 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
   const back = baseHash;
   let detail;
   let current = { tab, owner };
-  const fold = { open: new Set(), issuesOnly: false, blocks: { branches: false, tokenCost: false, timeline: true } };
+  const fold = {
+    open: new Set(),
+    issuesOnly: false,
+    doneOpen: false,
+    blocks: { description: false, scorecard: false, branches: false, tokenCost: false, timeline: true },
+  };
   const tabs = h("div.tabs", { role: "tablist" });
   const m = openModal({
     title: t("loading"),
     headExtra: tabs,
+    fixed: true,
     onClose: () => {
       window.removeEventListener("tracker:changed", onChanged);
       // only reset the URL if it still points at this project (close events fire asynchronously)
@@ -187,7 +232,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
   function render() {
     const seq = ++renderSeq;
     const p = detail.project;
-    m.heading.replaceChildren(p.title, " ", statusChip(p.status));
+    m.heading.replaceChildren(...headingNodes(p, detail.health));
     clear(
       tabs,
       ["overview", "risks", "context"].map((name) =>
@@ -248,15 +293,43 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       t(ctxCount(kind, ownerId) === 1 ? "ctxDocsCount_one" : "ctxDocsCount", { n: ctxCount(kind, ownerId) }),
     );
 
-  /** blocked_by is wp:<id>, ms:<id>, ext:<text> or free text; show titles instead of ids. */
-  function blockedLabel(raw) {
-    const m = /^(wp|ms|ext):([\s\S]*)$/.exec(String(raw).trim());
-    if (!m) return raw;
-    if (m[1] === "ext") return m[2].trim();
-    const list = m[1] === "wp" ? flatten(detail.workpackages) : detail.milestones;
-    const hit = list.find((x) => x.id === m[2].trim());
-    return (hit && (m[1] === "wp" ? wpName(hit) : hit.title)) ?? m[2].trim();
+  /** blocked_by is wp:<id>, ms:<id>, ext:<text> or free text; wp: and ms: show a link, the rest stays text. */
+  const blockedLabel = (raw) => blockedRef(raw, flatten(detail.workpackages), detail.milestones, jumpTo);
+
+  // dependency links
+  /** Links to work packages (kind "wp") by id, comma separated; an unknown id stays text. */
+  function wpRefs(ids) {
+    const all = flatten(detail.workpackages);
+    const refs = sortRefs((ids || []).map((x) => all.find((w) => w.id === x)).filter(Boolean));
+    const nodes = refs.map((w) => depLink("wp", w, jumpTo));
+    const unknown = (ids || []).filter((x) => !all.some((w) => w.id === x));
+    return [...nodes, ...unknown].flatMap((n, i) => [i ? ", " : null, n]);
   }
+
+  /** Unfolds the way to a work package or milestone, re-renders, then scrolls to it, focuses it and highlights it. */
+  function jumpTo(kind, targetId) {
+    const domId = depTargetId(kind, targetId);
+    const found = () => document.getElementById(domId);
+    if (current.tab !== "overview") {
+      current = { tab: "overview", owner: null };
+      history.replaceState(null, "", projectHash(id, "overview"));
+    }
+    if (kind === "wp") {
+      const shown = fold.issuesOnly && collectIssues(detail).length ? issueWpIds(detail) : null;
+      revealFold(sortTreeByCode(detail.workpackages), targetId, fold, shown);
+    }
+    render();
+    let el = found();
+    if (!el) {
+      // a milestone row may sit in the done group or be filtered out
+      fold.issuesOnly = false;
+      fold.doneOpen = true;
+      render();
+      el = found();
+    }
+    revealTarget(el, { reduceMotion: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches });
+  }
+  // /dependency links
   function blockedAge(w) {
     const n = w.status === "blocked" ? ageDays(w.blocked_since) : null;
     return n === null ? null : ` · ${t("blockedSince", { n, date: fmtDate(w.blocked_since) })}`;
@@ -285,17 +358,32 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
   }
 
   /** Rows of one tree level: gate rows before, milestone rows after their WP (running context). */
-  function levelRows(list, shown, plan, rowOf) {
-    return list
-      .filter((c) => !shown || shown.has(c.id))
-      .flatMap((c) => [
+  function levelRows(list, shown, plan, rowOf, depth = 1) {
+    const rows = (items) =>
+      items.flatMap((c) => [
         ...(plan.before.get(c.id) ?? []).map(rowOf),
-        wpNode(c, shown, plan, rowOf),
+        wpNode(c, shown, plan, rowOf, depth),
         ...(plan.after.get(c.id) ?? []).map(rowOf),
       ]);
+    const visible = list.filter((c) => !shown || shown.has(c.id));
+    if (depth > 1) return rows(visible);
+    // top level: done work packages fold into one line above the open blocks
+    const { open, done } = splitDone(visible);
+    return [
+      ...doneFold({
+        count: done.length,
+        open: fold.doneOpen,
+        onToggle: () => {
+          fold.doneOpen = !fold.doneOpen;
+          renderRefocus(render, () => document.querySelector("button.tw-donefold-btn"));
+        },
+        rows: rows(done),
+      }),
+      ...rows(open),
+    ];
   }
 
-  function wpNode(w, shown, plan, rowOf) {
+  function wpNode(w, shown, plan, rowOf, depth) {
     const leaf = !w.children?.length;
     const open = !leaf && (fold.open.has(w.id) || (shown && fold.issuesOnly));
     let slider = null;
@@ -331,69 +419,69 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       );
     if (leaf && w.last_progress_at) schedMeta.push(lastActivity(w.last_progress_at));
 
-    return h(
-      "li",
-      h(
-        "div.wp",
-        h(
-          "div.title",
-          !leaf
-            ? h(
-                "button.chev",
-                {
-                  type: "button",
-                  "aria-expanded": String(open),
-                  "aria-label": `${t(open ? "collapse" : "expand")} ${w.title}`,
-                  on: {
-                    click: () => {
-                      if (open) fold.open.delete(w.id);
-                      else fold.open.add(w.id);
-                      render();
-                    },
-                  },
-                },
-                h("span.fold-glyph", { "aria-hidden": "true" }, open ? "▾" : "▸"),
-              )
-            : null,
-          h("strong", w.code ? [h("span.wp-code", w.code), " ", w.title] : w.title),
-          statusChip(w.status),
-          w.effective_category ? catChip("w", w.effective_category, !w.category && !!w.effective_category) : null,
-          personBadge(w.effective_owner, { inherited: !w.owner, label: w.owner ? t("fOwner") : t("inheritedOwner") }),
-          w.is_human ? h("span.badge.human", { title: t("human"), "aria-label": t("human") }, "👤") : null,
-          w.locked ? h("span.badge.locked", { title: t("lockedBy", { name }) }, "🔒 ", t("locked")) : null,
-          issueBadge(w, titleOf),
-          w.critical ? h("span.badge.critical", t("criticalMark")) : null,
-          verifyBadge(w),
-          !leaf ? h("span.meta", t("subCount", { n: w.children.length })) : null,
-          ctxBadge("workpackage", w.id),
-          dates,
-        ),
-        slider,
-        h(
-          "div.actions",
-          leaf && w.status !== "done" && w.status !== "dropped" ? writeBtn(t("adjustProgress"), () => adjustProgressDialog(id, w)) : null,
-          leaf &&
+    const deps = wpDependencies(w, flatten(detail.workpackages), detail.milestones);
+    const row = wpRow({
+      depth,
+      id: depTargetId("wp", w.id),
+      fold: {
+        leaf,
+        open,
+        label: `${t(open ? "collapse" : "expand")} ${w.title}`,
+        onToggle: () => {
+          if (open) fold.open.delete(w.id);
+          else fold.open.add(w.id);
+          renderRefocus(render, () => document.getElementById(depTargetId("wp", w.id))?.querySelector("button.chev"));
+        },
+      },
+      code: w.code,
+      title: w.title,
+      badges: [
+        w.effective_category ? catChip("w", w.effective_category, !w.category && !!w.effective_category) : null,
+        w.is_human ? h("span.badge.human", { title: t("human"), "aria-label": t("human") }, "👤") : null,
+        w.locked ? h("span.badge.locked", { title: t("lockedBy", { name }) }, "🔒 ", t("locked")) : null,
+        issueBadge(w, titleOf),
+        w.critical ? h("span.badge.critical", t("criticalMark")) : null,
+        verifyBadge(w),
+        !leaf ? h("span.meta", t("subCount", { n: w.children.length })) : null,
+        ctxBadge("workpackage", w.id),
+      ],
+      status: statusChip(w.status),
+      dates,
+      owner: personBadge(w.effective_owner, { inherited: !w.owner, label: w.owner ? t("fOwner") : t("inheritedOwner") }),
+      progress: slider,
+      below: [
+        depLine("dep-on", t("fDependsOn"), deps.dependsOn, jumpTo),
+        depLine("dep-by", t("neededBy"), deps.neededBy, jumpTo),
+        rowActions({
+          edit: { label: t("edit"), onClick: () => wpForm(id, w, detail.workpackages, null, detail.milestones) },
+          menuLabel: t("moreActions"),
+          gate: (el) => roleGate(el, "write"),
+          items: [
+            leaf && w.status !== "done" && w.status !== "dropped"
+              ? { label: t("adjustProgress"), onClick: () => adjustProgressDialog(id, w) }
+              : null,
+            leaf &&
             w.progress >= 100 &&
             w.status !== "done" &&
             w.status !== "dropped" &&
             can(w.verification === "sign_off" ? "verify_sign_off" : "write")
-            ? smallBtn(t("markComplete"), () => markCompleteDialog(id, w), "secondary")
-            : null,
-          writeBtn(t("edit"), () => wpForm(id, w, detail.workpackages, null, detail.milestones)),
-          writeBtn(`+ ${t("addSubWorkpackage")}`, () => wpForm(id, null, detail.workpackages, w.id, detail.milestones)),
-          writeMenu(t("moreActions"), [
+              ? { label: t("markComplete"), onClick: () => markCompleteDialog(id, w) }
+              : null,
+            { label: t("addSubWorkpackage"), onClick: () => wpForm(id, null, detail.workpackages, w.id, detail.milestones) },
+            { label: t("addMilestone"), onClick: () => milestoneForm(id, null, detail.workpackages) },
+            { label: t("moveWorkpackage"), onClick: () => wpForm(id, w, detail.workpackages, null, detail.milestones) },
             { label: t("delete"), danger: true, onClick: () => deleteEntity("workpackage", w.id, w.title, id) },
-          ]),
-        ),
+          ],
+        }),
         schedMeta.length ? h("div.meta", schedMeta) : null,
         issueList(w, titleOf),
-        w.blocked_by ? h("div.blocked", `${t("blockedBy")}: ${blockedLabel(w.blocked_by)}`, blockedAge(w)) : null,
+        w.blocked_by ? h("div.blocked", `${t("blockedBy")}: `, blockedLabel(w.blocked_by), blockedAge(w)) : null,
         w.waiting_reason ? h("div.blocked", `${t("fWaitingReason")}: ${w.waiting_reason}`) : null,
         w.drop_reason ? h("div.blocked", `${t("fDropReason")}: ${w.drop_reason}`) : null,
         w.description_md ? h("details.blocked", h("summary", t("description")), mdBlock(w.description_md)) : null,
-      ),
-      !leaf && open ? h("ul", levelRows(w.children, shown, plan, rowOf)) : null,
-    );
+      ].filter(Boolean),
+    });
+    return wpItem(depth, row, !leaf && open ? h("ul", levelRows(w.children, shown, plan, rowOf, depth + 1)) : null);
   }
 
   /** Verified (person + date) or done-but-unverified (legacy rows, verification required). */
@@ -477,7 +565,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
               on: {
                 click: () => {
                   fold.issuesOnly = !fold.issuesOnly;
-                  render();
+                  renderRefocus(render, () => document.querySelector("button.badge.issue"));
                 },
               },
             },
@@ -560,18 +648,21 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
     const today = utcDateString();
 
     const rowOf = (ms) =>
-      milestoneItem(ms, {
+      slimMilestoneRow(ms, {
         today,
         titleOf,
-        requiresText: ms.requires?.length ? ms.requires.map((wpId) => wpTitle[wpId] || wpId).join(", ") : t("none"),
-        unlocksText: ms.unlocks?.length ? ms.unlocks.map((wpId) => wpTitle[wpId] || wpId).join(", ") : t("none"),
-        decide: can("decide") ? () => decisionDialog({ project: p, milestone: ms }) : undefined,
-        actions: [
-          writeBtn(t("edit"), () => milestoneForm(id, ms, detail.workpackages)),
-          writeMenu(t("moreActions"), [
+        id: depTargetId("ms", ms.id),
+        requiresText: ms.requires?.length ? wpRefs(ms.requires) : t("none"),
+        unlocksText: ms.unlocks?.length ? wpRefs(ms.unlocks) : t("none"),
+        actions: rowActions({
+          edit: { label: t("edit"), onClick: () => milestoneForm(id, ms, detail.workpackages) },
+          menuLabel: t("moreActions"),
+          gate: (el) => roleGate(el, "write"),
+          items: [
+            ms.gate && can("decide") ? { label: t("recordDecision"), onClick: () => decisionDialog({ project: p, milestone: ms }) } : null,
             { label: t("delete"), danger: true, onClick: () => deleteEntity("milestone", ms.id, ms.title, id) },
-          ]),
-        ],
+          ],
+        }),
       });
 
     const sortedTree = sortTreeByCode(d.workpackages);
@@ -616,11 +707,20 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       closureBlocks,
       copies,
       block(
+        t("workpackages"),
+        workpackageActions,
+        d.workpackages.length || d.milestones.length
+          ? h("ul.tree.tw-tree", [h("li.tw-headrow", treeHead()), ...levelRows(sortedTree, shownWps, plan, rowOf), ...plan.tail.map(rowOf)])
+          : h("p.empty", t("noWorkpackages")),
+      ),
+      cblock(
+        "description",
         t("description"),
         writeBtn(t("edit"), () => projectForm(p, { workpackages: d.workpackages })),
         p.description_md ? mdBlock(p.description_md) : h("p.meta", p.summary || t("noDescription")),
       ),
-      block(
+      cblock(
+        "scorecard",
         t("scorecard"),
         writeBtn(t("setScores"), () => scoresForm(id, d.scores), "secondary"),
         d.scores.length
@@ -650,13 +750,6 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
               ),
             )
           : h("p.empty", t("noScores")),
-      ),
-      block(
-        t("workpackages"),
-        workpackageActions,
-        d.workpackages.length || d.milestones.length
-          ? h("ul.tree", [...levelRows(sortedTree, shownWps, plan, rowOf), ...plan.tail.map(rowOf)])
-          : h("p.empty", t("noWorkpackages")),
       ),
       cblock(
         "branches",

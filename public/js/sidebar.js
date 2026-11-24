@@ -8,13 +8,14 @@ export const showLogout = (hostname) => hostname !== "localhost" && hostname !==
 
 /**
  * Entries from the top: dashboard, my dashboard, a categories group, the other views, then logout.
- * `labelKey` is a locale key; category entries carry the config key in `category`.
+ * `labelKey` is a locale key; category entries carry the config key in `category`. The dashboard entry carries
+ * `category: ""`: it clears the category filter (its plain `#/` link would keep it, since an empty query keeps the filter).
  */
 export function sidebarModel({ view, categories, filterCategory, inboxCount, hostname }) {
   const home = view === "grid" && !filterCategory;
   const entry = (id, href, labelKey, current, extra) => ({ id, href, labelKey, current, ...extra });
   return {
-    top: [entry("dashboard", "#/", "navDashboard", home), entry("my", "#/my", "navMy", view === "my")],
+    top: [entry("dashboard", "#/", "navDashboard", home, { category: "" }), entry("my", "#/my", "navMy", view === "my")],
     categories: categories.map((key) => ({
       id: `cat-${key}`,
       href: "#/",
@@ -48,7 +49,7 @@ export function renderSidebar(nav, model, { h, clear, t, catLabel, onCategory })
   const link = (e, label, extra) =>
     h(
       "a",
-      { href: e.href, "aria-current": e.current ? "page" : null, on: e.category ? { click: (ev) => onCategory(ev, e.category) } : {} },
+      { href: e.href, "aria-current": e.current ? "page" : null, on: typeof e.category === "string" ? { click: (ev) => onCategory(ev, e.category) } : {} },
       label,
       extra || null,
     );

@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.6.0 — 2026-11-24 (layout and visual hierarchy)
+
+No breaking change. No migration. Deploy only. The changes are in the dashboard and in REST project cards and detail; MCP keeps its tool and output shapes.
+
+### Added
+- A health chip on every active or on-hold project card and in the project dialog heading: On track, At risk, Late, Stalled or On hold, with a short line saying why. The dashboard can filter projects by health, and the filter is kept in the URL (`health`).
+- REST project cards and project detail carry `health` (`{ state, reasons }`, or `null` for projects that are neither active nor on hold); MCP results carry no health. The rules and their order are in `docs/SPEC.md`.
+- Two policy settings for health: `health_wp_late_days` (default 7) is how far an open work package may run past its end date before the project is at risk; `health_gate_soon_days` (default 2) is how close to its due date a reached gate without a decision may get. "Stalled" follows the existing `stale_days`, so the Stale tile and the chip agree.
+- A compact list view of projects next to the cards, with a toggle that each person's browser remembers.
+- Dependency links in the project dialog: a predecessor is a link that unfolds the tree down to it.
+- In the Gantt chart, the project title links to its project dialog; clicking the rest of the row still folds it.
+- Optional theme tokens `--tier-band`, `--tier-rule`, `--tier-guide` for the work package tree and `--health-on-track`, `--health-at-risk`, `--health-late`, `--health-stalled`, `--health-on-hold` for the health chip. Each falls back to an existing token (see `docs/CUSTOMISING.md`).
+
+### Changed
+- Project cards open with the health chip and title, with the reason line under them and a clearer type scale; the card grid is wider.
+- The project dialog tells work packages, sub-packages and tasks apart (header band, indent guides, rules), lists them in code order, folds done work packages, keeps one action per row and shows milestones and gates as slim rows.
+- Gantt defaults: top-level work packages only, completed projects hidden, neutral progress fill, the same tier look and code order as the dialog.
+- The Gantt critical path is a dark line under the bar with dark dependency arrows, and late keeps its red outline, so a bar that is both late and critical shows both. The legend matches.
+
+### Fixed
+- The sidebar Dashboard entry clears the category filter and shows all categories again.
+- An edit in a project dialog opened from the Gantt, Deadlines or another view now redraws that view underneath instead of the project grid.
+- Keyboard focus stays on the fold toggle in the project dialog after folding.
+
 ## v0.5.0 — 2026-11-23 (signals and order)
 
 No breaking change. No migration. Deploy only. Most changes are in the dashboard; MCP and REST keep their tool and output shapes.

@@ -4,7 +4,8 @@ import { lateness } from "./lateness.js";
 import { api } from "./api.js";
 import { h, clear, statusChip, toastError } from "./dom.js";
 import { openProject } from "./project.js";
-import { WP_CATEGORIES, catVar, catDot, catLabel } from "./categories.js";
+import { catVar, catDot } from "./categories.js";
+import { HEALTH_ORDER } from "./health.js";
 import { collectIssues } from "./schedule-ui.js";
 import { sortByCode } from "./order.js";
 import { issueEdgeKeys, ghostBar, ghostDiamond, issueMark, slipMark, barTooltip, barParts, placeMarks, markDate, markEdges, markArrowPath, markHalf } from "./gantt-marks.js";
@@ -23,13 +24,27 @@ const toDay = (ymd) => {
 };
 
 let selected = "";
-let level = "all";
+let showSub = false;
+let showDone = false;
+// collapsed project groups: per page view, cleared when the view is opened afresh
+const collapsed = new Set();
+const COMPLETED = ["done", "abandoned"];
 let showDeps = true;
 let showBaseline = false;
 let showCritical = false;
 
 /** Query of the current hash route (#/gantt?project=<id>): the project filter lives in the URL. */
 const hashParams = () => new URLSearchParams(location.hash.split("?")[1] || "");
+
+/** Writes project, sub and done back into the hash (defaults omitted). */
+const writeHash = () => {
+  const p = new URLSearchParams();
+  if (selected) p.set("project", selected);
+  if (showSub) p.set("sub", "1");
+  if (showDone) p.set("done", "1");
+  const q = p.toString();
+  history.replaceState(null, "", q ? `#/gantt?${q}` : "#/gantt");
+};
 
 const milestoneDate = markDate;
 
@@ -41,12 +56,22 @@ const milestoneState = (m, today) => {
 
 const milestoneStateLabel = (state) => (state === "done" ? t("reached") : state === "overdue" ? t("overdue") : t("msOpen"));
 
-export async function renderGantt(main, state) {
-  const wanted = hashParams().get("project") || "";
+export async function renderGantt(main, state, keep = false) {
+  const params = hashParams();
+  const wanted = params.get("project") || "";
   selected = state.projects.some((p) => p.id === wanted) ? wanted : "";
-  const rerender = () => renderGantt(main, state);
+  showSub = params.get("sub") === "1";
+  showDone = params.get("done") === "1";
+  if (!keep) collapsed.clear();
+  const rerender = () => renderGantt(main, state, true);
+  const toggleGroup = (id) => {
+    if (!collapsed.delete(id)) collapsed.add(id);
+    rerender();
+  };
   clear(main, h("h2", t("ganttTitle")), h("p", t("loading")));
-  const projects = state.projects.filter((p) => !selected || p.id === selected);
+  // a single-project Gantt shows that project even when it is completed
+  const doneCount = state.projects.filter((p) => COMPLETED.includes(p.status)).length;
+  const projects = state.projects.filter((p) => (selected ? p.id === selected : showDone || !COMPLETED.includes(p.status)));
   let detailsBy;
   try {
     detailsBy = await Promise.all(projects.map(async (p) => [p, await api.project(p.id)]));
@@ -62,7 +87,7 @@ export async function renderGantt(main, state) {
       on: {
         change: (e) => {
           selected = e.target.value;
-          history.replaceState(null, "", selected ? `#/gantt?project=${encodeURIComponent(selected)}` : "#/gantt");
+          writeHash();
           rerender();
         },
       },
@@ -72,13 +97,28 @@ export async function renderGantt(main, state) {
   );
   picker.value = selected;
 
-  const levelPicker = h(
-    "select",
-    { "aria-label": t("levelLabel"), on: { change: (e) => ((level = e.target.value), rerender()) } },
-    h("option", { value: "main" }, t("levelMain")),
-    h("option", { value: "all" }, t("levelAll")),
-  );
-  levelPicker.value = level;
+  const subCheck = h("input", {
+    type: "checkbox",
+    checked: showSub,
+    on: {
+      change: (e) => {
+        showSub = e.target.checked;
+        writeHash();
+        rerender();
+      },
+    },
+  });
+  const doneCheck = h("input", {
+    type: "checkbox",
+    checked: showDone,
+    on: {
+      change: (e) => {
+        showDone = e.target.checked;
+        writeHash();
+        rerender();
+      },
+    },
+  });
 
   const depsCheck = h("input", {
     type: "checkbox",
@@ -146,7 +186,7 @@ export async function renderGantt(main, state) {
       allWps.push(w);
       const validOwn = w.start_date && w.end_date && w.end_date >= w.start_date;
 
-      if (level === "main") {
+      if (!showSub) {
         if (depth === 0) {
           const ownActual = validOwn ? null : actualSpan(w);
           const descendants = validOwn || ownActual ? null : collectDescendantSpan(w);
@@ -200,11 +240,28 @@ export async function renderGantt(main, state) {
     for (const w of roots) markTop(w, w.id);
     for (const w of roots) walkAll(w, 0, null);
 
-    for (const m of projectMilestones) {
-      milestones.push({ m, p });
+    const isCollapsed = collapsed.has(p.id);
+    if (!isCollapsed) {
+      for (const m of projectMilestones) milestones.push({ m, p });
     }
 
-    if (projectRows.length) rows.push({ type: "project", p }, ...projectRows);
+    if (projectRows.length) {
+      const projectRow = {
+        type: "project",
+        p,
+        health: p.health || detail.health || null,
+        collapsed: isCollapsed,
+        start_date: projectRows.reduce((a, r) => (r.start_date < a ? r.start_date : a), projectRows[0].start_date),
+        end_date: projectRows.reduce((a, r) => (r.end_date > a ? r.end_date : a), projectRows[0].end_date),
+      };
+      if (isCollapsed) {
+        const hidden = new Set(projectRows);
+        for (const [id, row] of [...visibleByWp]) if (hidden.has(row)) visibleByWp.delete(id);
+        rows.push(projectRow);
+      } else {
+        rows.push(projectRow, ...projectRows);
+      }
+    }
   }
 
   // milestones and gates ride on WP rows (D14); undated plain milestones go to the table, the rest unplaced
@@ -236,7 +293,7 @@ export async function renderGantt(main, state) {
   } else {
     body.push(
       showBaseline && noBaseline ? h("p.meta", { role: "status" }, t("ganttNoBaseline")) : null,
-      h("div.gantt-wrap", chart(rows, visibleByWp, allWps, { ...opts, ...marksCtx })),
+      h("div.gantt-wrap", chart(rows, visibleByWp, allWps, { ...opts, ...marksCtx, toggleGroup })),
       legend(allMarks),
     );
   }
@@ -298,7 +355,8 @@ export async function renderGantt(main, state) {
       "div.toolbar",
       h("h2", { style: { margin: 0, flex: 1 } }, t("ganttTitle")),
       h("div", { style: { "min-width": "220px" } }, picker),
-      h("div", { style: { "min-width": "180px" } }, levelPicker),
+      h("label.check", subCheck, t("levelAll")),
+      h("label.check", doneCheck, t("ganttDoneProjects", { n: doneCount })),
       h("label.check", depsCheck, t("dependencies")),
       h("label.check", baselineCheck, t("ganttBaseline")),
       h("label.check", criticalCheck, t("ganttCritical")),
@@ -307,7 +365,7 @@ export async function renderGantt(main, state) {
   );
 }
 
-function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
+function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed, toggleGroup }) {
   const datedRows = rows.filter((r) => r.type === "wp");
   const today = Math.floor(Date.now() / DAY);
 
@@ -318,6 +376,8 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
     );
   const extents = datedRows.map((r) => partsOf(r)?.extent ?? { from: toDay(r.start_date), to: toDay(r.end_date) + 1 });
   for (const r of rows) {
+    // a collapsed group keeps its span, so the axis does not jump
+    if (r.type === "project" && r.collapsed) extents.push({ from: toDay(r.start_date), to: toDay(r.end_date) + 1 });
     if (r.type === "unplaced") for (const mk of r.marks) extents.push({ from: toDay(mk.date), to: toDay(mk.date) + 1 });
   }
   for (const marks of placed.values()) {
@@ -337,7 +397,10 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
   }
 
   const span = max - min;
-  const LABEL = 240;
+  const LABEL = 340;
+  const CODEW = 56;
+  // characters that fit between the code column and the issue mark, at about 6.6 px each
+  const fit = (indent) => Math.max(8, Math.floor((LABEL - 24 - 16 - CODEW - indent) / 6.6));
   const ROW = 30;
   const TOP = 34;
   const dayW = Math.max(4, Math.min(40, 900 / span));
@@ -393,6 +456,10 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
   const pointFor = wpPoint;
   const markX = (mk) =>
     mk.kind === "gate" ? x((partsOf(mk.row)?.extent ?? { from: toDay(mk.row.start_date) }).from) - 4 : x(toDay(mk.date) + 0.5);
+
+  // critical path: a dark rail under the bar or mark (red stays for "late", a state)
+  const critRail = (x1, x2, y) =>
+    s("rect", { class: "crit-rail", x: x1, y: y + ROW - 5, width: Math.max(2, x2 - x1), height: 3 });
 
   if (showDeps) {
     const defs = s(
@@ -495,6 +562,7 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
           titleOf,
         ),
       );
+    if (crit) svg.append(mk.kind === "gate" ? critRail(cx - 2, cx + 9, y) : critRail(cx - (state === "done" ? 10 : 8), cx + (state === "done" ? 10 : 8), y));
     if (mk.kind === "gate") {
       const top = cy - 9;
       const bot = cy + 9;
@@ -531,10 +599,40 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
     const y = TOP + i * ROW;
 
     if (r.type === "project") {
-      svg.append(
+      const open = !r.collapsed;
+      const toggle = () => toggleGroup?.(r.p.id);
+      const g = s("g", {
+        class: `proj-head${open ? "" : " collapsed"}`,
+        role: "button",
+        tabindex: 0,
+        "aria-expanded": String(open),
+        "aria-label": t(open ? "ganttCollapse" : "ganttExpand", { title: r.p.title }),
+      });
+      g.addEventListener("click", toggle);
+      g.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault?.();
+          toggle();
+        }
+      });
+      const dot = s("circle", { class: "cat-dot", cx: 30, cy: y + ROW / 2, r: 5 });
+      dot.style.setProperty("fill", catVar("p", r.p.category));
+      const name = truncate(r.p.title, 26);
+      const hs = HEALTH_ORDER.includes(r.health?.state) ? r.health.state : "";
+      g.append(
         s("rect", { class: "proj-row", x: 0, y, width, height: ROW }),
-        s("text", { class: "proj-label", x: 8, y: y + 20 }, truncate(r.p.title, 34)),
+        s("path", { class: "proj-caret", d: open ? `M8,${y + 12} h8 l-4,6 z` : `M10,${y + 9} v12 l6,-6 z` }),
+        dot,
+        ...(hs ? [s("text", { class: `proj-health h-${hs.replace(/_/g, "-")}`, x: LABEL - 10, y: y + 20, "text-anchor": "end" }, t(`healthState.${hs}`))] : []),
       );
+      // the title opens the project dialog; it sits beside the toggle row, not inside it, so a click never folds the group
+      const link = s(
+        "a",
+        { class: "proj-link", href: `#/p/${encodeURIComponent(r.p.id)}`, "aria-label": t("ganttOpenProject", { title: r.p.title }) },
+        s("text", { class: "proj-label", x: 42, y: y + 20 }, name, ...(name !== r.p.title ? [s("title", {}, r.p.title)] : [])),
+      );
+      link.addEventListener("click", (e) => e.stopPropagation?.());
+      svg.append(g, link);
       return;
     }
 
@@ -556,24 +654,24 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
     const lateText = late.late ? ` · ${t("lateChipTitle", { date: late.date, n: late.days })}` : "";
     const title = () =>
       s("title", {}, barTooltip(`${w.code ? `${w.code} ${w.title}` : w.title}: ${range} · ${fmtPct(pct)}${lateText}`, w, titleOf));
-    const colour = catVar("w", w.bar_category);
     const barY = y + 7;
     const barH = ROW - 14;
-    const rect = (cls, span, extra = {}) => {
-      const el = s(
-        "rect",
-        { class: cls, x: x(span.from), y: barY, width: Math.max(2, x(span.to) - x(span.from)), height: barH, rx: 3, ...extra },
-        title(),
-      );
-      const outline = cls === "bar-actual";
-      el.style.setProperty("fill", outline ? "none" : colour);
-      el.style.setProperty("stroke", cls.startsWith("bar-fill") ? "none" : colour);
-      return el;
-    };
+    // bars are neutral (colour comes from the CSS classes); only "late" colours a bar, critical gets a rail
+    const rect = (cls, span, extra = {}) =>
+      s("rect", { class: cls, x: x(span.from), y: barY, width: Math.max(2, x(span.to) - x(span.from)), height: barH, rx: 3, ...extra }, title());
 
+    const indent = r.depth * 14;
+    const maxTitle = fit(indent);
+    const shown = truncate(w.title, maxTitle);
     svg.append(
       ...[
-        s("text", { x: 16 + r.depth * 14, y: y + 20 }, truncate(w.code ? `${w.code} ${w.title}` : w.title, 28 - r.depth * 2)),
+        w.code ? s("text", { class: "wp-code", x: 16, y: y + 20 }, w.code) : null,
+        s(
+          "text",
+          { class: `wp-title tier-${r.depth === 0 ? 1 : 2}`, x: 16 + CODEW + indent, y: y + 20 },
+          shown,
+          ...(shown !== w.title ? [s("title", {}, w.title)] : []),
+        ),
         issueMark(s, { x: LABEL - 16, y: y + 20, entity: w, titleOf }),
       ].filter(Boolean),
     );
@@ -588,7 +686,7 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
       if (showCritical && w.critical) bg.classList.add("critical");
       if (late.late) {
         bg.classList.add("late");
-        // inline, because rect() sets the category colour inline
+        // inline so a bar's own stroke never depends on rule order; state colour, not category colour
         bg.style.setProperty("stroke", "var(--status-late, var(--status-blocked, var(--color-danger)))");
         bg.style.setProperty("stroke-width", "2");
       }
@@ -600,15 +698,13 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
       ["block", "bar-fill bar-actual-block"],
     ]) {
       if (!parts[key]) continue;
-      const el = rect(cls, parts[key]);
-      if (showCritical && w.critical) {
-        el.classList.add("critical");
-        el.style.setProperty("stroke", "var(--status-blocked)");
-        el.style.setProperty("stroke-width", "3");
-      }
-      svg.append(el);
+      svg.append(rect(cls, parts[key]));
     }
     if (parts.actual) svg.append(rect("bar-actual", parts.actual));
+    if (showCritical && w.critical) {
+      const span = parts.planned ?? parts.extent;
+      svg.append(critRail(x(span.from), x(span.to), y));
+    }
     if (parts.overdue) {
       const { from, to, closed } = parts.overdue;
       const yTop = barY;
@@ -616,9 +712,7 @@ function chart(rows, visibleByWp, allWps, { titleOf, issueKeys, placed }) {
       const d = closed
         ? `M${x(from)},${yTop} H${x(to)} V${yBot} H${x(from)}`
         : `M${x(from)},${yTop} H${x(to)} M${x(from)},${yBot} H${x(to)}`;
-      const od = s("path", { class: "bar-overdue", d }, title());
-      od.style.setProperty("stroke", colour);
-      svg.append(od);
+      svg.append(s("path", { class: "bar-overdue", d }, title()));
     }
   };
 
@@ -644,19 +738,20 @@ function legend(allMarks = []) {
   return h(
     "div.gantt-legend",
     h("strong", `${t("legend")}:`),
-    ...WP_CATEGORIES.map((key) => h("span", catDot("w", key), catLabel("w", key))),
+    h("span", h("span.legend-planned"), t("ganttLegendPlanned")),
+    h("span", h("span.legend-progress"), t("ganttLegendProgress")),
+    h("span", h("span.legend-late"), t("ganttLegendLate")),
     h("span", h("span.ms-diamond.done"), t("reached")),
     h("span", h("span.ms-diamond.open"), t("msOpen")),
     h("span", h("span.ms-diamond.overdue"), t("overdue")),
     h("span", h("span.ms-diamond.gate"), t("ganttGate")),
-    h("span", h("span.legend-planned"), t("ganttLegendPlanned")),
+    h("span", h("span.legend-today"), t("ganttToday")),
     h("span", h("span.legend-actual"), t("ganttLegendActual")),
-    h("span", h("span.legend-progress"), t("ganttLegendProgress")),
     h("span", h("span.legend-overdue"), t("ganttLegendOverdue")),
-    h("span", h("span.legend-late"), t("ganttLegendLate")),
     h("span", h("span.legend-ghost"), t("ganttBaseline")),
     h("span", h("span.legend-critical"), t("ganttCritical")),
     h("span", h("span.legend-issue", { "aria-hidden": "true" }, "⚠"), t("ganttIssues")),
+    h("span", catDot("p", null), t("ganttLegendCategory")),
     allMarks.length
       ? h(
           "ul.gantt-marklist",

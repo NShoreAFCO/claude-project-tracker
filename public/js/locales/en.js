@@ -70,9 +70,7 @@ export default {
   expand: "Expand",
   collapse: "Collapse",
   subCount: "{n} sub-WP",
-  levelMain: "Main WPs only",
   levelAll: "With sub-WPs",
-  levelLabel: "Level",
   dependencies: "Dependencies",
   legend: "Legend",
   confirmDeleteMilestone: "Delete milestone “{name}”?",
@@ -80,8 +78,6 @@ export default {
   progress: "Progress",
   target: "Target",
   start: "Start",
-  openBranches: "Open branches",
-  contextDocs: "Context documents",
   lastActivity: "Last activity",
   blockedBy: "Blocked by",
   originLabel: "Origin",
@@ -432,6 +428,11 @@ export default {
   ganttToday: "Today",
   ganttProject: "Project",
   ganttAllProjects: "All projects",
+  ganttDoneProjects: "Completed projects ({n})",
+  ganttCollapse: "Collapse {title}",
+  ganttExpand: "Expand {title}",
+  ganttOpenProject: "Open {title}",
+  ganttLegendCategory: "Category: dot before the project name",
 
   // inbox
   inboxTitle: "Inbox",
@@ -692,4 +693,59 @@ export default {
   // qol:t16
   mydColItem: "Item",
   // /qol:t16
+  // tier language
+  twColCode: "Code",
+  twColTitle: "Title",
+  twColDates: "Dates",
+  twColOwner: "Owner",
+  // /tier language
+  // dialog layout
+  doneCount: "{n} done",
+  doneShow: "Show",
+  doneHide: "Hide",
+  moveWorkpackage: "Move",
+  // /dialog layout
+  // dependency links
+  neededBy: "Needed by",
+  // /dependency links
+  // health
+  healthState: { on_hold: "On hold", late: "Late", at_risk: "At risk", stalled: "Stalled", on_track: "On track" },
+  healthReason: {
+    on_hold: "On hold",
+    milestone_overdue: "{label} overdue {n} d",
+    gate_overdue: "Gate {label} overdue {n} d",
+    target_passed: "Target {date} passed {n} d ago",
+    high_risk: "High risk: {title}",
+    wp_blocked: "{label} blocked",
+    gate_today: "Gate {label} due today",
+    gate_tomorrow: "Gate {label} due tomorrow",
+    gate_in: "Gate {label} due in {n} d",
+    wp_late: "{label} overdue {n} d",
+    no_activity: "No activity for {n} days",
+    no_activity_unknown: "No recent activity",
+    next_milestone: "Next: {label} · {date}",
+    next_milestone_undated: "Next: {label}",
+  },
+  filterHealth: "Health",
+  // /health
+  // list mode
+  list: {
+    col: {
+      health: "Health",
+      project: "Project",
+      status: "Status",
+      target: "Target",
+      next: "Next milestone",
+      progress: "Progress",
+      owner: "Owner",
+      wps: "Work packages",
+      activity: "Last activity",
+    },
+    wp: { open: "{n} open", in_progress: "{n} in progress", waiting_blocked: "{n} waiting or blocked", done: "{n} done" },
+    empty: "No projects match the filters.",
+    view: "View",
+    cards: "Cards",
+    rows: "List",
+  },
+  // /list mode
 };

@@ -380,7 +380,8 @@ button.badge {
 }
 .card h2 {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 16px;
+  font-weight: 600;
 }
 .card .head {
   display: flex;
@@ -583,15 +584,6 @@ section.block > header h3 {
   align-items: center;
   padding: 0.5rem 0;
   border-bottom: 1px solid var(--color-border);
-}
-.wp .title {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  align-items: center;
-}
-.wp .title strong {
-  font-weight: 600;
 }
 .wp .actions {
   display: flex;
@@ -807,14 +799,6 @@ details.inherited > summary {
 .gantt .today {
   stroke: var(--color-accent);
   stroke-width: 2;
-}
-.gantt .bar-bg {
-  fill: var(--color-tint);
-  stroke: var(--color-primary);
-  stroke-width: 1;
-}
-.gantt .bar-fill {
-  fill: var(--color-primary);
 }
 .gantt .proj-row {
   fill: var(--color-tint);
@@ -1292,13 +1276,10 @@ td .chip.late,
   stroke-width: 1.5;
   stroke-dasharray: 3 2;
 }
-.gantt .bar-bg.critical {
-  stroke: var(--status-blocked);
-  stroke-width: 3;
-}
-.gantt .ms.critical {
-  stroke: var(--status-blocked);
-  stroke-width: 3;
+/* critical path: a dark rail under the bar or mark; red outlines mean "late" only */
+.gantt .crit-rail {
+  fill: var(--color-text-strong);
+  stroke: none;
 }
 .gantt .dep.issue {
   stroke: var(--status-blocked);
@@ -1309,6 +1290,9 @@ td .chip.late,
 .gantt .dep.critical {
   stroke-width: 2.4;
   opacity: 1;
+}
+.gantt .dep.critical:not(.issue) {
+  stroke: var(--color-text-strong);
 }
 .gantt .dep-head.issue {
   fill: var(--status-blocked);
@@ -1405,18 +1389,14 @@ ul.issues .issue {
   border-top: 2px dashed var(--color-text-muted);
 }
 .legend-critical {
-  height: 0.7rem;
-  border: 3px solid var(--status-blocked);
-  border-radius: 3px;
+  height: 3px;
+  min-width: 1.4rem;
+  background: var(--color-text-strong);
+  vertical-align: middle;
 }
 .legend-issue {
   color: var(--status-blocked);
   font-weight: 700;
-}
-.card-actions {
-  margin-top: 0.5rem;
-  display: flex;
-  justify-content: flex-end;
 }
 a.btn.small {
   text-decoration: none;
@@ -1857,10 +1837,6 @@ details.cat-empty[open] > summary.cat-head::before {
 }
 /* /qol:t06 */
 /* qol:t10 */
-.gantt .bar-bg {
-  fill-opacity: 0.3;
-  stroke-width: 1;
-}
 .gantt .bar-actual {
   fill: none;
   stroke-width: 2.5;
@@ -1886,14 +1862,8 @@ details.cat-empty[open] > summary.cat-head::before {
   border-radius: 3px;
   vertical-align: middle;
 }
-.legend-planned {
-  background: var(--color-tint);
-}
 .legend-actual {
   border-width: 3px;
-}
-.legend-progress {
-  background: var(--color-primary);
 }
 .legend-overdue {
   border: 2px dashed var(--color-primary);
@@ -2179,3 +2149,617 @@ details.cat-empty[open] > summary.cat-head::before {
   margin: 0 0.3rem;
 }
 /* /qol:t16 */
+/* tier language */
+/* WP tree: one bordered block per top-level WP; tier 1 band, tier 2 white, tier 3 muted; meta in shared columns */
+.tw-tree {
+  container-type: inline-size;
+  display: grid;
+  gap: 10px;
+  --tw-x: 132px;
+}
+.tw-tree ul {
+  padding: 0;
+  margin: 0;
+  border-left: 0;
+}
+.tw-head,
+.tw-row {
+  display: grid;
+  align-items: center;
+  column-gap: 10px;
+  grid-template-columns: [fold] 36px [code] 66px [ttl] minmax(0, 1fr) [st] 104px [dt] 200px [own] 34px [pct] 130px;
+}
+.tw-head {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  padding: 0 10px 2px;
+}
+.tw-head > span {
+  min-width: 0;
+}
+.tw-h-code {
+  grid-column: code;
+}
+.tw-h-ttl {
+  grid-column: ttl;
+}
+.tw-h-st {
+  grid-column: st;
+  text-align: right;
+}
+.tw-h-dt {
+  grid-column: dt;
+  text-align: right;
+}
+.tw-h-own {
+  grid-column: own;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tw-h-pct {
+  grid-column: pct;
+  text-align: right;
+}
+.tw-block {
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.tw-row.wp {
+  padding: 7px 10px;
+  min-height: 40px;
+  font-size: 14px;
+  border-bottom: 0;
+  border-top: 1px solid var(--tier-rule, color-mix(in srgb, var(--color-border) 60%, transparent));
+  gap: 0 10px;
+  position: relative;
+}
+.tw-block > .tw-row.wp {
+  border-top: 0;
+}
+.tw-row.tier-1 {
+  background-color: var(--tier-band, var(--color-tint));
+  min-height: 46px;
+}
+.tw-name {
+  font-weight: 400;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+.tier-1 .tw-name {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--color-text-strong, var(--color-text));
+}
+.tier-2 .tw-name {
+  color: var(--color-text-strong, var(--color-text));
+}
+.tw-code {
+  grid-column: code;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tier-1 .tw-code {
+  font-weight: 700;
+  color: var(--color-text-strong, var(--color-text));
+}
+.tier-2 .tw-code {
+  font-weight: 650;
+  color: var(--color-text-strong, var(--color-text));
+}
+.tier-3 .tw-code {
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+.tw-ttl {
+  grid-column: ttl;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.tier-2 .tw-ttl {
+  padding-left: 18px;
+}
+.tier-3 .tw-ttl {
+  padding-left: 36px;
+}
+/* indent guides: 1 px vertical lines, drawn on the row so they run through its second line too */
+.tw-row.tier-2,
+.tw-row.tier-3 {
+  background-image: linear-gradient(var(--tier-guide, var(--color-border)), var(--tier-guide, var(--color-border)));
+  background-size: 1px 100%;
+  background-repeat: no-repeat;
+  background-position: calc(var(--tw-x) + 6px) 0;
+}
+.tw-row.tier-3 {
+  background-image:
+    linear-gradient(var(--tier-guide, var(--color-border)), var(--tier-guide, var(--color-border))),
+    linear-gradient(var(--tier-guide, var(--color-border)), var(--tier-guide, var(--color-border)));
+  background-size:
+    1px 100%,
+    1px 100%;
+  background-position:
+    calc(var(--tw-x) + 6px) 0,
+    calc(var(--tw-x) + 24px) 0;
+}
+.tw-st,
+.tw-dt,
+.tw-own,
+.tw-pct {
+  min-width: 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  font-variant-numeric: tabular-nums;
+}
+.tw-st {
+  grid-column: st;
+}
+.tw-dt {
+  grid-column: dt;
+  white-space: nowrap;
+  gap: 4px;
+}
+.tw-own {
+  grid-column: own;
+}
+.tw-pct {
+  grid-column: pct;
+}
+.tw-pct input[type="range"] {
+  width: 70px;
+  min-width: 0;
+}
+.tw-pct .progress-row,
+.tw-pct .slider {
+  width: 100%;
+  min-width: 0;
+}
+.tw-row .chip,
+.tw-row .badge {
+  font-size: 12px;
+  font-weight: 600;
+}
+.tw-row .initials {
+  font-size: 12px;
+}
+.tw-row .meta {
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+.tw-below {
+  grid-column: ttl / -1;
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
+  min-width: 0;
+}
+.tw-below .actions {
+  justify-content: flex-start;
+}
+.tw-fold,
+.tw-nofold {
+  grid-column: fold;
+  grid-row: 1 / span 2;
+}
+.tw-nofold {
+  width: 36px;
+}
+/* fold toggle: as tall as the row */
+.tw-fold {
+  align-self: stretch;
+  margin: -7px 0 -7px -10px;
+  width: 36px;
+  min-width: 36px;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+.tw-fold:hover {
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+  color: var(--color-text-strong, var(--color-text));
+}
+.tw-headrow {
+  list-style: none;
+}
+@container (max-width: 720px) {
+  .tw-tree {
+    --tw-x: 122px;
+  }
+  .tw-head {
+    display: none;
+  }
+  .tw-row {
+    grid-template-columns: [fold] 36px [code] 56px [ttl] minmax(0, 1fr) [st] auto;
+    row-gap: 6px;
+  }
+  .tw-st {
+    grid-column: st;
+    grid-row: 1;
+  }
+  .tw-dt {
+    grid-column: code / st;
+    grid-row: 2;
+    justify-content: flex-start;
+  }
+  .tw-own {
+    grid-column: st;
+    grid-row: 2;
+  }
+  .tw-pct {
+    grid-column: code / -1;
+    grid-row: 3;
+    justify-content: flex-start;
+  }
+  .tw-fold,
+  .tw-nofold {
+    grid-row: 1 / span 3;
+  }
+  .tw-below {
+    grid-column: code / -1;
+  }
+  .tier-2 .tw-ttl {
+    padding-left: 12px;
+  }
+  .tier-3 .tw-ttl {
+    padding-left: 24px;
+  }
+  .tw-row.tier-2 {
+    background-position: calc(var(--tw-x) + 4px) 0;
+  }
+  .tw-row.tier-3 {
+    background-position:
+      calc(var(--tw-x) + 4px) 0,
+      calc(var(--tw-x) + 16px) 0;
+  }
+}
+/* /tier language */
+
+/* dialog layout */
+/* fixed height with its own scroll; the page behind stays put */
+html.dlg-lock {
+  overflow: hidden;
+}
+dialog.fixed {
+  height: min(900px, calc(100vh - 1rem));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+dialog.fixed:not([open]) {
+  display: none;
+}
+dialog.fixed .modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+dialog.fixed .modal-head,
+dialog.fixed .modal-foot {
+  flex: 0 0 auto;
+}
+@media (min-width: 1601px) {
+  dialog.fixed {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100vh;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+}
+/* done work packages fold into one line */
+.tw-donefold {
+  list-style: none;
+}
+.tw-donefold-btn {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  padding: 4px 2px;
+}
+/* one action per row */
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+/* slim gate and milestone rows */
+.tree li.tw-ms {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 6px 10px;
+  min-height: 36px;
+  font-size: 13px;
+  border-radius: 6px;
+}
+.tw-ms .tw-ms-title {
+  font-size: 14px;
+}
+.tw-ms .tw-ms-code {
+  min-width: 40px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+.tw-ms .tw-ms-due,
+.tw-ms .tw-ms-last,
+.tw-ms .tw-ms-req,
+.tw-ms .tw-ms-unl {
+  color: var(--color-text-muted);
+}
+.tw-ms .row-actions {
+  margin-left: auto;
+}
+/* /dialog layout */
+
+/* dependency links */
+.tw-row .dep-line {
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+.dep-link {
+  font-size: inherit;
+  padding: 0;
+}
+.dep-target {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  animation: dep-flash 2s ease-out;
+}
+@keyframes dep-flash {
+  from {
+    background: color-mix(in srgb, var(--color-primary) 32%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dep-target {
+    animation: none;
+  }
+}
+/* /dependency links */
+
+/* health */
+.chip.health {
+  font-size: 12px;
+  font-weight: 600;
+}
+.chip.h-on-track {
+  --c: var(--health-on-track, var(--status-doing));
+}
+.chip.h-at-risk {
+  --c: var(--health-at-risk, var(--status-waiting, var(--status-hold)));
+}
+.chip.h-late {
+  --c: var(--health-late, var(--status-late, var(--status-blocked, var(--color-danger))));
+}
+.chip.h-stalled {
+  --c: var(--health-stalled, var(--status-dropped));
+}
+.chip.h-on-hold {
+  --c: var(--health-on-hold, var(--status-hold));
+}
+.card .head .chip.health {
+  flex: none;
+}
+.health-reason {
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+.health-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.5rem;
+  margin: 0 0 0.75rem;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+.health-filter button.chip {
+  cursor: pointer;
+  font-family: inherit;
+  border-top: 1px solid transparent;
+  border-right: 1px solid transparent;
+  border-bottom: 1px solid transparent;
+}
+.health-filter button.chip[aria-pressed='true'] {
+  border-color: var(--c);
+  border-left-width: 4px;
+  background: var(--color-surface);
+}
+/* /health */
+
+/* list mode */
+.list-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+  margin-bottom: 0.5rem;
+}
+.list-view {
+  min-width: 960px;
+  font-size: 14px;
+  line-height: 1.25;
+}
+.list-view th,
+.list-view td {
+  border: 0;
+  border-bottom: 1px solid var(--tier-rule, var(--color-border));
+  padding: 6px 10px;
+  vertical-align: middle;
+}
+.list-view th {
+  font-size: 13px;
+  white-space: nowrap;
+}
+.list-view tbody tr:nth-child(even) {
+  background: transparent;
+}
+.list-view .list-row {
+  height: 52px;
+  cursor: pointer;
+}
+.list-view .list-row:hover {
+  background: var(--color-tint);
+}
+.list-view .list-project {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-weight: 600;
+}
+.list-view .list-link {
+  all: unset;
+  cursor: pointer;
+  font-weight: 600;
+}
+.list-view .list-link:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.list-view .health-reason,
+.list-view .list-next-date,
+.list-view .wp-counts {
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+.list-view .health-reason {
+  max-width: 28ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.list-view .list-next-title {
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.list-view td.num,
+.list-view th:nth-child(8) {
+  text-align: right;
+}
+.list-view .progress-row {
+  min-width: 90px;
+}
+.list-view td.empty {
+  text-align: center;
+  padding: 1.5rem;
+  color: var(--color-text-muted);
+}
+.view-toggle {
+  flex: none;
+}
+/* /list mode */
+
+/* gantt tiers */
+.gantt {
+  --gantt-plan: color-mix(in srgb, var(--color-text-muted) 24%, transparent);
+  --gantt-plan-line: color-mix(in srgb, var(--color-text-muted) 55%, transparent);
+  --gantt-done: color-mix(in srgb, var(--color-text-muted) 75%, var(--color-text-strong, var(--color-text)));
+  --gantt-late: var(--status-late, var(--status-blocked, var(--color-danger)));
+}
+.gantt .proj-row {
+  fill: var(--tier-band, var(--color-tint));
+}
+.gantt .proj-head {
+  cursor: pointer;
+}
+.gantt .proj-head:focus-visible {
+  outline: 2px solid var(--color-accent);
+}
+.gantt .proj-link .proj-label {
+  fill: var(--color-link);
+  text-decoration: underline;
+}
+.gantt .proj-link:hover .proj-label {
+  text-decoration-thickness: 2px;
+}
+.gantt .proj-link:focus-visible {
+  outline: 2px solid var(--color-accent);
+}
+.gantt .proj-caret {
+  fill: var(--color-text-muted);
+}
+.gantt .proj-label {
+  font-weight: 700;
+}
+.gantt .proj-health {
+  font-size: 11px;
+  font-weight: 600;
+  fill: var(--c, var(--color-text-muted));
+}
+.gantt .proj-health.h-on-track {
+  --c: var(--health-on-track, var(--status-doing));
+}
+.gantt .proj-health.h-at-risk {
+  --c: var(--health-at-risk, var(--status-waiting, var(--status-hold)));
+}
+.gantt .proj-health.h-late {
+  --c: var(--health-late, var(--gantt-late));
+}
+.gantt .proj-health.h-stalled {
+  --c: var(--health-stalled, var(--status-dropped));
+}
+.gantt .proj-health.h-on-hold {
+  --c: var(--health-on-hold, var(--status-hold));
+}
+.gantt .wp-code {
+  font-variant-numeric: tabular-nums;
+  fill: var(--color-text-muted);
+}
+.gantt .wp-title.tier-1 {
+  font-weight: 650;
+}
+.gantt .wp-title.tier-2 {
+  font-weight: 400;
+}
+.gantt .bar-bg {
+  fill: var(--gantt-plan);
+  fill-opacity: 1;
+  stroke: var(--gantt-plan-line);
+  stroke-width: 1;
+}
+.gantt .bar-fill {
+  fill: var(--gantt-done);
+  stroke: none;
+}
+.gantt .bar-actual {
+  fill: none;
+  stroke: var(--gantt-done);
+}
+.gantt .bar-overdue {
+  stroke: var(--gantt-late);
+}
+.legend-planned {
+  background: color-mix(in srgb, var(--color-text-muted) 24%, transparent);
+  border-color: color-mix(in srgb, var(--color-text-muted) 55%, transparent);
+}
+.legend-progress {
+  background: color-mix(in srgb, var(--color-text-muted) 75%, var(--color-text-strong, var(--color-text)));
+  border-color: transparent;
+}
+.legend-today {
+  display: inline-block;
+  width: 0;
+  height: 0.9rem;
+  margin: 0 0.4rem;
+  border-left: 2px solid var(--color-accent);
+  vertical-align: middle;
+}
+.gantt-legend .cat-dot {
+  margin-right: 0.3rem;
+}
+/* /gantt tiers */

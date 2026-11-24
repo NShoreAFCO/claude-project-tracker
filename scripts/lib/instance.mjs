@@ -138,7 +138,7 @@ export function validatePolicy(c) {
     if (!Array.isArray(pol.locales) || !pol.locales.length || pol.locales.some((l) => !LOCALES.includes(l)))
       p.push(`policy.locales must be a non-empty list of ${LOCALES.join(", ")}`);
   }
-  for (const f of ["stale_days", "retention_days"])
+  for (const f of ["stale_days", "retention_days", "health_wp_late_days", "health_gate_soon_days"])
     if (pol[f] !== undefined && !isPositiveInt(pol[f])) p.push(`policy.${f} must be a whole number of days, 1 or more`);
   if (pol.schedule_strict_default !== undefined && typeof pol.schedule_strict_default !== "boolean")
     p.push("policy.schedule_strict_default must be true or false");
@@ -200,6 +200,8 @@ export function resolvePolicy(c) {
     default_role: pol.default_role ?? "editor",
     locales: pol.locales ?? [appLocale, ...LOCALES.filter((l) => l !== appLocale)],
     stale_days: pol.stale_days ?? 14,
+    health_wp_late_days: pol.health_wp_late_days ?? 7,
+    health_gate_soon_days: pol.health_gate_soon_days ?? 2,
     schedule_strict_default: pol.schedule_strict_default ?? false,
     target_date_required_categories: pol.target_date_required_categories ?? DEFAULT_TARGET_DATE_CATEGORIES.filter((k) => keys.has(k)),
     gates: { require_decision: pol.gates?.require_decision ?? true },

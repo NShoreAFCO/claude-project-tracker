@@ -213,15 +213,18 @@ export async function copyText(text) {
 
 // ---- dialogs
 /** Open a <dialog>. Returns { dialog, body, foot, head, close }. onClose runs once when it closes. */
-export function openModal({ title, narrow = false, onClose, headExtra } = {}) {
+export function openModal({ title, narrow = false, fixed = false, onClose, headExtra } = {}) {
   const titleId = `dlg-${Math.random().toString(36).slice(2)}`;
   const body = h("div.modal-body");
   const foot = h("div.modal-foot");
   const closeBtn = h("button.close", { type: "button", "aria-label": t("close"), on: { click: () => dialog.close() } }, "×");
   const heading = h("h2", { id: titleId }, title || "");
   const head = h("div.modal-head", heading, closeBtn, headExtra || null);
-  const dialog = h("dialog", { class: narrow ? "narrow" : "", "aria-labelledby": titleId }, head, body, foot);
+  const dialog = h("dialog", { class: `${narrow ? "narrow" : ""}${fixed ? " fixed" : ""}`.trim(), "aria-labelledby": titleId }, head, body, foot);
+  // fixed: the dialog scrolls inside, the page behind stays put
+  if (fixed) document.documentElement?.classList?.add("dlg-lock");
   dialog.addEventListener("close", () => {
+    if (fixed && !document.querySelector("dialog.fixed[open]")) document.documentElement?.classList?.remove("dlg-lock");
     dialog.remove();
     onClose?.(dialog.returnValue);
   });

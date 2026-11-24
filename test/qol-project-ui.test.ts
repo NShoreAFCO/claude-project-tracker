@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { installFakeDom } from "./fake-dom";
 
 // @ts-expect-error untyped JS module
 const mod = (await import("../public/js/schedule-view.js")) as unknown as {
@@ -89,5 +90,58 @@ describe("code order in the work package tree", () => {
     expect(sorted[1].children.map((w: any) => w.id)).toEqual(["w2a", "w2b"]);
     const r = placeMilestones(sorted, [{ id: "m", requires: ["w2b", "w1"] }]);
     expect(ids(r.after.get("w2b"))).toEqual(["m"]);
+  });
+});
+
+describe("focus after a fold toggle", () => {
+  it("focuses the rebuilt control once render has replaced the old one", async () => {
+    const doc = installFakeDom() as any;
+    // @ts-expect-error untyped JS module
+    const { renderRefocus } = (await import("../public/js/project.js")) as any;
+    const host = doc.createElement("div");
+    doc.body.append(host);
+    const build = () => {
+      const li = doc.createElement("li");
+      li.setAttribute("id", "wp-1");
+      const b = doc.createElement("button");
+      b.setAttribute("class", "chev");
+      li.append(b);
+      host.replaceChildren(li);
+    };
+    build();
+    const old = host.querySelector("button.chev");
+    old.focus();
+    renderRefocus(build, () => doc.getElementById("wp-1")?.querySelector("button.chev"));
+    const fresh = host.querySelector("button.chev");
+    expect(fresh).not.toBe(old);
+    expect(doc.activeElement).toBe(fresh);
+  });
+  it("does nothing when the control is gone", async () => {
+    installFakeDom();
+    // @ts-expect-error untyped JS module
+    const { renderRefocus } = (await import("../public/js/project.js")) as any;
+    expect(() => renderRefocus(() => {}, () => null)).not.toThrow();
+  });
+});
+
+describe("dialog heading health chip", () => {
+  const p = { title: "Alpha", status: "active" };
+  const text = (nodes: any[]) => nodes.map((n) => (typeof n === "string" ? n : n.textContent)).join("");
+  it("health chip shown when health is set", async () => {
+    installFakeDom();
+    // @ts-expect-error untyped JS module
+    const { headingNodes } = (await import("../public/js/project.js")) as any;
+    const nodes = headingNodes(p, { state: "at_risk", reasons: [] });
+    expect(nodes).toHaveLength(5);
+    expect(nodes[0]).toBe("Alpha");
+    expect(nodes[2].classList.contains("health")).toBe(true);
+  });
+  it("no chip and no extra spacer when health is null", async () => {
+    installFakeDom();
+    // @ts-expect-error untyped JS module
+    const { headingNodes } = (await import("../public/js/project.js")) as any;
+    const nodes = headingNodes(p, null);
+    expect(nodes).toHaveLength(3);
+    expect(text(nodes)).not.toContain("  ");
   });
 });

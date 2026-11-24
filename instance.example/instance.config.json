@@ -258,6 +258,8 @@
       "de"
     ],
     "stale_days": 14,
+    "health_wp_late_days": 7,
+    "health_gate_soon_days": 2,
     "schedule_strict_default": false,
     "target_date_required_categories": [
       "research",

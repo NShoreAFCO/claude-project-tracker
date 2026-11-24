@@ -1,5 +1,6 @@
 // Grid view: one card per project (SPEC §9).
-import { can, POLICY } from "./access.js";
+import { can, getMe, POLICY } from "./access.js";
+import { listView } from "./list-view.js";
 import { t, fmtDate, fmtDateTime, STRINGS } from "./i18n.js";
 import { h, clear, statusChip, progressBar, personBadge, ageDays } from "./dom.js";
 import { openProject } from "./project.js";
@@ -9,11 +10,12 @@ import { summaryBar, KPI_KEYS } from "./portfolio.js";
 import { lateness, lateChip } from "./lateness.js";
 import { GRID_FILTER_KEY } from "./sidebar.js";
 import { PROJECT_CATEGORIES, catVar, catDot, catLabel, knownCategory } from "./categories.js";
+import { healthChip, healthLine, HEALTH_ORDER } from "./health.js";
 
 const PROJECT_STATUSES = ["idea", "active", "on_hold", "done", "abandoned"];
 const COMPLETED = ["done", "abandoned"];
 const COMPLETED_MODES = ["hide", "only", "all"];
-const PERSISTED = ["completed", "tags", "status", "owner"];
+const PERSISTED = ["completed", "tags", "status", "owner", "health"];
 
 /** Completed mode of a filter; anything unknown (incl. the home reset's empty string) is the default `hide`. */
 export function completedMode(filter) {
@@ -47,6 +49,7 @@ export function filterProjects(projects, filter, kpiIds = null) {
       (!kpiIds || kpiIds.has(p.id)) &&
       (mode === "all" || (mode === "only") === COMPLETED.includes(p.status)) &&
       (!filter.status || p.status === filter.status) &&
+      (!filter.health || p.health?.state === filter.health) &&
       tags.every((x) => (p.tags || []).includes(x)) &&
       (!filter.owner || (filter.owner === "none" ? !p.owner_initials : p.owner_id === filter.owner)) &&
       (!category || (category === "none" ? p.category === null : p.category === category)),
@@ -72,6 +75,7 @@ export function loadGridFilter(filter, storage) {
       if (COMPLETED_MODES.includes(saved.completed) && !filter.completed) filter.completed = saved.completed;
       if (Array.isArray(saved.tags) && !checkedTags(filter).length) filter.tags = saved.tags.filter((x) => typeof x === "string");
       for (const k of ["status", "owner"]) if (typeof saved[k] === "string" && !filter[k]) filter[k] = saved[k];
+      if (HEALTH_ORDER.includes(saved.health) && !filter.health) filter.health = saved.health;
     }
   } catch {
     // unreadable saved filter: ignore
@@ -79,6 +83,29 @@ export function loadGridFilter(filter, storage) {
   return filter;
 }
 let hydrated = false;
+
+const VIEWS = ["cards", "list"];
+
+/** Storage key of the remembered view: one per person (`anon` while nobody is known). */
+export const gridViewKey = () => `tracker.gridView.${getMe()?.id || "anon"}`;
+
+/** The remembered view of the current person; `cards` when nothing usable is stored or storage throws. */
+export function loadGridView(storage) {
+  try {
+    const v = (storage ?? globalThis.localStorage)?.getItem(gridViewKey());
+    return VIEWS.includes(v) ? v : "cards";
+  } catch {
+    return "cards";
+  }
+}
+
+export function saveGridView(view, storage) {
+  try {
+    (storage ?? globalThis.localStorage)?.setItem(gridViewKey(), view);
+  } catch {
+    // storage unavailable: the choice is just not remembered
+  }
+}
 
 /** Filter as URL query params (`attention`, `cat`, `status`, `completed`, `tags`, `owner`); defaults are omitted. */
 export function filterToQuery(filter) {
@@ -89,6 +116,8 @@ export function filterToQuery(filter) {
   if (completedMode(filter) !== "hide") p.set("completed", completedMode(filter));
   if (checkedTags(filter).length) p.set("tags", checkedTags(filter).join(","));
   if (filter.owner) p.set("owner", filter.owner);
+  if (HEALTH_ORDER.includes(filter.health)) p.set("health", filter.health);
+  if (filter.view === "list") p.set("view", "list");
   return p;
 }
 
@@ -109,7 +138,11 @@ export function applyGridQuery(filter, params) {
   const completed = params.get("completed");
   const tags = (params.get("tags") || "").split(",").filter(Boolean);
   const owner = params.get("owner");
+  const health = params.get("health");
+  const view = params.get("view");
   const next = {
+    view: VIEWS.includes(view) ? view : "",
+    health: HEALTH_ORDER.includes(health) ? health : "",
     kpi: KPI_KEYS.includes(attention) ? attention : "",
     category: cat || "",
     status: PROJECT_STATUSES.includes(status) ? status : "",
@@ -117,7 +150,7 @@ export function applyGridQuery(filter, params) {
     tags,
     owner: owner || "",
   };
-  if (!next.kpi && !next.category && !next.status && !next.completed && !tags.length && !next.owner) return false;
+  if (!next.kpi && !next.category && !next.status && !next.completed && !tags.length && !next.owner && !next.health && !next.view) return false;
   Object.assign(filter, next);
   if (filter.status && !statusOptions(completedMode(filter)).includes(filter.status)) filter.status = "";
   hydrated = true; // the URL wins over the stored filter
@@ -175,6 +208,7 @@ function card(p, persons, blockedIds = null) {
     },
     h(
       "div.head",
+      healthChip(p.health),
       h("h2", h("button.card-link", { type: "button" }, p.title)),
       statusChip(p.status),
       h(
@@ -183,6 +217,7 @@ function card(p, persons, blockedIds = null) {
         STRINGS.originIcon[p.origin] || "",
       ),
     ),
+    healthLine(p.health),
     h(
       "div.card-target",
       noTarget || [
@@ -222,12 +257,7 @@ function card(p, persons, blockedIds = null) {
       p.summary ? h("p.summary", p.summary) : null,
       progressBar(p.progress),
       h("div.meta", basisLabel(p.progress_basis)),
-      h(
-        "div.meta",
-        h("span", t("openBranches"), ": ", h("b", String(p.open_branches))),
-        h("span", t("contextDocs"), ": ", h("b", String(p.context_docs))),
-        h("span", t("lastActivity"), ": ", h("b", fmtDateTime(p.last_activity))),
-      ),
+      h("div.meta", h("span", t("lastActivity"), ": ", h("b", fmtDateTime(p.last_activity)))),
     ),
     p.blocked?.length
       ? h(
@@ -235,14 +265,6 @@ function card(p, persons, blockedIds = null) {
           p.blocked.map((b) => h("span.badge.blocked", `${t("blockedBy")}: ${b.replace(/^ext:/, "")}`)),
         )
       : null,
-    h(
-      "div.card-actions",
-      h(
-        "a.btn.small.secondary",
-        { href: `#/gantt?project=${encodeURIComponent(p.id)}`, on: { click: (e) => e.stopPropagation() } },
-        t("cardGantt"),
-      ),
-    ),
   );
 }
 
@@ -255,7 +277,7 @@ function noTargetChip(p) {
 }
 
 /** `all` = the unfiltered project list: a category is empty only when it has no projects at all. */
-function categoryBlocks(shown, persons, filter, all = shown, blockedIds = null) {
+function categoryBlocks(shown, persons, filter, all = shown, blockedIds = null, view = "cards") {
   return [...PROJECT_CATEGORIES, null]
     .map((key) => {
       const projects = shown.filter((p) => knownCategory("p", p.category) === key);
@@ -266,10 +288,12 @@ function categoryBlocks(shown, persons, filter, all = shown, blockedIds = null) 
           "section.cat-block",
           { "aria-label": label },
           h("header.cat-head", catDot("p", key), h("h2", label), h("span.count", String(projects.length))),
-          h(
-            "div.cards",
-            projects.map((p) => card(p, persons, blockedIds)),
-          ),
+          view === "list"
+            ? h("div.list-scroll", listView(projects, { persons, onOpen: openProject }))
+            : h(
+                "div.cards",
+                projects.map((p) => card(p, persons, blockedIds)),
+              ),
         );
       }
 
@@ -301,6 +325,9 @@ export function renderGrid(main, state, restore = null) {
     hydrated = true;
     loadGridFilter(filter);
   }
+  // the URL (filter.view) wins over the person's remembered choice
+  if (!VIEWS.includes(filter.view)) filter.view = loadGridView();
+  const view = filter.view;
   const mode = completedMode(filter);
   const checked = checkedTags(filter);
   const change = (fn) => {
@@ -346,6 +373,32 @@ export function renderGrid(main, state, restore = null) {
           on: { click: () => change(() => (filter.completed = m)) },
         },
         t(`completed.${m}`),
+      ),
+    ),
+  );
+
+  const viewCtl = h(
+    "div.seg-control.view-toggle",
+    { role: "group", "aria-label": t("list.view") },
+    [
+      ["cards", t("list.cards")],
+      ["list", t("list.rows")],
+    ].map(([v, label]) =>
+      h(
+        "button.seg",
+        {
+          type: "button",
+          [FOCUS]: `view-${v}`,
+          "aria-pressed": String(v === view),
+          on: {
+            click: () =>
+              change(() => {
+                filter.view = v;
+                saveGridView(v);
+              }),
+          },
+        },
+        label,
       ),
     ),
   );
@@ -435,6 +488,32 @@ export function renderGrid(main, state, restore = null) {
 
   const shown = filterProjects(state.projects, filter, kpiIds);
 
+  // Health filter row: counts over the projects shown without the health filter itself, so the other states stay clickable
+  const counts = {};
+  for (const p of filterProjects(state.projects, { ...filter, health: "" }, kpiIds)) {
+    if (p.health) counts[p.health.state] = (counts[p.health.state] || 0) + 1;
+  }
+  const healthStates = HEALTH_ORDER.filter((s) => counts[s] || filter.health === s);
+  const healthRow = healthStates.length
+    ? h(
+        "div.health-filter",
+        { role: "group", "aria-label": t("filterHealth") },
+        h("span", `${t("filterHealth")}:`),
+        healthStates.map((s) =>
+          h(
+            `button.chip.health.h-${s.replace(/_/g, "-")}`,
+            {
+              type: "button",
+              [FOCUS]: `health-${s}`,
+              "aria-pressed": String(filter.health === s),
+              on: { click: () => change(() => (filter.health = filter.health === s ? "" : s)) },
+            },
+            `${t(`healthState.${s}`)} ${counts[s] || 0}`,
+          ),
+        ),
+      )
+    : null;
+
   clear(
     main,
     summaryBar(state.summary || null, kpi, (key) => ((filter.kpi = key), renderGrid(main, state))),
@@ -447,9 +526,11 @@ export function renderGrid(main, state, restore = null) {
       h("div", { style: { "min-width": "160px" } }, ownerSel),
       h("div", { style: { "min-width": "200px" } }, attentionSel),
       h("span.spacer"),
+      viewCtl,
       can("write") ? h("button.btn", { type: "button", on: { click: () => projectForm(null) } }, `+ ${t("newProject")}`) : null,
     ),
-    shown.length ? categoryBlocks(shown, persons, filter, state.projects, new Set(state.summary?.blocked?.project_ids ?? [])) : h("p.empty", t("noProjects")),
+    healthRow,
+    shown.length ? categoryBlocks(shown, persons, filter, state.projects, new Set(state.summary?.blocked?.project_ids ?? []), view) : h("p.empty", t("noProjects")),
   );
 
   if (restore?.key) {

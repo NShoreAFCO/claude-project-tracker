@@ -13,7 +13,7 @@ import { filterToQuery, gridHash, applyGridQuery, syncGridUrl, renderGrid } from
 // @ts-expect-error plain browser module without types
 import { resetGridFilter } from "../public/js/sidebar.js";
 
-const empty = () => ({ status: "", tag: "", category: "", owner: "", completed: "", tags: [] as string[], kpi: "" });
+const empty = () => ({ status: "", tag: "", category: "", owner: "", completed: "", tags: [] as string[], kpi: "", health: "" });
 const q = (s: string) => new URLSearchParams(s);
 
 function fakeWin(hash: string) {
@@ -38,7 +38,7 @@ describe("grid URL state", () => {
   });
 
   it("round-trips parse and build", () => {
-    const f = { ...empty(), kpi: "overdue_milestones", category: "research", status: "active", completed: "all", tags: ["a", "b"], owner: "u1" };
+    const f = { ...empty(), kpi: "overdue_milestones", category: "research", status: "active", completed: "all", tags: ["a", "b"], owner: "u1", health: "at_risk", view: "list" };
     const hash = gridHash(f);
     const g = empty();
     expect(applyGridQuery(g, q(hash.split("?")[1]))).toBe(true);
@@ -122,6 +122,18 @@ describe("project dialog return URL", () => {
     expect(returnHashFor("#/p/a", false, "#/", "#/?cat=research&status=active")).toBe("#/?cat=research&status=active");
     expect(returnHashFor("#/p/b", true, "#/?cat=x", "#/?other=1")).toBe("#/?cat=x");
     expect(returnHashFor("#/p/a", false, "#/", "")).toBe("#/");
+  });
+
+  it("a reload while the dialog is open redraws the view underneath, not the grid", async () => {
+    vi.doUnmock("../public/js/project.js");
+    vi.resetModules();
+    // @ts-expect-error plain browser module without types
+    const { viewHashFor } = await import("../public/js/project.js");
+    expect(viewHashFor("#/p/a", "#/gantt?project=a")).toBe("#/gantt?project=a");
+    expect(viewHashFor("#/p/a/context", "#/upcoming")).toBe("#/upcoming");
+    expect(viewHashFor("#/p/a", "")).toBe("#/");
+    expect(viewHashFor("#/gantt", "#/?cat=x")).toBe("#/gantt");
+    expect(viewHashFor("", "#/gantt")).toBe("");
   });
 
   it("a link from a non-grid view keeps that view underneath and closes back to it", async () => {
