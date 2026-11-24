@@ -89,6 +89,9 @@ export const api = {
   getDashboardPrefs: () => request("GET", "/api/persons/me/dashboard"),
   putDashboardPrefs: (prefs) => request("PUT", "/api/persons/me/dashboard", { prefs }),
   // /qol:t12
+  // my work
+  myRecent: (params = {}) => request("GET", `/api/me/recent${q(params)}`),
+  // /my work
   /** Raw report fetch (pdf: a Blob; md/html: text). Throws ApiError, e.g. 503 pdf_unavailable. */
   report: async (id, format) => {
     const res = await fetch(`/api/projects/${encodeURIComponent(id)}/report?format=${format}`, { credentials: "same-origin" });

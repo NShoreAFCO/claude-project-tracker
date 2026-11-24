@@ -231,7 +231,7 @@ Each doc is also exposed as an MCP resource `tracker://context/{doc_id}`.
 
 - CRUD mirroring the MCP tools under:
   - `/api/projects`, `/api/workpackages`, `/api/branches`, `/api/scores`, `/api/token-cost`
-  - `/api/portfolio/summary`, `/api/workpackages/upcoming`, `/api/workpackages/mine` (§22), `GET /api/projects/:id/report` (§23)
+  - `/api/portfolio/summary`, `/api/workpackages/upcoming`, `/api/workpackages/mine` (§22), `GET /api/me/recent` (changes of the last days on my work packages, gates and projects, not my own; REST only), `GET /api/projects/:id/report` (§23)
   - `/api/persons`, `/api/trash`, `/api/delete-preview` (§15, §17), `POST /api/projects/:id/move-workpackages` (§16)
   - `/api/context`: list, get, create, update, append, delete, revisions, restore, plus bundle as markdown download (`GET /api/context/bundle?project_id=&workpackage_id=&format=md`)
 - `GET /api/events`.

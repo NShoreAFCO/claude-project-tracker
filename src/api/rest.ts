@@ -26,6 +26,7 @@ import { redactEvents } from "../data/internal";
 import { moveWorkpackages } from "../data/rules";
 import { ConflictError, ForbiddenError, ValidationError } from "../data/util";
 import { getDashboardPrefs, openGates, putDashboardPrefs } from "../data/mydash";
+import { recentForMe } from "../data/mywork";
 import { handleUpload } from "./upload";
 import { userCaller } from "../auth/caller";
 import { REST_ACTIONS, requireAction, restAction, type Action } from "../auth/permissions";
@@ -190,8 +191,30 @@ route("GET", "/api/gates/open", async ({ db, url, by }) => {
   return openGates(db, by, { scope, project_id: url.searchParams.get("project_id") || undefined });
 });
 
+// ---- my work: what changed on my work packages, gates and projects while I was away
+route("GET", "/api/me/recent", async ({ db, url, by }) => {
+  const bounded = (name: string, def: number, max: number): number => {
+    const raw = url.searchParams.get(name);
+    if (raw === null || raw === "") return def;
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 1 || n > max) throw new ValidationError(`${name} must be a whole number from 1 to ${max}`);
+    return n;
+  };
+  const days = bounded("days", 7, 30);
+  const limit = bounded("limit", 20, 100);
+  return redactEvents(
+    await recentForMe(db, by, {
+      days,
+      limit,
+      assigned_only: ["1", "true"].includes(url.searchParams.get("assigned_only") ?? ""),
+      project_id: url.searchParams.get("project_id") || undefined,
+    }),
+    by,
+  );
+});
+
 // ---- work packages
-route("GET", "/api/workpackages", async ({ db, url }) => listWorkpackagesOut(db, reqStr(url.searchParams.get("project_id"), "project_id")));
+route("GET", "/api/workpackages",async ({ db, url }) => listWorkpackagesOut(db, reqStr(url.searchParams.get("project_id"), "project_id")));
 route("POST", "/api/workpackages", async ({ db, req, by }) => {
   const { project_id, expected_version, ...input } = await readJson(req);
   return upsertWorkpackage(db, reqStr(project_id, "project_id"), input, by, optNum(expected_version));
