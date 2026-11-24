@@ -471,7 +471,7 @@ export default {
   inboxRuleProject: "Projekt",
   inboxRuleApply: "Auch auf die {n} Ereignisse anwenden, die schon im Eingang liegen",
   inboxRuleApplyAtLeast: "Auch auf die Ereignisse anwenden, die schon im Eingang liegen (mindestens {n})",
-  inboxRuleSaved: "Vorhandene Ereignisse bearbeitet: {n}",
+  inboxRuleSaved: "Regel gespeichert. Vorhandene Ereignisse bearbeitet: {n}",
   inboxRulesTitle: "Ordnerregeln",
   inboxRulesEmpty: "Noch keine Ordnerregeln.",
   inboxRuleKindIgnore: "Ignorieren",
