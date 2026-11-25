@@ -33,8 +33,9 @@ import {
   wpRow,
   wpItem,
   treeHead,
-  splitDone,
-  doneFold,
+  hasFoldableSubs,
+  doneSubCount,
+  doneToggleLabel,
   canMarkDone,
   rowActions,
   slimMilestoneRow,
@@ -107,7 +108,8 @@ function reportActions(projectId) {
   );
 }
 
-const smallBtn = (label, onClick, cls = "ghost") => h(`button.btn.small.${cls}`, { type: "button", on: { click: onClick } }, label);
+const smallBtn = (label, onClick, cls = "ghost", extra = {}) =>
+  h(`button.btn.small.${cls}`, { type: "button", ...extra, on: { click: onClick } }, label);
 /** Buttons and menus that change data: hidden below the editor role (the server is the gate, this is convenience). */
 const writeBtn = (label, onClick, cls) => roleGate(smallBtn(label, onClick, cls), "write");
 const writeMenu = (label, items) => roleGate(menuButton(label, items), "write");
@@ -340,7 +342,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
     render();
     let el = found();
     if (!el) {
-      // a milestone row may sit in the done group or be filtered out
+      // the row may be a hidden sub-work package or be filtered out
       fold.issuesOnly = false;
       fold.doneOpen = true;
       render();
@@ -384,27 +386,18 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         wpNode(c, shown, plan, rowOf, depth),
         ...(plan.after.get(c.id) ?? []).map(rowOf),
       ]);
-    const visible = list.filter((c) => !shown || shown.has(c.id));
-    if (depth > 1) return rows(visible);
-    // top level: done work packages fold into one line above the open blocks
-    const { open, done } = splitDone(visible);
-    return [
-      ...doneFold({
-        count: done.length,
-        open: fold.doneOpen,
-        onToggle: () => {
-          fold.doneOpen = !fold.doneOpen;
-          renderRefocus(render, () => document.querySelector("button.tw-donefold-btn"));
-        },
-        rows: rows(done),
-      }),
-      ...rows(open),
-    ];
+    return rows(list.filter((c) => !shown || shown.has(c.id)));
+  }
+
+  /** True for a finished top-level work package whose sub-work packages the done toggle currently hides. */
+  function subsHidden(w) {
+    return !fold.doneOpen && hasFoldableSubs(w) && detail.workpackages.some((x) => x.id === w.id);
   }
 
   function wpNode(w, shown, plan, rowOf, depth) {
+    const hidden = subsHidden(w);
     const leaf = !w.children?.length;
-    const open = !leaf && (fold.open.has(w.id) || (shown && fold.issuesOnly));
+    const open = !leaf && !hidden && (fold.open.has(w.id) || (shown && fold.issuesOnly));
     let slider = null;
     const doneBtn = markDoneRowButton(id, w);
     if (leaf) {
@@ -450,7 +443,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       depth,
       id: depTargetId("wp", w.id),
       fold: {
-        leaf,
+        leaf: leaf || hidden, // hidden sub-work packages: no chevron, the toolbar toggle shows them
         open,
         label: `${t(open ? "collapse" : "expand")} ${w.title}`,
         onToggle: () => {
@@ -538,7 +531,11 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
     const wpTitle = Object.fromEntries(allWps.map((w) => [w.id, wpName(w)]));
     const allIssues = collectIssues(d);
     const shownWps = fold.issuesOnly && allIssues.length ? issueWpIds(d) : null;
-    const expandableWps = allWps.filter((w) => w.children?.length);
+    // sub-work packages of done top-level work packages are hidden while the done toggle is off: Expand all skips them
+    const hiddenIds = new Set(fold.doneOpen ? [] : flatten(d.workpackages.filter(hasFoldableSubs).flatMap((w) => w.children)).map((w) => w.id));
+    const expandableWps = allWps.filter((w) => w.children?.length && !hiddenIds.has(w.id) && !subsHidden(w));
+    const doneTops = d.workpackages.filter((w) => !shownWps || shownWps.has(w.id));
+    const doneN = doneSubCount(doneTops);
     const hasFoldedWp = expandableWps.some((w) => !fold.open.has(w.id));
 
     // internal fields (session, local path, repo) are for editors and above; viewer reads omit them server-side too
@@ -692,7 +689,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
 
     const sortedTree = sortTreeByCode(d.workpackages);
     const shownTree = pruneTree(sortedTree, shownWps);
-    const plan = placeMilestones(shownTree, d.milestones, (w) => fold.open.has(w.id) || (!!shownWps && fold.issuesOnly));
+    const plan = placeMilestones(shownTree, d.milestones, (w) => !subsHidden(w) && (fold.open.has(w.id) || (!!shownWps && fold.issuesOnly)));
 
     const workpackageActions = h(
       "div.actions",
@@ -704,6 +701,12 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         }
         render();
       }),
+      doneN
+        ? smallBtn(doneToggleLabel(doneN, fold.doneOpen), () => {
+            fold.doneOpen = !fold.doneOpen;
+            renderRefocus(render, () => document.querySelector("button.tw-done-toggle"));
+          }, "ghost.tw-done-toggle", { "aria-expanded": String(!!fold.doneOpen) })
+        : null,
       writeBtn(`+ ${t("addWorkpackage")}`, () => wpForm(id, null, d.workpackages, null, d.milestones), "secondary"),
       writeBtn(`+ ${t("addMilestone")}`, () => milestoneForm(id, null, detail.workpackages), "secondary"),
     );

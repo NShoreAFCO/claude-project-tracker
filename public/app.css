@@ -2489,15 +2489,6 @@ dialog.fixed .modal-foot {
     border-radius: 0;
   }
 }
-/* done work packages fold into one line */
-.tw-donefold {
-  list-style: none;
-}
-.tw-donefold-btn {
-  font-size: 13px;
-  color: var(--color-text-muted);
-  padding: 4px 2px;
-}
 /* one action per row */
 .row-actions {
   display: flex;

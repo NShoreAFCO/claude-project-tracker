@@ -80,8 +80,7 @@ describe("jumping to a target", () => {
         });
         return tree.wpItem(depth, row, open && w.children?.length ? dom.h("ul", rows(w.children, depth + 1)) : null);
       });
-    const { open, done } = tree.splitDone(wps);
-    return dom.h("ul", [...tree.doneFold({ count: done.length, open: f.doneOpen, onToggle: () => {}, rows: rows(done, 1) }), ...rows(open, 1)]);
+    return dom.h("ul", rows(wps, 1));
   }
 
   it("unfolds all ancestors of a task three levels down, marks it and clears the mark after 2 s", () => {
@@ -110,12 +109,19 @@ describe("jumping to a target", () => {
     expect(target.classList.contains("dep-target")).toBe(false);
   });
 
-  it("a link into the done group opens it", () => {
+  it("a link below a done top-level WP shows the hidden sub-WPs, a link to the WP itself does not", () => {
+    const doneTree = [
+      { id: "a", code: "WP1", title: "Alpha", status: "done", children: [{ id: "a1", code: "WP1.1", title: "A one", status: "done" }] },
+      { id: "c", code: "WP3", title: "Gamma", status: "doing", children: [{ id: "c1", code: "WP3.1", title: "G one", status: "doing" }] },
+    ];
     const f = fold();
-    tree.revealFold(wps, "a", f);
+    tree.revealFold(doneTree, "a1", f);
     expect(f.doneOpen).toBe(true);
+    const f1 = fold();
+    tree.revealFold(doneTree, "a", f1);
+    expect(f1.doneOpen).toBe(false);
     const f2 = fold();
-    tree.revealFold(wps, "c", f2);
+    tree.revealFold(doneTree, "c1", f2);
     expect(f2.doneOpen).toBe(false);
   });
 
