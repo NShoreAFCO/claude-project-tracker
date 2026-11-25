@@ -1,7 +1,7 @@
 import { t } from "./i18n.js";
 import { api } from "./api.js";
 import { h, formDialog, toast, statusChip, progressBar } from "./dom.js";
-import { isGateLocked, overrideTarget, gateNames, decisionLabel } from "./schedule-ui.js";
+import { isGateLocked, overrideTarget, gateNames, decisionLabel, gateDecisionPending } from "./schedule-ui.js";
 
 const isClosedWp = (wp) => wp.status === "done" || wp.status === "dropped";
 const wpName = (wp) => (wp.code ? `${wp.code} ${wp.title}` : wp.title);
@@ -71,7 +71,7 @@ export async function decisionDialog({ project, milestone }) {
   );
 
   const links = gateLinksBlock(milestone);
-  const state = milestone.decision_state === "pending" || (milestone.reached === true && !milestone.decision_state) ? h("p.meta.gate-state", decisionLabel("pending")) : null;
+  const state = gateDecisionPending({ gate: true, ...milestone }) ? h("p.meta.gate-state", decisionLabel("pending")) : null;
   const introParts = [intro, state, links].filter(Boolean);
 
   return formDialog({

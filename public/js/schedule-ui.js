@@ -100,6 +100,11 @@ export function milestoneView(m, today) {
   };
 }
 
+/** True for a gate that is reached and still waits for its decision. */
+export function gateDecisionPending(m) {
+  return !!m.gate && (m.decision_state === "pending" || (m.reached === true && !m.decision_state));
+}
+
 /** Return the localized label for a decision state. */
 export function decisionLabel(decision) {
   return t(`decisionState.${decision}`);

@@ -27,7 +27,7 @@ import {
   deleteEntity,
 } from "./forms.js";
 import { renderContextPanel, openDocViewer } from "./context.js";
-import { collectIssues, issuesByEntity } from "./schedule-ui.js";
+import { collectIssues, issuesByEntity, gateDecisionPending } from "./schedule-ui.js";
 import { issueList, issueBadge, scheduleMeta, placeMilestones, pruneTree } from "./schedule-view.js";
 import {
   wpRow,
@@ -661,8 +661,11 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
 
     const today = utcDateString();
 
-    const rowOf = (ms) =>
-      slimMilestoneRow(ms, {
+    const rowOf = (ms) => {
+      const decide = ms.gate && can("decide") ? { label: t("recordDecision"), onClick: () => decisionDialog({ project: p, milestone: ms }) } : null;
+      // a reached gate waiting for its decision shows the decision as the primary button, not in the menu
+      const primary = decide && gateDecisionPending(ms) ? decide : null;
+      return slimMilestoneRow(ms, {
         today,
         titleOf,
         id: depTargetId("ms", ms.id),
@@ -670,14 +673,16 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
         unlocksText: ms.unlocks?.length ? wpRefs(ms.unlocks) : t("none"),
         actions: rowActions({
           edit: { label: t("edit"), onClick: () => milestoneForm(id, ms, detail.workpackages) },
+          primary,
           menuLabel: t("moreActions"),
           gate: (el) => roleGate(el, "write"),
           items: [
-            ms.gate && can("decide") ? { label: t("recordDecision"), onClick: () => decisionDialog({ project: p, milestone: ms }) } : null,
+            primary ? null : decide,
             { label: t("delete"), danger: true, onClick: () => deleteEntity("milestone", ms.id, ms.title, id) },
           ],
         }),
       });
+    };
 
     const sortedTree = sortTreeByCode(d.workpackages);
     const shownTree = pruneTree(sortedTree, shownWps);
