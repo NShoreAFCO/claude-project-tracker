@@ -652,13 +652,29 @@ export function tokenCostForm(projectId, tree) {
   });
 }
 
-export function logProgressForm(projectId, tree) {
+/** opts.wp: a work package to preselect; its current progress fills the progress field (an absolute value, not an increment). */
+export function logProgressForm(projectId, tree, { wp: preset } = {}) {
   return formDialog({
     title: t("formLogProgress"),
     fields: [
       { name: "summary", label: t("fSummaryText"), type: "textarea", required: true, rows: 5 },
-      { name: "workpackage_id", label: t("fWorkpackage"), type: "select", options: [["", t("fNoParent")], ...wpOptions(tree)] },
-      { name: "progress", label: `${t("fProgress")} (${t("fWorkpackage")})`, type: "number", min: 0, max: 100, step: 5 },
+      {
+        name: "workpackage_id",
+        label: t("fWorkpackage"),
+        type: "select",
+        value: preset?.id ?? "",
+        options: [["", t("fNoParent")], ...wpOptions(tree)],
+      },
+      {
+        name: "progress",
+        label: `${t("fProgress")} (${t("fWorkpackage")})`,
+        type: "number",
+        min: 0,
+        max: 100,
+        step: 5,
+        value: preset ? preset.progress : undefined,
+        hint: t("logProgressHint"),
+      },
     ],
     onSubmit: async (v) => {
       const wp = flatWps(tree).find((w) => w.id === v.workpackage_id) || { id: v.workpackage_id, title: v.workpackage_id };

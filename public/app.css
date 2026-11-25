@@ -1174,6 +1174,26 @@ td .chip.late,
   bottom: 100%;
   margin: 0 0 0.2rem;
 }
+/* row menu placement, set on open by menuButton: keep the list inside the viewport */
+.menu-list.align-start {
+  left: 0;
+  right: auto;
+}
+.menu-list.open-up {
+  top: auto;
+  bottom: 100%;
+  margin: 0 0 0.2rem;
+}
+/* row menu in the top layer (popover): fixed, edges set inline by menuButton, never clipped by a row or card */
+.menu-list[popover] {
+  position: fixed;
+  inset: auto;
+  z-index: auto;
+  margin: 0.2rem 0;
+  max-width: calc(100vw - 1rem);
+  overflow: auto;
+  color: var(--color-text);
+}
 .checklist .check {
   flex-wrap: wrap;
 }
@@ -2469,15 +2489,6 @@ dialog.fixed .modal-foot {
     border-radius: 0;
   }
 }
-/* done work packages fold into one line */
-.tw-donefold {
-  list-style: none;
-}
-.tw-donefold-btn {
-  font-size: 13px;
-  color: var(--color-text-muted);
-  padding: 4px 2px;
-}
 /* one action per row */
 .row-actions {
   display: flex;
@@ -2486,16 +2497,46 @@ dialog.fixed .modal-foot {
   flex-wrap: nowrap;
 }
 /* slim gate and milestone rows */
+/* same fold / code / title columns as the work package rows, so the actions start at the title */
 .tree li.tw-ms {
   list-style: none;
-  display: flex;
+  display: grid;
+  grid-template-columns: [fold] 36px [code] 66px [ttl] minmax(0, 1fr);
   align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 12px;
+  column-gap: 10px;
+  row-gap: 4px;
   padding: 6px 10px;
   min-height: 36px;
   font-size: 13px;
   border-radius: 6px;
+}
+.tw-ms .ms-diamond,
+.tw-ms .ms-diamond.done {
+  grid-column: fold;
+  justify-self: center;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin: 0;
+}
+.tw-ms .tw-ms-code {
+  grid-column: code;
+}
+.tw-ms .tw-ms-main {
+  grid-column: ttl;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+.tw-ms .tw-ms-below {
+  grid-column: ttl;
+  min-width: 0;
+}
+@container (max-width: 720px) {
+  .tree li.tw-ms {
+    grid-template-columns: [fold] 36px [code] 56px [ttl] minmax(0, 1fr);
+  }
 }
 .tw-ms .tw-ms-title {
   font-size: 14px;
@@ -2510,9 +2551,6 @@ dialog.fixed .modal-foot {
 .tw-ms .tw-ms-req,
 .tw-ms .tw-ms-unl {
   color: var(--color-text-muted);
-}
-.tw-ms .row-actions {
-  margin-left: auto;
 }
 /* /dialog layout */
 
@@ -2776,3 +2814,159 @@ dialog.fixed .modal-foot {
   margin-right: 0.3rem;
 }
 /* /gantt tiers */
+
+/* inbox triage */
+.inbox-tabs {
+  margin: 0.5rem 0 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+}
+.inbox-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.5rem;
+  background: var(--color-tint);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+.inbox-bar[hidden] {
+  display: none;
+}
+.inbox-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.inbox-ignored {
+  color: var(--color-text-muted);
+}
+td.sel,
+th.sel {
+  width: 2rem;
+}
+.inbox-rules {
+  margin-top: 1.5rem;
+}
+fieldset.rule-kind {
+  border: 0;
+  padding: 0;
+  margin: 0.75rem 0;
+}
+fieldset.rule-kind label.check {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+/* my work */
+.my-work {
+  display: grid;
+  gap: 1.25rem;
+}
+.my-work-host {
+  margin-top: 0.75rem;
+}
+.mw-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+}
+.mw-count {
+  padding: 0 0.5rem;
+  border-radius: 999px;
+  background: var(--color-tint);
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+.mw-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+.mw-row + .mw-row {
+  border-top: 1px solid var(--color-border);
+}
+.mw-link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+  width: 100%;
+  padding: 0.45rem 0.75rem;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.mw-link:hover {
+  background: var(--color-tint);
+}
+.mw-code,
+.mw-project,
+.mw-date,
+.mw-person {
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+.mw-title,
+.mw-summary {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+.mw-section .empty {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  color: var(--color-text-muted);
+}
+@media (min-width: 1400px) {
+  .my-work {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+}
+/* /my work */
+/* my work shell */
+.mw-views {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4em;
+  align-items: center;
+  margin: 0.5em 0;
+}
+.mw-views-label {
+  font-weight: 600;
+}
+.mw-views button.active {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+.mw-manage {
+  margin: 1em 0;
+}
+.mw-manage > summary {
+  cursor: pointer;
+}
+/* /my work shell */
+
+/* ---- per-row Log progress button: sits under the read-only slider, right-aligned, wraps inside the progress cell */
+.row-progress {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+  min-width: 0;
+  width: 100%;
+}
+.row-progress .row-log-progress {
+  white-space: nowrap;
+  max-width: 100%;
+}

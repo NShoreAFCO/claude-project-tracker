@@ -8,7 +8,8 @@ import { listRisks, upsertRisk, type RiskType } from "../data/risks";
 import { createBaseline } from "../data/baselines";
 import { overrideGateLock, recordGateDecision, type DecisionInput } from "../data/gates";
 import { linkBranch } from "../data/branches";
-import { assignInboxEvent, listEvents, listInbox, logProgress, logTokenCost, setScores } from "../data/logs";
+import { assignInboxEvent, listEvents, logProgress, logTokenCost, setScores } from "../data/logs";
+import { countInbox, createRule, deleteRule, dismissInbox, listInbox, listRules, restoreInbox } from "../data/inbox";
 import { deleteEntity, deletePreview, listTrash, purgeEntity, restoreEntity, type EntityKind } from "../data/entities";
 import { getContextBundle, listContext, readContext } from "../data/context-read";
 import {
@@ -25,6 +26,7 @@ import { redactEvents } from "../data/internal";
 import { moveWorkpackages } from "../data/rules";
 import { ConflictError, ForbiddenError, ValidationError } from "../data/util";
 import { getDashboardPrefs, openGates, putDashboardPrefs } from "../data/mydash";
+import { recentForMe } from "../data/mywork";
 import { handleUpload } from "./upload";
 import { userCaller } from "../auth/caller";
 import { REST_ACTIONS, requireAction, restAction, type Action } from "../auth/permissions";
@@ -189,6 +191,28 @@ route("GET", "/api/gates/open", async ({ db, url, by }) => {
   return openGates(db, by, { scope, project_id: url.searchParams.get("project_id") || undefined });
 });
 
+// ---- my work: what changed on my work packages, gates and projects while I was away
+route("GET", "/api/me/recent", async ({ db, url, by }) => {
+  const bounded = (name: string, def: number, max: number): number => {
+    const raw = url.searchParams.get(name);
+    if (raw === null || raw === "") return def;
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 1 || n > max) throw new ValidationError(`${name} must be a whole number from 1 to ${max}`);
+    return n;
+  };
+  const days = bounded("days", 7, 30);
+  const limit = bounded("limit", 20, 100);
+  return redactEvents(
+    await recentForMe(db, by, {
+      days,
+      limit,
+      assigned_only: ["1", "true"].includes(url.searchParams.get("assigned_only") ?? ""),
+      project_id: url.searchParams.get("project_id") || undefined,
+    }),
+    by,
+  );
+});
+
 // ---- work packages
 route("GET", "/api/workpackages", async ({ db, url }) => listWorkpackagesOut(db, reqStr(url.searchParams.get("project_id"), "project_id")));
 route("POST", "/api/workpackages", async ({ db, req, by }) => {
@@ -292,13 +316,28 @@ route("GET", "/api/events", async ({ db, url, by }) =>
     by,
   ),
 );
-route("GET", "/api/inbox", async ({ db, by }) => redactEvents(await listInbox(db), by));
+route("GET", "/api/search", async ({ db, url }) => search(db, url.searchParams.get("q") ?? ""));
+
+// ---- inbox triage (unassigned hook and webhook events; no MCP tool). The fixed paths below never match
+// the /api/inbox/:id/assign pattern, which needs the /assign suffix. Dismiss and restore answer 200 (no create).
+route("GET", "/api/inbox", async ({ db, url, by }) =>
+  redactEvents(await listInbox(db, { state: url.searchParams.get("state") ?? undefined, limit: optNum(url.searchParams.get("limit")) }), by),
+);
+route("GET", "/api/inbox/count", async ({ db }) => ({ open: await countInbox(db) }));
+route("POST", "/api/inbox/dismiss", async ({ db, req, by }) => json({ dismissed: await dismissInbox(db, (await readJson(req)).ids, by) }));
+route("POST", "/api/inbox/restore", async ({ db, req, by }) => json({ restored: await restoreInbox(db, (await readJson(req)).ids, by) }));
 route("POST", "/api/inbox/:id/assign", async ({ db, req, by, params }) => {
   const { project_id } = await readJson(req);
   await assignInboxEvent(db, Number(params[0]), reqStr(project_id, "project_id"), by);
   return { ok: true };
 });
-route("GET", "/api/search", async ({ db, url }) => search(db, url.searchParams.get("q") ?? ""));
+// Rules hold folder paths, which viewers may not see (spec F12): even the list needs write.
+route("GET", "/api/inbox/rules", async ({ db }) => listRules(db));
+route("POST", "/api/inbox/rules", async ({ db, req, by }) => createRule(db, await readJson(req), by));
+route("DELETE", "/api/inbox/rules/:id", async ({ db, by, params }) => {
+  await deleteRule(db, params[0], by);
+  return { ok: true };
+});
 
 // ---- context
 route("GET", "/api/context", async ({ db, url }) =>

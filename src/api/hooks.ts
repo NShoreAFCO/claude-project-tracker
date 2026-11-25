@@ -1,9 +1,10 @@
-import type { Env } from "../types";
+import type { Env, ProjectRow } from "../types";
 import { CONTEXT_DOC_MAX_BYTES } from "../types";
 import { linkBranch } from "../data/branches";
 import { writeContext } from "../data/context-write";
+import { findRule } from "../data/inbox";
 import { logProgress } from "../data/logs";
-import { eventStmt, utf8Bytes } from "../data/util";
+import { LIVE, eventStmt, utf8Bytes } from "../data/util";
 import { serviceCaller } from "../auth/caller";
 import { REST_ACTIONS, requireAction } from "../auth/permissions";
 import { findProjectByPath, findProjectByRepo, normalisePath, repoFullName } from "./match";
@@ -43,7 +44,7 @@ const HOOK_FILES: Record<string, { slug: string; title: string; pinned: boolean 
 
 const str = (v: unknown, max: number): string | null => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
 
-/** POST /api/hooks/claude-code (SPEC §6). Matches by repo_url, then by local_path. */
+/** POST /api/hooks/claude-code (SPEC §6). Matches by repo_url, then by local_path, then by inbox folder rule. */
 export async function handleClaudeCodeHook(body: HookBody, env: Env): Promise<Record<string, unknown>> {
   const db = env.DB;
   const by = await serviceCaller(db, ACTOR, typeof body.on_behalf_of === "string" ? body.on_behalf_of : null);
@@ -67,22 +68,47 @@ export async function handleClaudeCodeHook(body: HookBody, env: Env): Promise<Re
     if (byPath) ({ project, nested } = byPath);
   }
 
-  if (!project) {
-    await db.batch([
+  // No real match: a folder rule (longest folder first). A real match always wins over a rule.
+  const inboxEvent = (action: "unmatched" | "ignored", ruleId?: string) =>
+    db.batch([
       eventStmt(db, {
         by,
         project_id: null,
         entity: "hook",
         entity_id: sessionId,
-        action: "unmatched",
+        action,
         summary: `Claude Code session ended (${reason}) in ${cwd ?? "?"}${repoUrl ? ` · ${repoUrl}` : ""}`,
-        diff: { hook: [null, { session_id: sessionId, cwd, repo_url: repoUrl, branch, last_commit: lastCommit, reason }] },
+        diff: {
+          hook: [null, { session_id: sessionId, cwd, repo_url: repoUrl, branch, last_commit: lastCommit, reason }],
+          ...(ruleId ? { rule: [null, ruleId] } : {}),
+        },
       }),
     ]);
+  let ruleId: string | null = null;
+  if (!project && cwd) {
+    const rule = await findRule(db, cwd);
+    if (rule?.kind === "ignore") {
+      await inboxEvent("ignored", rule.id);
+      return { ok: true, matched: null, ignored: true };
+    }
+    if (rule?.kind === "assign" && rule.project_id) {
+      // A rule to a project in the trash is ignored (the event stays unmatched).
+      const target = await db.prepare(`SELECT * FROM project WHERE id = ? AND ${LIVE()}`).bind(rule.project_id).first<ProjectRow>();
+      if (target) {
+        project = target;
+        nested = false; // no nested guess for rules: only body.worktree marks a worktree
+        ruleId = rule.id;
+      }
+    }
+  }
+
+  if (!project) {
+    await inboxEvent("unmatched");
     return { ok: true, matched: null };
   }
 
   const result: Record<string, unknown> = { ok: true, matched: project.id };
+  if (ruleId) result.rule = ruleId;
   const isWorktree = body.worktree ?? nested;
   // Like the GitHub webhook: the default branch gets no branch row (it is not "open work").
   // Without origin/HEAD (no remote) main/master count as default.

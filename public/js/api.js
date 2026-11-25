@@ -89,6 +89,9 @@ export const api = {
   getDashboardPrefs: () => request("GET", "/api/persons/me/dashboard"),
   putDashboardPrefs: (prefs) => request("PUT", "/api/persons/me/dashboard", { prefs }),
   // /qol:t12
+  // my work
+  myRecent: (params = {}) => request("GET", `/api/me/recent${q(params)}`),
+  // /my work
   /** Raw report fetch (pdf: a Blob; md/html: text). Throws ApiError, e.g. 503 pdf_unavailable. */
   report: async (id, format) => {
     const res = await fetch(`/api/projects/${encodeURIComponent(id)}/report?format=${format}`, { credentials: "same-origin" });
@@ -106,8 +109,15 @@ export const api = {
   logProgress: (body) => request("POST", "/api/progress", body),
 
   events: (params) => request("GET", `/api/events${q(params)}`),
-  inbox: () => request("GET", "/api/inbox"),
+  // inbox: params { state: "open" | "dismissed", limit }; rules are listed for editors only
+  inbox: (params = {}) => request("GET", `/api/inbox${q(params)}`),
+  inboxCount: () => request("GET", "/api/inbox/count"),
   assignInbox: (id, project_id) => request("POST", `/api/inbox/${id}/assign`, { project_id }),
+  dismissInbox: (ids) => request("POST", "/api/inbox/dismiss", { ids }),
+  restoreInbox: (ids) => request("POST", "/api/inbox/restore", { ids }),
+  inboxRules: () => request("GET", "/api/inbox/rules"),
+  createInboxRule: (body) => request("POST", "/api/inbox/rules", body),
+  deleteInboxRule: (id) => request("DELETE", `/api/inbox/rules/${encodeURIComponent(id)}`),
   search: (query) => request("GET", `/api/search${q({ q: query })}`),
 
   contextList: (owner_kind, owner_id, inherited = false) =>

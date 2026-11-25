@@ -7,8 +7,8 @@ import { api } from "./api.js";
 import { h, clear, toastError } from "./dom.js";
 import { renderGrid, applyGridQuery } from "./grid.js";
 import { renderGantt } from "./gantt.js";
-import { renderMyDashboard } from "./mydash.js";
-import { renderUpcoming, renderMyWps, loadSummary } from "./portfolio.js";
+import { renderUpcoming, loadSummary } from "./portfolio.js";
+import { renderMyWork, legacyWorkHash } from "./my-work-page.js";
 import { renderInbox } from "./inbox.js";
 import { openProject, tabFromSegment, dialogUnderlay, viewHashFor } from "./project.js";
 import { renderPeople } from "./people.js";
@@ -56,7 +56,7 @@ export async function refresh() {
 
 async function updateInboxCount() {
   try {
-    state.inboxCount = (await api.inbox()).length;
+    state.inboxCount = (await api.inboxCount()).open ?? 0;
   } catch {
     state.inboxCount = 0;
   }
@@ -159,14 +159,13 @@ function parseHash(hash = location.hash) {
 async function renderView() {
   // under an open project dialog the hash is #/p/<id>: redraw the view the dialog closes back to
   const { parts, params } = parseHash(viewHashFor(location.hash));
-  const view = ["gantt", "inbox", "search", "people", "trash", "upcoming", "mine", "my"].includes(parts[0]) ? parts[0] : "grid";
+  const view = ["gantt", "inbox", "search", "people", "trash", "upcoming", "work"].includes(parts[0]) ? parts[0] : "grid";
   state.view = view;
   renderNav();
   if (view === "people") await renderPeople(main, state);
   else if (view === "trash") await renderTrash(main, state);
   else if (view === "upcoming") await renderUpcoming(main);
-  else if (view === "mine") await renderMyWps(main);
-  else if (view === "my") await renderMyDashboard(main, state);
+  else if (view === "work") await renderMyWork(main, state);
   else if (view === "gantt") await renderGantt(main, state);
   else if (view === "inbox") await renderInbox(main, state);
   else if (view === "search") await renderSearchResults(params.get("q") || "");
@@ -177,6 +176,9 @@ async function renderView() {
 }
 
 async function route() {
+  // the old personal views live on the My work page now; replace the entry so Back does not bounce
+  const moved = legacyWorkHash(location.hash);
+  if (moved) history.replaceState(null, "", moved);
   const { parts } = parseHash();
   try {
     if (!state.projects.length) await loadProjects();

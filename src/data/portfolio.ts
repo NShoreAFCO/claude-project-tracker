@@ -288,6 +288,25 @@ export async function upcomingWorkpackages(db: D1Database, opts: { project_id?: 
   return (await toPortfolioWps(db, result.results)).slice(0, limit);
 }
 
+/**
+ * WHERE fragment for "this work package is mine" (aliases w = workpackage, p = project): assigned to the person,
+ * or, unless assignedOnly, unassigned in a project the person owns. Shared by mineWorkpackages and the my-work feed.
+ */
+export function mineOwnership(personId: string, assignedOnly?: boolean): { sql: string; params: string[] } {
+  if (assignedOnly) return { sql: "w.owner_person_id = ?", params: [personId] };
+  return {
+    sql: `(
+        w.owner_person_id = ?
+        OR (
+          w.owner_person_id IS NULL
+          AND (w.owner_text IS NULL OR trim(w.owner_text) = '')
+          AND p.owner_person_id = ?
+        )
+      )`,
+    params: [personId, personId],
+  };
+}
+
 export async function mineWorkpackages(
   db: D1Database,
   personId: string | null,
@@ -327,18 +346,9 @@ export async function mineWorkpackages(
     }
   }
 
-  const ownership = opts.assigned_only
-    ? "w.owner_person_id = ?"
-    : `(
-        w.owner_person_id = ?
-        OR (
-          w.owner_person_id IS NULL
-          AND (w.owner_text IS NULL OR trim(w.owner_text) = '')
-          AND p.owner_person_id = ?
-        )
-      )`;
+  const { sql: ownership, params: ownershipParams } = mineOwnership(personId, opts.assigned_only);
 
-  const params: (string | number)[] = opts.assigned_only ? [personId] : [personId, personId];
+  const params: (string | number)[] = [...ownershipParams];
   let projectFilter = "";
   if (opts.project_id !== undefined) {
     projectFilter = " AND w.project_id = ?";

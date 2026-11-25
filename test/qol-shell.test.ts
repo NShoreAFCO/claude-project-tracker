@@ -10,20 +10,27 @@ import { sidebarModel, resetGridFilter, showLogout, GRID_FILTER_KEY, LOGOUT_HREF
 const base = { view: "grid", categories: ["a", "b", "c"], filterCategory: "", inboxCount: 2, hostname: "tracker.example.com" };
 
 describe("sidebar model", () => {
-  it("lists dashboard, my dashboard, every category, the views and logout", () => {
+  it("lists dashboard, my work, every category, the views and logout", () => {
     const m = sidebarModel(base);
-    expect(m.top.map((e: any) => e.href)).toEqual(["#/", "#/my"]);
+    expect(m.top.map((e: any) => e.href)).toEqual(["#/", "#/work"]);
+    expect(m.top.map((e: any) => e.labelKey)).toEqual(["navDashboard", "navWork"]);
     expect(m.categories.map((e: any) => e.category)).toEqual(["a", "b", "c"]);
-    expect(m.views.map((e: any) => e.id)).toEqual(["gantt", "upcoming", "mine", "people", "trash", "inbox"]);
+    expect(m.views.map((e: any) => e.id)).toEqual(["gantt", "upcoming", "people", "trash", "inbox"]);
     expect(m.views.at(-1).count).toBe(2);
     expect(m.logout).toEqual({ href: LOGOUT_HREF, labelKey: "navLogout" });
+  });
+
+  it("has one personal entry and no separate my-work-packages or my-dashboard entry", () => {
+    const m = sidebarModel(base);
+    const all = [...m.top, ...m.views].map((e: any) => e.href);
+    expect(all.filter((href: string) => ["#/work", "#/my", "#/mine"].includes(href))).toEqual(["#/work"]);
   });
 
   it("marks exactly one entry active", () => {
     const current = (m: any) => [...m.top, ...m.categories, ...m.views].filter((e) => e.current).map((e) => e.id);
     expect(current(sidebarModel(base))).toEqual(["dashboard"]);
     expect(current(sidebarModel({ ...base, filterCategory: "b" }))).toEqual(["cat-b"]);
-    expect(current(sidebarModel({ ...base, view: "my" }))).toEqual(["my"]);
+    expect(current(sidebarModel({ ...base, view: "work" }))).toEqual(["work"]);
     expect(current(sidebarModel({ ...base, view: "inbox" }))).toEqual(["inbox"]);
   });
 
@@ -70,17 +77,16 @@ describe("shell render", () => {
     deps = { h, clear, t: (k: string) => k, catLabel: (_: string, k: string) => `cat:${k}`, onCategory: () => {} };
   });
 
-  it("renders dashboard, my dashboard, categories, views and logout in order", () => {
+  it("renders dashboard, my work, categories, views and logout in order", () => {
     render();
     expect(labels()).toEqual([
       "navDashboard",
-      "navMy",
+      "navWork",
       "cat:a",
       "cat:b",
       "cat:c",
       "navGantt",
       "navUpcoming",
-      "navMine",
       "navPeople",
       "navTrash",
       "navInbox2",
@@ -93,12 +99,12 @@ describe("shell render", () => {
     render({ filterCategory: "b" });
     const cur = links().filter((a) => a.getAttribute("aria-current") === "page");
     expect(cur.map((a) => a.textContent)).toEqual(["cat:b"]);
-    render({ view: "my" });
+    render({ view: "work" });
     expect(
       links()
         .filter((a) => a.getAttribute("aria-current") === "page")
         .map((a) => a.textContent),
-    ).toEqual(["navMy"]);
+    ).toEqual(["navWork"]);
   });
 
   it("a category link calls back with its key and the default navigation is the callback's to cancel", () => {

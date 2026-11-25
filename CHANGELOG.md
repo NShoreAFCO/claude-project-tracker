@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.7.0 — 2026-11-25 (workflow)
+
+**Migration 0008 (additive): back up D1, run `npm run db:migrate:remote`, then deploy.** Run the migration before the Worker deploy: the new Worker needs the `inbox_rule` table and the `event_ts` index (My work, unmatched hook events with a folder and the inbox rules fail without them). The migration only adds a table and indexes, so the previous Worker keeps working on the migrated database. MCP keeps its tool and output shapes; the new routes are REST only.
+
+### Added
+- Inbox triage: a "To review" tab and a "Dismissed" tab. Events can be dismissed and restored one by one or in bulk (a checkbox per row, select all, "Dismiss selected" and "Restore selected").
+- Folder rules for Claude Code hook events: "Ignore events from this folder" or "Always assign this folder to a project". A rule covers the folder and everything below it, can also move the events already in the inbox, and is listed and deleted in a "Folder rules" section under the inbox. A real project match always wins over a rule.
+- The inbox badge counts only the events still to review, with no cap.
+- The My work page (`#/work`): Decisions waiting on me, Overdue, Due in 14 days, Waiting or blocked, and Recently changed (changes by others in the last 7 days on your work packages, gates and projects). A scope toggle ("Assigned to me" or "Mine and unassigned in my projects", remembered per browser) and a project filter. Saved views sit in a strip above the sections and are managed in a "Manage views" panel on the same page; `#/work?view=<id>` opens one.
+- A visible "Log progress" button on each open leaf row in the project dialog, pre-filled with the current progress.
+- A visible "Mark complete" button on a work package at 100 %, and a "Record decision" button first on a reached gate that waits for its decision.
+- New REST routes: `GET /api/inbox?state=open|dismissed&limit=`, `GET /api/inbox/count`, `POST /api/inbox/dismiss`, `POST /api/inbox/restore`, `GET /api/inbox/rules`, `POST /api/inbox/rules`, `DELETE /api/inbox/rules/:id`, `GET /api/me/recent`. Listing and changing folder rules needs write access. Details in `docs/SPEC.md`.
+
+### Changed
+- My work replaces My dashboard and My work packages in the sidebar; `#/my` and `#/mine` now open `#/work`. Deadlines stays.
+- In the project dialog, done top-level work packages stay in the tree with their milestones; only their sub-packages fold away, and a "n done · Show/Hide" button in the toolbar shows them.
+- Milestone and gate rows line up with the work package rows.
+
+### Fixed
+- Row "⋯" menus stay on screen and are no longer cut off by the dialog edge.
+
 ## v0.6.1 — 2026-11-24 (tree guide fix)
 
 No breaking change. No migration. Deploy only.

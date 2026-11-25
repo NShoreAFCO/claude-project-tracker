@@ -149,6 +149,19 @@ export function deleteText(kind, name, children) {
   return t("confirmDeleteTrash", { kind: t(`entityKind.${kind}`), name, kids });
 }
 
+/**
+ * Where a row menu opens so it stays inside the viewport. btn is a DOMRect-like object. Default is right edges
+ * aligned, opening downward; a missing or all-zero rect (fake DOM, hidden parent) keeps the default.
+ */
+export function menuPlacement({ btn, listWidth = 0, listHeight = 0, vw = 0, vh = 0 }) {
+  const out = { alignStart: false, openUp: false };
+  if (!btn || ![btn.left, btn.right, btn.top, btn.bottom, btn.width, btn.height].some((n) => n)) return out;
+  const edge = 8;
+  if (listWidth > 0 && btn.right - listWidth < edge) out.alignStart = true;
+  if (listHeight > 0 && vh > 0 && btn.bottom + listHeight > vh - edge && btn.top > vh - btn.bottom) out.openUp = true;
+  return out;
+}
+
 /** "..." row menu: items = [{ label, onClick, danger }]. Closes on outside click, Escape and after a choice. */
 export function menuButton(label, items) {
   const list = h("ul.menu-list", { role: "menu", hidden: true });
@@ -175,13 +188,64 @@ export function menuButton(label, items) {
       btn.focus();
     }
   };
+  // the popover top layer keeps the list above and outside every row, card and dialog
+  const popover = typeof list.showPopover === "function" && typeof list.hidePopover === "function";
+  if (popover) list.setAttribute("popover", "manual");
+  const onScrollResize = () => close();
   function open() {
     list.hidden = false;
+    if (popover) {
+      try {
+        list.showPopover();
+      } catch {
+        /* already open */
+      }
+    }
+    place();
     btn.setAttribute("aria-expanded", "true");
     document.addEventListener("click", onDoc, true);
     document.addEventListener("keydown", onKey, true);
+    if (popover) {
+      document.addEventListener("scroll", onScrollResize, true);
+      globalThis.addEventListener?.("resize", onScrollResize);
+    }
+  }
+  function place() {
+    list.classList.toggle("align-start", false);
+    list.classList.toggle("open-up", false);
+    if (typeof btn.getBoundingClientRect !== "function" || typeof list.getBoundingClientRect !== "function") return;
+    const b = btn.getBoundingClientRect();
+    const l = list.getBoundingClientRect();
+    const root = document.documentElement;
+    const vw = globalThis.innerWidth || root?.clientWidth || 0;
+    const vh = globalThis.innerHeight || root?.clientHeight || 0;
+    const { alignStart, openUp } = menuPlacement({ btn: b, listWidth: l?.width || 0, listHeight: l?.height || 0, vw, vh });
+    list.classList.toggle("align-start", alignStart);
+    // dialog footers already open upward through their own rule
+    const up = openUp || !!btn.closest(".modal-foot");
+    list.classList.toggle("open-up", openUp && !btn.closest(".modal-foot"));
+    if (popover) {
+      // fixed coordinates from the button; the unused edges are reset
+      const s = list.style;
+      const px = (n) => `${Math.round(n)}px`;
+      s.setProperty("left", alignStart ? px(b.left) : "auto");
+      s.setProperty("right", alignStart ? "auto" : px(Math.max(0, vw - b.right)));
+      s.setProperty("top", up ? "auto" : px(b.bottom));
+      s.setProperty("bottom", up ? px(Math.max(0, vh - b.top)) : "auto");
+    }
   }
   function close() {
+    list.classList.toggle("align-start", false);
+    list.classList.toggle("open-up", false);
+    if (popover) {
+      try {
+        list.hidePopover();
+      } catch {
+        /* not open */
+      }
+      document.removeEventListener("scroll", onScrollResize, true);
+      globalThis.removeEventListener?.("resize", onScrollResize);
+    }
     list.hidden = true;
     btn.setAttribute("aria-expanded", "false");
     document.removeEventListener("click", onDoc, true);

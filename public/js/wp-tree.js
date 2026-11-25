@@ -69,39 +69,47 @@ export function isDoneWp(w) {
   return w.status === "done" || w.status === "dropped";
 }
 
-/** Splits top-level work packages into open and done ones, keeping the code order of each. */
-export function splitDone(list) {
-  return { open: list.filter((w) => !isDoneWp(w)), done: list.filter(isDoneWp) };
+/**
+ * True when a work package can be marked done: not done or dropped yet, and its progress is 100 % (a leaf by its own
+ * progress, a parent by its effective progress from the sub-work packages). The permission check is the caller's.
+ */
+export function canMarkDone(w) {
+  if (isDoneWp(w)) return false;
+  const leaf = !w.children?.length;
+  return Number(leaf ? w.progress : w.effective_progress) >= 100;
 }
 
-/** One fold line "n done · Show" with the done blocks after it while it is open. Returns a list of items. */
-export function doneFold({ count, open, onToggle, rows = [] }) {
-  if (!count) return [];
-  return [
-    h(
-      "li.tw-donefold",
-      h(
-        "button.linkbtn.tw-donefold-btn",
-        { type: "button", "aria-expanded": String(!!open), on: { click: onToggle } },
-        t("doneCount", { n: count }),
-        " · ",
-        t(open ? "doneHide" : "doneShow"),
-      ),
-    ),
-    ...(open ? rows : []),
-  ];
+/** True for a top-level work package whose sub-work packages the done toggle can hide (finished, has children). */
+export function hasFoldableSubs(w) {
+  return isDoneWp(w) && !!w.children?.length;
+}
+
+/** Number of top-level work packages the done toggle acts on. */
+export function doneSubCount(tops) {
+  return tops.filter(hasFoldableSubs).length;
+}
+
+/** Label of the done toggle: "n done · Show" while the sub-work packages are hidden, "n done · Hide" while shown. */
+export function doneToggleLabel(count, open) {
+  return `${t("doneCount", { n: count })} · ${t(open ? "doneHide" : "doneShow")}`;
 }
 
 /**
  * One action per row: the primary button stays visible, everything else goes into a menu.
  * edit: { label, onClick }; items: [{ label, onClick, danger }] (falsy entries are skipped).
+ * primary (optional): { label, onClick } shown first as the filled button; Edit then becomes secondary.
  * gate wraps the result (role check); it returns null for a reader.
  */
-export function rowActions({ edit, items = [], menuLabel, gate = (x) => x }) {
+export function rowActions({ edit, primary = null, items = [], menuLabel, gate = (x) => x }) {
   const menuItems = items.filter(Boolean);
   const box = h(
     "div.actions.row-actions",
-    h("button.btn.small", { type: "button", on: { click: edit.onClick } }, edit.label),
+    primary ? h("button.btn.small", { type: "button", on: { click: primary.onClick } }, primary.label) : null,
+    h(
+      primary ? "button.btn.small.secondary" : "button.btn.small",
+      { type: "button", on: { click: edit.onClick } },
+      edit.label,
+    ),
     menuItems.length ? menuButton(menuLabel, menuItems) : null,
   );
   return gate(box);
@@ -127,16 +135,20 @@ export function slimMilestoneRow(ms, { today, titleOf, requiresText, unlocksText
     { id, dataset: { kind: gate ? "gate" : "milestone" } },
     h("span.ms-diamond." + state, { "aria-hidden": "true", class: gate ? "gate" : "" }),
     h("span.tw-ms-code", ms.code || (gate ? t("gateMark") : "")),
-    h("strong.tw-ms-title", ms.title),
-    h("span.ms-state." + state, stateLabel),
-    gate ? h("span.badge.decision.decision-" + decision, decisionLabel(decision)) : null,
-    h("span.tw-ms-due", `${t("due")}: ${fmtDate(ms.due_date)}`, " ", lateChip(lateness(ms.due_date, state === "done" ? "reached" : "open"))),
-    issueBadge(ms, titleOf),
-    ...scheduleMeta(ms),
-    lastText ? h("span.tw-ms-last.meta", lastText) : null,
-    h("span.tw-ms-req", t("requires"), ": ", requiresText),
-    h("span.tw-ms-unl", t("unlocks"), ": ", unlocksText),
-    actions,
+    // title column: the text parts, then the actions under the title, like the work package rows
+    h(
+      "div.tw-ms-main",
+      h("strong.tw-ms-title", ms.title),
+      h("span.ms-state." + state, stateLabel),
+      gate ? h("span.badge.decision.decision-" + decision, decisionLabel(decision)) : null,
+      h("span.tw-ms-due", `${t("due")}: ${fmtDate(ms.due_date)}`, " ", lateChip(lateness(ms.due_date, state === "done" ? "reached" : "open"))),
+      issueBadge(ms, titleOf),
+      ...scheduleMeta(ms),
+      lastText ? h("span.tw-ms-last.meta", lastText) : null,
+      h("span.tw-ms-req", t("requires"), ": ", requiresText),
+      h("span.tw-ms-unl", t("unlocks"), ": ", unlocksText),
+    ),
+    actions ? h("div.tw-ms-below", actions) : null,
   );
 }
 // /dialog layout
@@ -222,15 +234,15 @@ export function pathTo(tree, id, trail = []) {
 }
 
 /**
- * Makes a work package visible by changing the fold state: unfolds all its ancestors, opens the done group when its
- * top-level work package is finished, and turns the issues-only filter off when `shown` (a Set or null) hides it.
+ * Makes a work package visible by changing the fold state: unfolds all its ancestors, shows the hidden sub-work packages
+ * when the target lies below a finished top-level work package, and turns the issues-only filter off when `shown` (a Set or null) hides it.
  */
 export function revealFold(tree, id, fold, shown = null) {
   const path = pathTo(tree, id);
   if (!path.length) return;
   for (const a of path.slice(0, -1)) fold.open.add(a);
   const top = tree.find((w) => w.id === path[0]);
-  if (top && isDoneWp(top)) fold.doneOpen = true;
+  if (top && path.length > 1 && isDoneWp(top)) fold.doneOpen = true;
   if (fold.issuesOnly && shown && !shown.has(id)) fold.issuesOnly = false;
 }
 
