@@ -8,6 +8,8 @@ import { upsertMilestone } from "../src/data/milestones";
 import { deleteEntity } from "../src/data/entities";
 import { ensureUserPerson } from "../src/data/persons";
 import { recentForMe } from "../src/data/mywork";
+import { logProgress } from "../src/data/logs";
+import { ACTOR as HOOK_ACTOR } from "../src/api/hooks";
 
 const db = env.DB;
 const SYS = testCaller();
@@ -115,6 +117,25 @@ describe("GET /api/me/recent", () => {
     expect(ids).toEqual(expect.arrayContaining([a.id, `${a.id}-g`]));
     expect(ids).not.toContain(b.id);
     expect(ids).not.toContain(`${b.id}-g`);
+  });
+
+  it("leaves out session-hook rows on an owned project and still returns the real changes up to the limit", async () => {
+    const hook = testCaller({ actor: HOOK_ACTOR });
+    const p = await createProject(db, { title: uniq("Hook project"), owner: "user@example.com" }, otherCaller);
+    await mk(p.id, `${p.id}-w`, { assignee: "user@example.com" });
+    await logProgress(db, { project_id: p.id, summary: "Claude Code session ended (clear) on main" }, hook);
+    expect(await recentIds(`?project_id=${p.id}`)).toContain(p.id);
+    const before = await recentForMe(db, meCaller, { project_id: p.id });
+    expect(before.some((e) => e.actor === HOOK_ACTOR)).toBe(false);
+    expect(before.length).toBeGreaterThan(0);
+
+    // more hook rows than the limit, all newer than the real changes
+    for (let i = 0; i < 4; i++) await logProgress(db, { project_id: p.id, summary: `session ${i}` }, hook);
+    const rows = await recentForMe(db, meCaller, { project_id: p.id, limit: 2 });
+    expect(rows).toHaveLength(2);
+    expect(rows.every((e) => e.actor !== HOOK_ACTOR)).toBe(true);
+    const log = await db.prepare("SELECT COUNT(*) AS c FROM event WHERE project_id = ? AND actor = ?").bind(p.id, HOOK_ACTOR).first<{ c: number }>();
+    expect(log!.c).toBeGreaterThanOrEqual(5);
   });
 
   it("reads events by the ts index, not by a full scan of event", async () => {

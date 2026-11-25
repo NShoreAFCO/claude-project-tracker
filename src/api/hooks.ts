@@ -9,7 +9,7 @@ import { serviceCaller } from "../auth/caller";
 import { REST_ACTIONS, requireAction } from "../auth/permissions";
 import { findProjectByPath, findProjectByRepo, normalisePath, repoFullName } from "./match";
 
-const ACTOR = "hook:claude-code";
+export const ACTOR = "hook:claude-code";
 /** Route key of the hook endpoint in the permission table (src/auth/permissions.ts). */
 export const HOOK_ROUTE = "POST /api/hooks/claude-code";
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.7.1 — 2026-11-25 (inbox and My work fixes)
+
+No breaking change. No migration. Deploy only. MCP keeps its tool and output shapes.
+
+### Fixed
+- Inbox ("To review", "Dismissed") and Folder rules: long folder paths, session ids and URLs now break inside the description, so the table no longer grows wider than the page and the row actions (project choice, Assign, Dismiss) stay visible, also in Firefox. The actions column has a header, and Time and By no longer break mid-word. On narrow screens the rows stack, with the actions under the description.
+- My work, "Recently changed": the rows the Claude Code session hook logs on a project ("Claude Code session ended …") are left out, so they no longer push real changes out of the list. The project log and the inbox still show them.
+- The test suite passes on an instance whose dashboard locale is not English: tests now always start in English.
+
 ## v0.7.0 — 2026-11-25 (workflow)
 
 **Migration 0008 (additive): back up D1, run `npm run db:migrate:remote`, then deploy.** Run the migration before the Worker deploy: the new Worker needs the `inbox_rule` table and the `event_ts` index (My work, unmatched hook events with a folder and the inbox rules fail without them). The migration only adds a table and indexes, so the previous Worker keeps working on the migrated database. MCP keeps its tool and output shapes; the new routes are REST only.

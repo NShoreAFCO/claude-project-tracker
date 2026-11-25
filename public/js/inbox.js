@@ -27,13 +27,13 @@ function details(e) {
   try {
     JSON.parse(e.diff_json);
   } catch {
-    return h("div.meta", e.diff_json.slice(0, 300));
+    return h("div.meta.inbox-meta", e.diff_json.slice(0, 300));
   }
   const pairs = Object.entries(diffFields(e))
     .filter(([, v]) => v !== null && v !== "" && typeof v !== "object")
     .slice(0, 8)
     .map(([k, v]) => h("span", `${k}: `, h("b", String(v).slice(0, 200))));
-  return pairs.length ? h("div.meta", pairs) : null;
+  return pairs.length ? h("div.meta.inbox-meta", pairs) : null;
 }
 
 const slashes = (p) => String(p).replace(/\\/g, "/").replace(/\/+$/, "");
@@ -172,8 +172,8 @@ function rulesSection(rules) {
       h("td", t(r.kind === "assign" ? "inboxRuleKindAssign" : "inboxRuleKindIgnore")),
       h("td", h("code", r.path)),
       h("td", r.kind === "assign" ? r.project_title || r.project_id || "" : ""),
-      h("td", fmtDateTime(r.created_at)),
-      h("td", del),
+      h("td.inbox-when", fmtDateTime(r.created_at)),
+      h("td.inbox-act", del),
     );
   });
   return h(
@@ -183,8 +183,8 @@ function rulesSection(rules) {
       ? h(
           "div.table-wrap",
           h(
-            "table",
-            h("thead", h("tr", [t("inboxRuleColKind"), t("inboxRuleColFolder"), t("inboxRuleColProject"), t("inboxRuleColCreated"), ""].map((x) => h("th", x)))),
+            "table.inbox-table",
+            h("thead", h("tr", [t("inboxRuleColKind"), t("inboxRuleColFolder"), t("inboxRuleColProject"), t("inboxRuleColCreated")].map((x) => h("th", x)), h("th.inbox-act", t("colActions")))),
             h("tbody", rows),
           ),
         )
@@ -309,10 +309,10 @@ export async function renderInbox(main, state) {
     return h(
       "tr",
       editor ? h("td.sel", box) : null,
-      h("td", fmtDateTime(e.ts)),
-      h("td", e.actor),
-      h("td", h("strong", e.summary || `${e.entity} ${e.action}`), details(e)),
-      h("td", cells),
+      h("td.inbox-when", fmtDateTime(e.ts)),
+      h("td.inbox-by", e.actor),
+      h("td.inbox-desc", h("strong", e.summary || `${e.entity} ${e.action}`), details(e)),
+      h("td.inbox-act", cells),
     );
   });
 
@@ -340,10 +340,10 @@ export async function renderInbox(main, state) {
       ? h(
           "div.table-wrap",
           h(
-            "table",
+            "table.inbox-table",
             h(
               "thead",
-              h("tr", [editor ? h("th.sel", all) : null, ...[t("colWhen"), t("colBy"), t("description"), ""].map((x) => h("th", x))]),
+              h("tr", [editor ? h("th.sel", all) : null, ...[t("colWhen"), t("colBy"), t("description")].map((x) => h("th", x)), h("th.inbox-act", t("colActions"))]),
             ),
             h("tbody", rows),
           ),

@@ -1,5 +1,6 @@
 // "My work" feed: recent changes on what is mine (read only).
 import type { Caller, EventOut } from "../types";
+import { ACTOR as HOOK_ACTOR } from "../api/hooks";
 import { mineOwnership } from "./portfolio";
 import { ForbiddenError, LIVE } from "./util";
 
@@ -8,7 +9,7 @@ export type RecentChange = EventOut & { project_title: string; wp_code: string |
 /**
  * Events of the last `days` days on my work: work packages `mineWorkpackages` would return (done and dropped ones
  * included), milestones of projects where I am the decision maker, and projects I own. Live projects only, and
- * never my own actions. Newest first. One query.
+ * never my own actions and never the rows the Claude Code session hook logs. Newest first. One query.
  * INDEXED BY: without table statistics SQLite prefers walking the whole event table in id order for
  * `ORDER BY e.id DESC LIMIT`; the ts index reads only the window and sorts it.
  */
@@ -24,7 +25,7 @@ export async function recentForMe(
   const since = new Date(Date.now() - days * 86400000).toISOString();
   const own = mineOwnership(me, opts.assigned_only);
 
-  const params: (string | number)[] = [since, me, by.actor, ...own.params, me, me];
+  const params: (string | number)[] = [since, me, by.actor, HOOK_ACTOR, ...own.params, me, me];
   let projectFilter = "";
   if (opts.project_id !== undefined) {
     projectFilter = " AND e.project_id = ?";
@@ -42,6 +43,7 @@ export async function recentForMe(
        LEFT JOIN person pe ON pe.id = e.person_id
        WHERE e.ts >= ?
          AND (e.person_id IS NULL OR e.person_id <> ?)
+         AND e.actor <> ?
          AND e.actor <> ?
          AND (
            (w.id IS NOT NULL AND ${own.sql})

@@ -240,3 +240,28 @@ describe("viewer", () => {
     expect(mocks.inboxRules).not.toHaveBeenCalled();
   });
 });
+
+describe("table layout hooks", () => {
+  it("gives the description meta, the time, by and actions cells the classes the CSS targets, and the actions header text", async () => {
+    await render();
+    const table = main.querySelector("table.inbox-table")!;
+    expect(table).toBeTruthy();
+    expect(table.querySelectorAll("td.inbox-when")).toHaveLength(3);
+    expect(table.querySelectorAll("td.inbox-by")).toHaveLength(3);
+    expect(table.querySelectorAll("td.inbox-act")).toHaveLength(3);
+    expect(table.querySelector("td.inbox-desc").querySelector(".inbox-meta")).toBeTruthy();
+    const head = table.querySelector("th.inbox-act")!;
+    expect(head.textContent).toBe("colActions");
+  });
+
+  it("the folder rules table has the same hooks", async () => {
+    mocks.inboxRules.mockResolvedValue([
+      { id: 1, kind: "ignore", path: "C:/work/demo", project_id: null, created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    await render();
+    const tables = main.querySelectorAll("table.inbox-table");
+    expect(tables).toHaveLength(2);
+    expect(tables[1].querySelector("th.inbox-act")!.textContent).toBe("colActions");
+    expect(tables[1].querySelectorAll("td.inbox-act")).toHaveLength(1);
+  });
+});
