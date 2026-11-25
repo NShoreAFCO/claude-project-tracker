@@ -69,6 +69,16 @@ export function isDoneWp(w) {
   return w.status === "done" || w.status === "dropped";
 }
 
+/**
+ * True when a work package can be marked done: not done or dropped yet, and its progress is 100 % (a leaf by its own
+ * progress, a parent by its effective progress from the sub-work packages). The permission check is the caller's.
+ */
+export function canMarkDone(w) {
+  if (isDoneWp(w)) return false;
+  const leaf = !w.children?.length;
+  return Number(leaf ? w.progress : w.effective_progress) >= 100;
+}
+
 /** Splits top-level work packages into open and done ones, keeping the code order of each. */
 export function splitDone(list) {
   return { open: list.filter((w) => !isDoneWp(w)), done: list.filter(isDoneWp) };
@@ -133,16 +143,20 @@ export function slimMilestoneRow(ms, { today, titleOf, requiresText, unlocksText
     { id, dataset: { kind: gate ? "gate" : "milestone" } },
     h("span.ms-diamond." + state, { "aria-hidden": "true", class: gate ? "gate" : "" }),
     h("span.tw-ms-code", ms.code || (gate ? t("gateMark") : "")),
-    h("strong.tw-ms-title", ms.title),
-    h("span.ms-state." + state, stateLabel),
-    gate ? h("span.badge.decision.decision-" + decision, decisionLabel(decision)) : null,
-    h("span.tw-ms-due", `${t("due")}: ${fmtDate(ms.due_date)}`, " ", lateChip(lateness(ms.due_date, state === "done" ? "reached" : "open"))),
-    issueBadge(ms, titleOf),
-    ...scheduleMeta(ms),
-    lastText ? h("span.tw-ms-last.meta", lastText) : null,
-    h("span.tw-ms-req", t("requires"), ": ", requiresText),
-    h("span.tw-ms-unl", t("unlocks"), ": ", unlocksText),
-    actions,
+    // title column: the text parts, then the actions under the title, like the work package rows
+    h(
+      "div.tw-ms-main",
+      h("strong.tw-ms-title", ms.title),
+      h("span.ms-state." + state, stateLabel),
+      gate ? h("span.badge.decision.decision-" + decision, decisionLabel(decision)) : null,
+      h("span.tw-ms-due", `${t("due")}: ${fmtDate(ms.due_date)}`, " ", lateChip(lateness(ms.due_date, state === "done" ? "reached" : "open"))),
+      issueBadge(ms, titleOf),
+      ...scheduleMeta(ms),
+      lastText ? h("span.tw-ms-last.meta", lastText) : null,
+      h("span.tw-ms-req", t("requires"), ": ", requiresText),
+      h("span.tw-ms-unl", t("unlocks"), ": ", unlocksText),
+    ),
+    actions ? h("div.tw-ms-below", actions) : null,
   );
 }
 // /dialog layout

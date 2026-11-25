@@ -1184,6 +1184,16 @@ td .chip.late,
   bottom: 100%;
   margin: 0 0 0.2rem;
 }
+/* row menu in the top layer (popover): fixed, edges set inline by menuButton, never clipped by a row or card */
+.menu-list[popover] {
+  position: fixed;
+  inset: auto;
+  z-index: auto;
+  margin: 0.2rem 0;
+  max-width: calc(100vw - 1rem);
+  overflow: auto;
+  color: var(--color-text);
+}
 .checklist .check {
   flex-wrap: wrap;
 }
@@ -2496,16 +2506,46 @@ dialog.fixed .modal-foot {
   flex-wrap: nowrap;
 }
 /* slim gate and milestone rows */
+/* same fold / code / title columns as the work package rows, so the actions start at the title */
 .tree li.tw-ms {
   list-style: none;
-  display: flex;
+  display: grid;
+  grid-template-columns: [fold] 36px [code] 66px [ttl] minmax(0, 1fr);
   align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 12px;
+  column-gap: 10px;
+  row-gap: 4px;
   padding: 6px 10px;
   min-height: 36px;
   font-size: 13px;
   border-radius: 6px;
+}
+.tw-ms .ms-diamond,
+.tw-ms .ms-diamond.done {
+  grid-column: fold;
+  justify-self: center;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin: 0;
+}
+.tw-ms .tw-ms-code {
+  grid-column: code;
+}
+.tw-ms .tw-ms-main {
+  grid-column: ttl;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+.tw-ms .tw-ms-below {
+  grid-column: ttl;
+  min-width: 0;
+}
+@container (max-width: 720px) {
+  .tree li.tw-ms {
+    grid-template-columns: [fold] 36px [code] 56px [ttl] minmax(0, 1fr);
+  }
 }
 .tw-ms .tw-ms-title {
   font-size: 14px;
@@ -2520,9 +2560,6 @@ dialog.fixed .modal-foot {
 .tw-ms .tw-ms-req,
 .tw-ms .tw-ms-unl {
   color: var(--color-text-muted);
-}
-.tw-ms .row-actions {
-  margin-left: auto;
 }
 /* /dialog layout */
 
