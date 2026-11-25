@@ -149,6 +149,19 @@ export function deleteText(kind, name, children) {
   return t("confirmDeleteTrash", { kind: t(`entityKind.${kind}`), name, kids });
 }
 
+/**
+ * Where a row menu opens so it stays inside the viewport. btn is a DOMRect-like object. Default is right edges
+ * aligned, opening downward; a missing or all-zero rect (fake DOM, hidden parent) keeps the default.
+ */
+export function menuPlacement({ btn, listWidth = 0, listHeight = 0, vw = 0, vh = 0 }) {
+  const out = { alignStart: false, openUp: false };
+  if (!btn || ![btn.left, btn.right, btn.top, btn.bottom, btn.width, btn.height].some((n) => n)) return out;
+  const edge = 8;
+  if (listWidth > 0 && btn.right - listWidth < edge) out.alignStart = true;
+  if (listHeight > 0 && vh > 0 && btn.bottom + listHeight > vh - edge && btn.top > vh - btn.bottom) out.openUp = true;
+  return out;
+}
+
 /** "..." row menu: items = [{ label, onClick, danger }]. Closes on outside click, Escape and after a choice. */
 export function menuButton(label, items) {
   const list = h("ul.menu-list", { role: "menu", hidden: true });
@@ -177,11 +190,28 @@ export function menuButton(label, items) {
   };
   function open() {
     list.hidden = false;
+    place();
     btn.setAttribute("aria-expanded", "true");
     document.addEventListener("click", onDoc, true);
     document.addEventListener("keydown", onKey, true);
   }
+  function place() {
+    list.classList.toggle("align-start", false);
+    list.classList.toggle("open-up", false);
+    if (typeof btn.getBoundingClientRect !== "function" || typeof list.getBoundingClientRect !== "function") return;
+    const b = btn.getBoundingClientRect();
+    const l = list.getBoundingClientRect();
+    const root = document.documentElement;
+    const vw = globalThis.innerWidth || root?.clientWidth || 0;
+    const vh = globalThis.innerHeight || root?.clientHeight || 0;
+    const { alignStart, openUp } = menuPlacement({ btn: b, listWidth: l?.width || 0, listHeight: l?.height || 0, vw, vh });
+    list.classList.toggle("align-start", alignStart);
+    // dialog footers already open upward through their own rule
+    list.classList.toggle("open-up", openUp && !btn.closest(".modal-foot"));
+  }
   function close() {
+    list.classList.toggle("align-start", false);
+    list.classList.toggle("open-up", false);
     list.hidden = true;
     btn.setAttribute("aria-expanded", "false");
     document.removeEventListener("click", onDoc, true);

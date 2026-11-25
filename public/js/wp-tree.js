@@ -95,13 +95,19 @@ export function doneFold({ count, open, onToggle, rows = [] }) {
 /**
  * One action per row: the primary button stays visible, everything else goes into a menu.
  * edit: { label, onClick }; items: [{ label, onClick, danger }] (falsy entries are skipped).
+ * primary (optional): { label, onClick } shown first as the filled button; Edit then becomes secondary.
  * gate wraps the result (role check); it returns null for a reader.
  */
-export function rowActions({ edit, items = [], menuLabel, gate = (x) => x }) {
+export function rowActions({ edit, primary = null, items = [], menuLabel, gate = (x) => x }) {
   const menuItems = items.filter(Boolean);
   const box = h(
     "div.actions.row-actions",
-    h("button.btn.small", { type: "button", on: { click: edit.onClick } }, edit.label),
+    primary ? h("button.btn.small", { type: "button", on: { click: primary.onClick } }, primary.label) : null,
+    h(
+      primary ? "button.btn.small.secondary" : "button.btn.small",
+      { type: "button", on: { click: edit.onClick } },
+      edit.label,
+    ),
     menuItems.length ? menuButton(menuLabel, menuItems) : null,
   );
   return gate(box);

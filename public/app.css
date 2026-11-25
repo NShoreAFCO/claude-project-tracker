@@ -1174,6 +1174,16 @@ td .chip.late,
   bottom: 100%;
   margin: 0 0 0.2rem;
 }
+/* row menu placement, set on open by menuButton: keep the list inside the viewport */
+.menu-list.align-start {
+  left: 0;
+  right: auto;
+}
+.menu-list.open-up {
+  top: auto;
+  bottom: 100%;
+  margin: 0 0 0.2rem;
+}
 .checklist .check {
   flex-wrap: wrap;
 }
