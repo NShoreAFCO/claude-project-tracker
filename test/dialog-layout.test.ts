@@ -1,4 +1,4 @@
-// Project dialog layout: done work packages fold, one action per row, slim gate and milestone rows.
+// Project dialog layout: done toggle, one action per row, slim gate and milestone rows.
 import { beforeEach, describe, expect, it } from "vitest";
 import { dispatch, installFakeDom, type FDoc, type FEl } from "./fake-dom";
 
@@ -25,42 +25,43 @@ const wps: W[] = [
   { id: "d", code: "WP4", title: "Delta", status: "planned" },
 ];
 
-/** Same assembly as the project dialog's top level. */
-function topLevel(foldOpen: boolean, toggle: () => void) {
-  const row = (w: W) => dom.h("li.tw-item", w.code);
-  const { open, done } = tree.splitDone(wps);
-  return dom.h("ul.tw-tree", [...tree.doneFold({ count: done.length, open: foldOpen, onToggle: toggle, rows: done.map(row) }), ...open.map(row)]);
-}
+describe('done toggle helpers', () => {
+  const kids = [{ id: 'k', code: 'WP1.1', title: 'K', status: 'doing' }];
+  const tops: any[] = [
+    { id: 'a', code: 'WP1', title: 'Alpha', status: 'done', children: kids },
+    { id: 'b', code: 'WP2', title: 'Beta', status: 'doing', children: kids },
+    { id: 'c', code: 'WP3', title: 'Gamma', status: 'dropped', children: kids },
+    { id: 'd', code: 'WP4', title: 'Delta', status: 'done' },
+  ];
 
-describe("done fold", () => {
-  it("folds done and dropped top-level WPs into one line with the count", () => {
-    const ul = topLevel(false, () => {});
-    doc.body.append(ul);
-    const fold = ul.querySelector(".tw-donefold")!;
-    expect(fold.textContent).toContain("2");
-    expect(fold.querySelector("button")!.getAttribute("aria-expanded")).toBe("false");
-    expect(ul.querySelectorAll(".tw-item").map((li: FEl) => li.textContent)).toEqual(["WP2", "WP4"]);
+  it('counts only done or dropped top-level WPs that have sub-WPs', () => {
+    expect(tree.doneSubCount(tops)).toBe(2);
+    expect(tree.doneSubCount([tops[1], tops[3]])).toBe(0);
+    expect(tree.hasFoldableSubs(tops[2])).toBe(true);
+    expect(tree.hasFoldableSubs(tops[3])).toBe(false);
   });
 
-  it("expands the done blocks in place after Show", () => {
-    let openFold = false;
-    let ul = topLevel(openFold, () => {});
-    const rebuild = () => {
-      ul = topLevel(openFold, toggle);
-      doc.body.replaceChildren(ul);
-    };
-    const toggle = () => {
-      openFold = !openFold;
-      rebuild();
-    };
-    rebuild();
-    dispatch(doc, ul.querySelector(".tw-donefold-btn")!, "click");
-    expect(ul.querySelector(".tw-donefold-btn")!.getAttribute("aria-expanded")).toBe("true");
-    expect(ul.querySelectorAll(".tw-item").map((li: FEl) => li.textContent)).toEqual(["WP1", "WP3", "WP2", "WP4"]);
+  it('flips the label between Show and Hide', () => {
+    expect(tree.doneToggleLabel(2, false)).toBe('2 done · Show');
+    expect(tree.doneToggleLabel(2, true)).toBe('2 done · Hide');
   });
 
-  it("renders no fold line when nothing is done", () => {
-    expect(tree.doneFold({ count: 0, open: false, onToggle: () => {} })).toEqual([]);
+  it('no longer exports the old fold line', () => {
+    expect(tree.doneFold).toBeUndefined();
+    expect(tree.splitDone).toBeUndefined();
+  });
+
+  it('a reached milestone on a hidden sub-WP lands after its done top-level WP; shown, after the sub-WP', () => {
+    const tr = [
+      { id: 'a', status: 'done', children: [{ id: 'a1', children: [] }, { id: 'a2', children: [] }] },
+      { id: 'b', status: 'doing', children: [] },
+    ];
+    const ms = [{ id: 'm', requires: ['a1'], reached_at: '2026-11-01' }];
+    const hiddenPlan = sched.placeMilestones(tr, ms, (w: any) => w.id !== 'a');
+    expect((hiddenPlan.after.get('a') ?? []).map((m: any) => m.id)).toEqual(['m']);
+    const shownPlan = sched.placeMilestones(tr, ms, () => true);
+    expect((shownPlan.after.get('a1') ?? []).map((m: any) => m.id)).toEqual(['m']);
+    expect(shownPlan.after.get('a')).toBeUndefined();
   });
 });
 

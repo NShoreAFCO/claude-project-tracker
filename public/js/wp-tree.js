@@ -79,27 +79,19 @@ export function canMarkDone(w) {
   return Number(leaf ? w.progress : w.effective_progress) >= 100;
 }
 
-/** Splits top-level work packages into open and done ones, keeping the code order of each. */
-export function splitDone(list) {
-  return { open: list.filter((w) => !isDoneWp(w)), done: list.filter(isDoneWp) };
+/** True for a top-level work package whose sub-work packages the done toggle can hide (finished, has children). */
+export function hasFoldableSubs(w) {
+  return isDoneWp(w) && !!w.children?.length;
 }
 
-/** One fold line "n done · Show" with the done blocks after it while it is open. Returns a list of items. */
-export function doneFold({ count, open, onToggle, rows = [] }) {
-  if (!count) return [];
-  return [
-    h(
-      "li.tw-donefold",
-      h(
-        "button.linkbtn.tw-donefold-btn",
-        { type: "button", "aria-expanded": String(!!open), on: { click: onToggle } },
-        t("doneCount", { n: count }),
-        " · ",
-        t(open ? "doneHide" : "doneShow"),
-      ),
-    ),
-    ...(open ? rows : []),
-  ];
+/** Number of top-level work packages the done toggle acts on. */
+export function doneSubCount(tops) {
+  return tops.filter(hasFoldableSubs).length;
+}
+
+/** Label of the done toggle: "n done · Show" while the sub-work packages are hidden, "n done · Hide" while shown. */
+export function doneToggleLabel(count, open) {
+  return `${t("doneCount", { n: count })} · ${t(open ? "doneHide" : "doneShow")}`;
 }
 
 /**
@@ -242,15 +234,15 @@ export function pathTo(tree, id, trail = []) {
 }
 
 /**
- * Makes a work package visible by changing the fold state: unfolds all its ancestors, opens the done group when its
- * top-level work package is finished, and turns the issues-only filter off when `shown` (a Set or null) hides it.
+ * Makes a work package visible by changing the fold state: unfolds all its ancestors, shows the hidden sub-work packages
+ * when the target lies below a finished top-level work package, and turns the issues-only filter off when `shown` (a Set or null) hides it.
  */
 export function revealFold(tree, id, fold, shown = null) {
   const path = pathTo(tree, id);
   if (!path.length) return;
   for (const a of path.slice(0, -1)) fold.open.add(a);
   const top = tree.find((w) => w.id === path[0]);
-  if (top && isDoneWp(top)) fold.doneOpen = true;
+  if (top && path.length > 1 && isDoneWp(top)) fold.doneOpen = true;
   if (fold.issuesOnly && shown && !shown.has(id)) fold.issuesOnly = false;
 }
 
