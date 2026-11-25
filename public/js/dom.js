@@ -188,12 +188,27 @@ export function menuButton(label, items) {
       btn.focus();
     }
   };
+  // the popover top layer keeps the list above and outside every row, card and dialog
+  const popover = typeof list.showPopover === "function" && typeof list.hidePopover === "function";
+  if (popover) list.setAttribute("popover", "manual");
+  const onScrollResize = () => close();
   function open() {
     list.hidden = false;
+    if (popover) {
+      try {
+        list.showPopover();
+      } catch {
+        /* already open */
+      }
+    }
     place();
     btn.setAttribute("aria-expanded", "true");
     document.addEventListener("click", onDoc, true);
     document.addEventListener("keydown", onKey, true);
+    if (popover) {
+      document.addEventListener("scroll", onScrollResize, true);
+      globalThis.addEventListener?.("resize", onScrollResize);
+    }
   }
   function place() {
     list.classList.toggle("align-start", false);
@@ -207,11 +222,30 @@ export function menuButton(label, items) {
     const { alignStart, openUp } = menuPlacement({ btn: b, listWidth: l?.width || 0, listHeight: l?.height || 0, vw, vh });
     list.classList.toggle("align-start", alignStart);
     // dialog footers already open upward through their own rule
+    const up = openUp || !!btn.closest(".modal-foot");
     list.classList.toggle("open-up", openUp && !btn.closest(".modal-foot"));
+    if (popover) {
+      // fixed coordinates from the button; the unused edges are reset
+      const s = list.style;
+      const px = (n) => `${Math.round(n)}px`;
+      s.setProperty("left", alignStart ? px(b.left) : "auto");
+      s.setProperty("right", alignStart ? "auto" : px(Math.max(0, vw - b.right)));
+      s.setProperty("top", up ? "auto" : px(b.bottom));
+      s.setProperty("bottom", up ? px(Math.max(0, vh - b.top)) : "auto");
+    }
   }
   function close() {
     list.classList.toggle("align-start", false);
     list.classList.toggle("open-up", false);
+    if (popover) {
+      try {
+        list.hidePopover();
+      } catch {
+        /* not open */
+      }
+      document.removeEventListener("scroll", onScrollResize, true);
+      globalThis.removeEventListener?.("resize", onScrollResize);
+    }
     list.hidden = true;
     btn.setAttribute("aria-expanded", "false");
     document.removeEventListener("click", onDoc, true);

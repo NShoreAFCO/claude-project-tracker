@@ -35,6 +35,7 @@ import {
   treeHead,
   splitDone,
   doneFold,
+  canMarkDone,
   rowActions,
   slimMilestoneRow,
   wpDependencies,
@@ -118,6 +119,15 @@ export const isOpenLeaf = (w) => !w.children?.length && w.status !== "done" && w
 export function logProgressRowButton(projectId, tree, w) {
   if (!isOpenLeaf(w)) return null;
   return writeBtn(t("logProgress"), () => logProgressForm(projectId, tree, { wp: w }), "secondary");
+}
+
+/** Whether the caller may mark this work package done (the work package itself must pass `canMarkDone` as well). */
+export const canMarkDoneNow = (w) => canMarkDone(w) && can(w.verification === "sign_off" ? "verify_sign_off" : "write");
+
+/** Visible "Mark done" button of a work package at 100 % (null when it cannot be marked done or the caller may not). */
+export function markDoneRowButton(projectId, w) {
+  if (!canMarkDoneNow(w)) return null;
+  return h("button.btn.small.secondary.row-mark-done", { type: "button", on: { click: () => markCompleteDialog(projectId, w) } }, t("markComplete"));
 }
 
 /** The URL the project dialog was opened from; closing it puts this back instead of `#/`. */
@@ -396,6 +406,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
     const leaf = !w.children?.length;
     const open = !leaf && (fold.open.has(w.id) || (shown && fold.issuesOnly));
     let slider = null;
+    const doneBtn = markDoneRowButton(id, w);
     if (leaf) {
       // read-only slider: changes go through "Log progress" (visible button) or "Adjust progress" (menu), spec F7
       const input = h("input", {
@@ -409,11 +420,12 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
       });
       slider = h("div.slider", input, h("output", fmtPct(w.progress)));
       const logBtn = logProgressRowButton(id, detail.workpackages, w);
-      if (logBtn) {
-        logBtn.classList.add("row-log-progress");
-        slider = h("div.row-progress", slider, logBtn);
-      }
-    } else slider = progressBar(w.effective_progress);
+      logBtn?.classList.add("row-log-progress");
+      if (logBtn || doneBtn) slider = h("div.row-progress", slider, logBtn, doneBtn);
+    } else {
+      slider = progressBar(w.effective_progress);
+      if (doneBtn) slider = h("div.row-progress", slider, doneBtn);
+    }
 
     const dates =
       w.start_date || w.end_date
@@ -474,13 +486,7 @@ export async function openProject(id, { tab = "overview", owner = null, openDoc 
             leaf && w.status !== "done" && w.status !== "dropped"
               ? { label: t("adjustProgress"), onClick: () => adjustProgressDialog(id, w) }
               : null,
-            leaf &&
-            w.progress >= 100 &&
-            w.status !== "done" &&
-            w.status !== "dropped" &&
-            can(w.verification === "sign_off" ? "verify_sign_off" : "write")
-              ? { label: t("markComplete"), onClick: () => markCompleteDialog(id, w) }
-              : null,
+            // "Mark complete" is the visible button in the progress column (doneBtn), never in this menu
             { label: t("addSubWorkpackage"), onClick: () => wpForm(id, null, detail.workpackages, w.id, detail.milestones) },
             { label: t("addMilestone"), onClick: () => milestoneForm(id, null, detail.workpackages) },
             { label: t("moveWorkpackage"), onClick: () => wpForm(id, w, detail.workpackages, null, detail.milestones) },
