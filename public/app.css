@@ -2849,6 +2849,65 @@ th.sel {
 .inbox-rules {
   margin-top: 1.5rem;
 }
+/* long paths, ids and URLs break instead of widening the table (Firefox does not break them by itself) */
+.inbox-table .inbox-meta,
+.inbox-table td code {
+  overflow-wrap: anywhere;
+}
+.inbox-table td.inbox-when,
+.inbox-table td.inbox-by {
+  white-space: nowrap;
+}
+.inbox-table td.inbox-when {
+  min-width: 7.5rem;
+  white-space: normal;
+}
+.inbox-table td.inbox-by {
+  overflow-wrap: normal;
+}
+.inbox-table th.inbox-act,
+.inbox-table td.inbox-act {
+  min-width: max-content;
+}
+.inbox-table td.inbox-act .inbox-actions {
+  flex-wrap: nowrap;
+}
+@media (max-width: 720px) {
+  /* rows stack as blocks, actions under the description: no sideways scrolling to reach them */
+  .inbox-table,
+  .inbox-table tbody,
+  .inbox-table tr,
+  .inbox-table td {
+    display: block;
+  }
+  .inbox-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .inbox-table tr {
+    padding: 0.4rem 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .inbox-table td {
+    border: 0;
+  }
+  .inbox-table td.inbox-when,
+  .inbox-table td.inbox-by {
+    display: inline-block;
+    min-width: 0;
+    white-space: nowrap;
+  }
+  .inbox-table th.inbox-act,
+  .inbox-table td.inbox-act {
+    min-width: 0;
+  }
+  .inbox-table td.inbox-act .inbox-actions {
+    flex-wrap: wrap;
+  }
+}
 fieldset.rule-kind {
   border: 0;
   padding: 0;

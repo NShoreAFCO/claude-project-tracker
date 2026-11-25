@@ -148,6 +148,7 @@ export default {
   colNote: "Notiz",
   colWhen: "Zeitpunkt",
   colBy: "Von",
+  colActions: "Aktionen",
   colClaudeTokens: "Claude-Tokens",
   colCopilotPrompts: "Copilot-Prompts",
   colWp: "Arbeitspaket",

@@ -148,6 +148,7 @@ export default {
   colNote: "Note",
   colWhen: "Time",
   colBy: "By",
+  colActions: "Actions",
   colClaudeTokens: "Claude tokens",
   colCopilotPrompts: "Copilot prompts",
   colWp: "Work package",
